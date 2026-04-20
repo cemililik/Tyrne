@@ -12,7 +12,7 @@ The architecture is being written in phases. Many documents listed below are pla
 |----------|---------|--------|
 | [`overview.md`](overview.md) | Top-level structure: kernel, userspace, HAL, boot flow; with Mermaid diagrams. | Accepted |
 | `kernel-core.md` | Core kernel responsibilities: scheduler, IPC, memory, capabilities. | Planned — Phase 2 |
-| `security-model.md` | Capability system, trust boundaries, threat model. | Planned — Phase 2 |
+| [`security-model.md`](security-model.md) | Capability system, trust boundaries, threat model. | Accepted |
 | `memory-management.md` | Physical + virtual memory, MMU/paging, allocators. | Planned |
 | `scheduling.md` | Scheduler design, priorities, real-time considerations. | Planned |
 | `ipc.md` | Inter-process communication, message passing, endpoints, capability transfer. | Planned |
