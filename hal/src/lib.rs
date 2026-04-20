@@ -16,34 +16,25 @@
 //!
 //! In progress. Traits are pinned down one at a time, each behind a dedicated
 //! ADR. Accepted so far: [`Console`] (ADR-0007), [`Cpu`] (ADR-0008),
-//! [`Mmu`] (ADR-0009), [`Timer`] (ADR-0010). The remaining trait stub below
-//! is a placeholder whose method surface will be pinned by its own ADR at
-//! Phase 4b implementation time.
+//! [`Mmu`] (ADR-0009), [`Timer`] (ADR-0010), [`IrqController`] (ADR-0011).
+//! The remaining trait stub below is a placeholder whose method surface
+//! will be pinned by its own ADR when a concrete caller needs it.
 
 #![no_std]
 
 mod console;
 mod cpu;
+mod irq_controller;
 mod mmu;
 mod timer;
 
 pub use console::{Console, FmtWriter};
 pub use cpu::{CoreId, Cpu, IrqGuard, IrqState};
+pub use irq_controller::{IrqController, IrqNumber};
 pub use mmu::{
     FrameProvider, MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE,
 };
 pub use timer::Timer;
-
-/// Interrupt controller dispatch and control.
-///
-/// Responsibilities: enable and disable specific `IRQ` lines, acknowledge
-/// the current `IRQ` at entry, end-of-interrupt signalling, and optional
-/// per-CPU routing.
-///
-/// Used by the kernel's minimal interrupt service routine. Drivers never see
-/// this interface; they receive asynchronous notifications on their
-/// `IrqCap`'s endpoint.
-pub trait IrqController {}
 
 /// System `IOMMU` interaction, on platforms that have one.
 ///
