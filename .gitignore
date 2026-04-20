@@ -1,0 +1,46 @@
+# Rust build output
+/target/
+**/target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# Kernel / bootloader artifacts
+*.elf
+*.bin
+*.img
+*.iso
+*.o
+*.obj
+*.a
+*.lib
+*.pdb
+
+# Emulator / debugger state
+*.qcow2
+*.serial.log
+gdb.txt
+.gdb_history
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# Logs and temp
+*.log
+tmp/
+.tmp/
+
+# Python tooling occasionally used for build scripts
+__pycache__/
+*.pyc
+.venv/

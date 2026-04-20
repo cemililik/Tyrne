@@ -1,0 +1,44 @@
+# Architecture Decision Records
+
+Every non-trivial architectural, security, or process decision in Umbrix is recorded here as an **ADR** (Architecture Decision Record) using a lightweight **MADR** (Markdown Architectural Decision Records) style.
+
+## Why ADRs
+
+- They preserve the **why**, not just the **what**. This is the information that decays fastest and is most expensive to re-derive years later.
+- They make the evolution of the project readable: you can follow the numbered history and see how the design language developed, including the options that were rejected.
+- They give future contributors (human or AI) a way to disagree with a decision by writing a new ADR that supersedes an old one, rather than silently changing code.
+
+## Format
+
+All ADRs live in this folder, named `NNNN-short-kebab-slug.md`, where `NNNN` is a zero-padded four-digit sequence number. Use [template.md](template.md) as the starting point for a new ADR.
+
+Each ADR contains:
+
+- **Title** (matches the filename, minus the number prefix).
+- **Status** — `Proposed`, `Accepted`, `Deprecated`, or `Superseded by NNNN`.
+- **Date** — ISO-8601.
+- **Deciders** — who signed off.
+- **Context** — the question the project was facing and the constraints that applied.
+- **Decision drivers** — the forces that influenced the choice.
+- **Considered options** — the alternatives examined.
+- **Decision outcome** — the option chosen, with a short justification.
+- **Consequences** — positive, negative, and neutral effects, with mitigations where relevant.
+- **References** — prior art, literature, upstream discussions.
+
+## Index
+
+| # | Title | Status | Date |
+|---|-------|--------|------|
+| 0001 | [Capability-based microkernel architecture](0001-microkernel-architecture.md) | Accepted | 2026-04-20 |
+| 0002 | [Rust as the implementation language](0002-implementation-language-rust.md) | Accepted | 2026-04-20 |
+| 0003 | [Apache-2.0 license](0003-license-apache-2.md) | Accepted | 2026-04-20 |
+| 0004 | [Target hardware platforms and tiers](0004-target-platforms.md) | Accepted | 2026-04-20 |
+| 0005 | [English as the documentation and code language](0005-documentation-language-english.md) | Accepted | 2026-04-20 |
+
+## Creating a new ADR
+
+1. Copy [template.md](template.md) to the next available number: `NNNN-your-slug.md`.
+2. Fill it in. Start with status `Proposed`.
+3. Open a PR (once the PR process is established) or, in the solo phase, commit directly with a descriptive commit message referencing the ADR number.
+4. When the decision is settled, change the status to `Accepted`.
+5. If a later ADR overrides this one, mark the old one `Superseded by NNNN` and link forward to the new record. Do **not** delete or rewrite the old ADR — the historical reasoning is the point.
