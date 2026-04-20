@@ -21,7 +21,7 @@ Kernel boots under QEMU `virt` aarch64 and writes a greeting to the PL011 consol
 
 ---
 
-## Milestone A2 — Capability table foundation (active)
+## Milestone A2 — Capability table foundation ✓ (done 2026-04-21)
 
 Per-task capability table data structure, capability kind enum, and the in-kernel operations (`cap_copy`, `cap_derive`, `cap_revoke`, `cap_drop`) — without IPC integration. Capabilities are move-only Rust tokens; a derivation tree enforces the narrowing-only invariant and supports cascading revocation.
 
@@ -50,8 +50,8 @@ Per-task capability table data structure, capability kind enum, and the in-kerne
 
 ### Tasks under A2
 
-- [T-001 — Capability table foundation](../../analysis/tasks/phase-a/T-001-capability-table-foundation.md) — In Review.
-- Subsequent tasks (T-002+) will be opened as T-001 lands if further decomposition is needed; current plan is T-001 covers the milestone in one task.
+- [T-001 — Capability table foundation](../../analysis/tasks/phase-a/T-001-capability-table-foundation.md) — Done.
+- T-001 covered the milestone in one task as planned; no further decomposition was needed.
 
 ### Informs
 

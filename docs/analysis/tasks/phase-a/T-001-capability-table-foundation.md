@@ -2,7 +2,7 @@
 
 - **Phase:** A
 - **Milestone:** A2 — Capability table foundation
-- **Status:** In Review
+- **Status:** Done
 - **Created:** 2026-04-20
 - **Author:** @cemililik
 - **Dependencies:** none (Milestone A1 — Bootable skeleton — is complete)
@@ -105,3 +105,5 @@ Every step keeps `cargo host-test` green.
 | 2026-04-20 | @cemililik | opened; status Ready |
 | 2026-04-20 | @cemililik | ADR-0014 Accepted; status → In Progress; work begins on `development` branch |
 | 2026-04-20 | @cemililik | implementation landed on `development`; status → In Review. 27 new host tests green on top of the existing 34 (61/61 total). |
+| 2026-04-21 | @cemililik | review-round code/doc fixes landed; CapRights masks reserved bits, `cap_drop` rejects interior nodes with `HasChildren`, `CapObject` encapsulated (`new`/`raw`), BFS uses `debug_assert` for invariants, `cap_derive` cleaned up; two new host tests added (29 kernel + 34 test-hal = 63/63 green). |
+| 2026-04-21 | @cemililik | PR #1 merged to `main`; status → Done. |
