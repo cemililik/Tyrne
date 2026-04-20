@@ -74,7 +74,7 @@ A read-mostly filesystem service on top of E4. Initial choice may be read-only (
 
 ### Sub-breakdown
 
-1. **ADR-0040 — Filesystem choice.** Build a simple one, port smoltcp / littlefs / ext4 via an existing crate, etc. Weighed against portability and `no_std + alloc` compatibility.
+1. **ADR-0040 — Filesystem choice.** Build a simple one, port an existing crate (`littlefs`, `ext4`-via-crate, a log-structured FS like F2FS-style for flash-friendly wear-levelling), or start with a read-only block layout and add write support incrementally. Weighed against portability, `no_std + alloc` compatibility, crash-consistency guarantees, and the smart-home target's preference for flash-friendly wear-levelling.
 2. **Filesystem service task** implementing the chosen approach.
 3. **Storage capability flow** — the filesystem service has the block-device capability; it grants named-file capabilities to clients.
 

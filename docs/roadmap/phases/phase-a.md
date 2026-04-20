@@ -155,12 +155,15 @@ Integration: the kernel runs a deterministic two-task scenario where Task A send
 1. **Demo tasks** (A and B) as kernel-level stubs (no userspace yet).
 2. **QEMU smoke runner** — captures serial, asserts the expected trace (`umbrix: A sends; B receives; B replies; A receives reply; done`).
 3. **Guide** — `docs/guides/two-task-demo.md` explaining what the demo proves and how to run it.
-4. **Business review** — milestone A2–A6 retrospective in `docs/analysis/reviews/business-reviews/`.
+4. **Baseline performance review** — first entry in [`analysis/reviews/performance-optimization-reviews/`](../../analysis/reviews/performance-optimization-reviews/). Captures measurements of the v0.0.1 kernel so later reviews have a reference point. Expected metrics: kernel image size (stripped release ELF), idle memory footprint (kernel + demo tasks), IPC round-trip latency (send → receive → reply → sender resumes), context-switch overhead, boot time from reset to kernel-ready. No optimization goals here — the review records the numbers and notes whether they look plausible for a v0.0.1 kernel on QEMU `virt`.
+5. **Business review** — milestone A2–A6 retrospective in [`analysis/reviews/business-reviews/`](../../analysis/reviews/business-reviews/).
 
 ### Acceptance criteria
 
 - Deterministic QEMU trace demonstrates both tasks executed and IPC round-tripped.
 - Guide committed.
+- Baseline performance-review artifact exists with measured numbers for all five metrics above.
+- Business-review artifact exists.
 - Phase A exit bar met: two kernel tasks exchange IPC messages under capability control.
 
 ### Phase A closure

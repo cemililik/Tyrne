@@ -23,6 +23,27 @@ On hardware that supports it (Pi 4 via its secure-boot chain, or a future board 
 - ADR-0046 Accepted.
 - Measurement log produced on a supported board and inspectable from userspace.
 
+## Milestone G1.5 — TEE support in the HAL
+
+Introduce a Trusted Execution Environment trait in `umbrix-hal` and a BSP implementation where the hardware offers ARM TrustZone or an equivalent. This is one of the four "AI-readiness" hooks mandated by [ADR-0015](../../decisions/0015-ai-integration-stance.md); it also stands on its own for non-AI use (secrets protection, boot attestation, high-assurance crypto containment).
+
+### Sub-breakdown
+
+1. **ADR — TEE trait surface.** What operations (enter / exit, attested message exchange, key sealing), what errors, what capability model for granting TEE access.
+2. **BSP implementation** for whichever target is chosen first (Pi 4 TrustZone via Pi firmware is plausible; QEMU has `-machine virt,secure=on`; Jetson has its own chain).
+3. **Integration with G1** — boot measurements can be sealed to the TEE for attestation.
+4. **Security review** per [`analysis/reviews/security-reviews/`](../../analysis/reviews/security-reviews/).
+
+### Acceptance criteria
+
+- TEE trait in `umbrix-hal` with at least one BSP impl.
+- Security review recorded; attestation flow documented.
+- Usable independently by Phase G2 (crypto) and — later — by Phase J6 (confidential inference).
+
+### Why this pairs with G1
+
+Measured boot and TEE are complementary: measured boot proves what was loaded, TEE protects what runs. Doing them together lets both land with a single security review and a consistent attestation model.
+
 ## Milestone G2 — Cryptographic primitives
 
 A crypto crate with audited implementations: hash (SHA-2, SHA-3), AEAD (ChaCha20-Poly1305, AES-GCM), signature (Ed25519, ECDSA P-256), random-bytes source.

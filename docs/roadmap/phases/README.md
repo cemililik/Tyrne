@@ -17,6 +17,7 @@ The plan is a **sequence**, not a schedule: there are no dates. Later phases are
 | [G](phase-g.md) | Security maturation | Medium | Measured boot, cryptography primitives, TLS, first formal-verification pilot. |
 | [H](phase-h.md) | Platform expansion | Light | `bsp-pi5`, `bsp-jetson` (CPU-only), first RISC-V BSP. |
 | [I](phase-i.md) | Mobile | Light | First prototype boot on phone-class hardware. |
+| [J](phase-j.md) | AI-native userspace layer (opt-in) | Sketch | Optional AI-integrated features running entirely in userspace above the kernel's trust boundary. Per [ADR-0015](../../decisions/0015-ai-integration-stance.md). |
 
 ## Dependency sketch
 
@@ -32,6 +33,8 @@ flowchart LR
     D --> H[Phase H<br/>platforms]
     F --> I[Phase I<br/>mobile]
     G --> I
+    G -. opt-in .-> J[Phase J<br/>AI-native userspace]
+    E -. opt-in .-> J
     H --> I
 ```
 
