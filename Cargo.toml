@@ -1,0 +1,50 @@
+# Umbrix Cargo workspace.
+#
+# Crate layout decided in docs/decisions/0006-workspace-layout.md.
+# Build / test commands and lint policy described in docs/standards/infrastructure.md.
+
+[workspace]
+resolver = "2"
+members = [
+    "kernel",
+    "hal",
+    "bsp-qemu-virt",
+    "test-hal",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+authors = ["Cemil İlik"]
+license = "Apache-2.0"
+repository = "https://github.com/cemililik/UmbrixOS"
+
+# Lints applied to every workspace crate that opts in via `[lints] workspace = true`.
+# See docs/standards/code-style.md and docs/standards/unsafe-policy.md for the
+# rationale behind each.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+unreachable_pub = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+alloc_instead_of_core = "deny"
+
+# Release profile: optimized, thin on debug info, panic=abort comes from
+# .cargo/config.toml rustflags so it only applies to the bare-metal target.
+[profile.release]
+codegen-units = 1
+debug = "line-tables-only"
+lto = "fat"
+opt-level = 3
+overflow-checks = true
+
+# Dev profile: reasonable compile times, full debug info, overflow checks on.
+[profile.dev]
+debug = 2
+opt-level = 1
+overflow-checks = true

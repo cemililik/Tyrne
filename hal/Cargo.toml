@@ -1,0 +1,14 @@
+[package]
+name = "umbrix-hal"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Umbrix Hardware Abstraction Layer — trait definitions only."
+
+[lib]
+name = "umbrix_hal"
+
+[lints]
+workspace = true

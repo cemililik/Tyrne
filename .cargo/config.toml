@@ -1,0 +1,32 @@
+# Cargo configuration for the Umbrix workspace.
+#
+# See docs/standards/infrastructure.md for the policy this file implements and
+# docs/decisions/0006-workspace-layout.md for the crate structure it supports.
+#
+# Intentionally NO `[build] target = "..."`: host-runnable tests (unit tests,
+# test-hal tests) use the default host triple; the kernel image is built with
+# an explicit `--target aarch64-unknown-none` or via the `kernel-build` alias
+# below.
+
+# Per-target rustflags for the kernel build. Kept here, scoped to the bare-metal
+# triple, so host tests are not affected by panic=abort or other kernel-specific
+# codegen.
+[target.aarch64-unknown-none]
+rustflags = [
+    # Kernel panics abort; unwinding in kernel mode requires runtime support the
+    # kernel does not carry. See docs/standards/error-handling.md — Panic strategy.
+    "-C", "panic=abort",
+    # Frame pointers aid panic backtraces and debugger unwinding.
+    "-C", "force-frame-pointers=yes",
+]
+
+# Convenience aliases.
+[alias]
+# Build the kernel image for the primary development BSP.
+kernel-build = "build --target aarch64-unknown-none -p umbrix-bsp-qemu-virt"
+
+# Run clippy against the kernel image with warnings as errors.
+kernel-clippy = "clippy --target aarch64-unknown-none -p umbrix-bsp-qemu-virt --all-targets -- -D warnings"
+
+# Run host-side unit tests across the workspace.
+host-test = "test --workspace"

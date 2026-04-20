@@ -1,0 +1,14 @@
+# Umbrix clippy thresholds.
+#
+# Lint **levels** (allow/warn/deny) are configured in workspace Cargo.toml under
+# [workspace.lints.clippy] and extended per-crate via #![deny(...)] attributes
+# where the kernel needs stricter enforcement. See docs/standards/code-style.md
+# and docs/standards/error-handling.md.
+#
+# This file holds numeric thresholds (complexity, function size, type
+# complexity) and a small number of clippy-specific knobs. Defaults are kept
+# unless we have a concrete reason to change them.
+
+# We are pre-alpha and have no stable public API to protect; changes to pub
+# items across crates are expected.
+avoid-breaking-exported-api = false

@@ -1,0 +1,17 @@
+[package]
+name = "umbrix-test-hal"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fake HAL implementations for host-side Umbrix kernel unit tests."
+
+[lib]
+name = "umbrix_test_hal"
+
+[dependencies]
+umbrix-hal = { path = "../hal" }
+
+[lints]
+workspace = true

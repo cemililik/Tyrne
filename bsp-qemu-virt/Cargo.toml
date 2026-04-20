@@ -1,0 +1,18 @@
+[package]
+name = "umbrix-bsp-qemu-virt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Umbrix BSP for QEMU aarch64 virt machine (primary development target)."
+
+[lib]
+name = "umbrix_bsp_qemu_virt"
+
+[dependencies]
+umbrix-hal = { path = "../hal" }
+umbrix-kernel = { path = "../kernel" }
+
+[lints]
+workspace = true

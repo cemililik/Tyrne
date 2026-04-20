@@ -1,0 +1,21 @@
+# Umbrix pins a specific nightly Rust toolchain.
+#
+# Nightly is required because the kernel relies on features that are still
+# unstable at Rust's stable channel (inline asm intrinsics, some lang items,
+# `#![feature(...)]` flags the kernel will need).
+#
+# Bump policy: the toolchain is bumped in a dedicated commit with a clear
+# rationale. See docs/standards/infrastructure.md — Toolchain section.
+
+[toolchain]
+channel = "nightly-2026-01-15"
+components = [
+    "rustfmt",
+    "clippy",
+    "rust-src",
+    "llvm-tools-preview",
+]
+targets = [
+    "aarch64-unknown-none",
+]
+profile = "minimal"
