@@ -44,3 +44,6 @@ tmp/
 __pycache__/
 *.pyc
 .venv/
+
+# Local-only technical analyses (reading notes on external codebases)
+docs/analysis/technical-analysis/
