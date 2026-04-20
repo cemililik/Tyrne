@@ -41,6 +41,9 @@ Each ADR contains:
 | 0010 | [Timer HAL trait signature (v1)](0010-timer-trait.md) | Accepted | 2026-04-20 |
 | 0011 | [IrqController HAL trait signature (v1)](0011-irq-controller-trait.md) | Accepted | 2026-04-20 |
 | 0012 | [Boot flow and memory layout for bsp-qemu-virt](0012-boot-flow-qemu-virt.md) | Accepted | 2026-04-20 |
+| 0013 | [Roadmap and planning process](0013-roadmap-and-planning.md) | Accepted | 2026-04-20 |
+| 0014 | [Capability representation](0014-capability-representation.md) | Accepted | 2026-04-20 |
+| 0015 | [AI integration stance: userspace-only, kernel-neutral](0015-ai-integration-stance.md) | Accepted | 2026-04-20 |
 
 ## Creating a new ADR
 

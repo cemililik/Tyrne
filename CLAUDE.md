@@ -28,6 +28,10 @@ These rules apply to every AI agent acting inside this repository, regardless of
 | Why we chose X | [docs/decisions/](docs/decisions/) |
 | How to write docs, code, commits | [docs/standards/](docs/standards/) |
 | **Step-by-step procedures for recurring tasks** | [.claude/skills/](.claude/skills/) |
+| **What work is active, and what's next** | [docs/roadmap/current.md](docs/roadmap/current.md) |
+| **Full phase plan (one file per phase)** | [docs/roadmap/phases/](docs/roadmap/phases/) |
+| **Individual task user stories (per-phase)** | [docs/analysis/tasks/](docs/analysis/tasks/) |
+| **Reviews (business / code / security / perf)** | [docs/analysis/reviews/](docs/analysis/reviews/) |
 | How-to guides | [docs/guides/](docs/guides/) |
 | Project-specific terms | [docs/glossary.md](docs/glossary.md) |
 | Security policy | [SECURITY.md](SECURITY.md) |

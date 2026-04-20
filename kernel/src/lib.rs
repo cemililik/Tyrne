@@ -10,20 +10,20 @@
 //! [architectural principle P6][p6].
 //!
 //! Host-side unit tests wire in [`umbrix_test_hal`] as a `[dev-dependency]`.
+//! `#![cfg_attr(not(test), no_std)]` disables `std` for production builds
+//! while allowing the standard test harness in host-side `cargo test` runs.
 //!
 //! [adr-0006]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0006-workspace-layout.md
 //! [p6]: https://github.com/cemililik/UmbrixOS/blob/main/docs/standards/architectural-principles.md#p6--hal-separation
 //!
-//! ## Status
+//! ## Subsystems
 //!
-//! Phase 4c v0.0.1: a single public entry point, [`run`], that writes a
-//! greeting to the console and halts. Subsystems (capabilities, scheduler,
-//! IPC, memory management, interrupt dispatch) land in subsequent phases
-//! per the architecture documents in [`docs/architecture/`][arch-docs].
+//! - [`cap`] — capability subsystem (Phase A2 / [T-001]), the substrate every
+//!   later subsystem refers through for authority.
 //!
-//! [arch-docs]: https://github.com/cemililik/UmbrixOS/tree/main/docs/architecture
+//! [T-001]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-001-capability-table-foundation.md
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 // Kernel-specific stricter lints on top of the workspace set.
 // See docs/standards/error-handling.md and docs/standards/unsafe-policy.md.
 #![deny(clippy::panic)]
@@ -32,6 +32,8 @@
 #![deny(clippy::todo)]
 #![deny(clippy::arithmetic_side_effects)]
 #![deny(clippy::float_arithmetic)]
+
+pub mod cap;
 
 use umbrix_hal::Console;
 

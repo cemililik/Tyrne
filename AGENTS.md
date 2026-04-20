@@ -15,8 +15,9 @@ The canonical agent guide is [CLAUDE.md](CLAUDE.md). It is written with Claude-b
 Before acting:
 
 1. Read [CLAUDE.md](CLAUDE.md) in full.
-2. Read the ADRs in [docs/decisions/](docs/decisions/) in numerical order.
-3. Read the standards in [docs/standards/](docs/standards/).
-4. Check [.claude/skills/](.claude/skills/) — each recurring task has a `SKILL.md` file under `<slug>/`. If the task matches one, follow that skill's procedure.
+2. Check [docs/roadmap/current.md](docs/roadmap/current.md) — this is where the project says what is active right now.
+3. Read the ADRs in [docs/decisions/](docs/decisions/) in numerical order.
+4. Read the standards in [docs/standards/](docs/standards/).
+5. Check [.claude/skills/](.claude/skills/) — each recurring task has a `SKILL.md` file under `<slug>/`. If the task matches one, follow that skill's procedure.
 
 If the task is non-trivial, propose a plan before editing. If a requested change would violate any of the seven rules above, stop and ask the maintainer.
