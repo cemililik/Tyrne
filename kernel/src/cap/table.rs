@@ -8,7 +8,7 @@
 //!
 //! [adr-0014]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0014-capability-representation.md
 
-use super::{CapError, CapRights, Capability};
+use super::{CapError, CapObject, CapRights, Capability};
 
 /// Maximum number of capabilities in a single table.
 ///
@@ -169,11 +169,12 @@ impl CapabilityTable {
         src: CapHandle,
         new_rights: CapRights,
     ) -> Result<CapHandle, CapError> {
-        // Snapshot the source.
-        let (kind, rights, object, parent, depth) = {
+        // Snapshot the source. `kind` is no longer a separate field on
+        // `Capability` (ADR-0016 put it on `CapObject`), so we read
+        // rights / object / tree-link fields directly.
+        let (rights, object, parent, depth) = {
             let entry = self.entry_of(src)?;
             (
-                entry.capability.kind(),
                 entry.capability.rights(),
                 entry.capability.object(),
                 entry.parent,
@@ -204,7 +205,7 @@ impl CapabilityTable {
         };
 
         self.slots[new_index as usize].entry = Some(SlotEntry {
-            capability: Capability::new(kind, new_rights, object),
+            capability: Capability::new(new_rights, object),
             parent,
             first_child: None,
             next_sibling: former_first_child,
@@ -248,14 +249,12 @@ impl CapabilityTable {
         // `entry_of` already validates the handle and resolves to a live
         // slot; its input handle gives us the index we need for the new
         // entry's `parent` link without a second `resolve_handle` call.
-        let (kind, rights, parent_index, parent_depth) = {
+        // `kind` moved onto `CapObject` in ADR-0016, so we no longer
+        // snapshot it here — the new entry's kind is carried by
+        // `new_object`'s variant.
+        let (rights, parent_index, parent_depth) = {
             let entry = self.entry_of(src)?;
-            (
-                entry.capability.kind(),
-                entry.capability.rights(),
-                src.index,
-                entry.depth,
-            )
+            (entry.capability.rights(), src.index, entry.depth)
         };
 
         if !rights.contains(CapRights::DERIVE) {
@@ -288,7 +287,7 @@ impl CapabilityTable {
         };
 
         self.slots[new_index as usize].entry = Some(SlotEntry {
-            capability: Capability::new(kind, new_rights, new_object),
+            capability: Capability::new(new_rights, new_object),
             parent: Some(parent_index),
             first_child: None,
             next_sibling: former_first_child,
@@ -440,6 +439,24 @@ impl CapabilityTable {
         Ok(&entry.capability)
     }
 
+    /// Return `true` if any live capability in this table names the
+    /// given kernel object. Used by the [`crate::obj`] destroy paths
+    /// to implement the reachability check described in
+    /// [ADR-0016][adr-0016] — callers pass their watcher tables and
+    /// refuse destruction if any of them reports a reference.
+    ///
+    /// The check is linear in [`CAP_TABLE_CAPACITY`]; acceptable at
+    /// Phase A's scale.
+    ///
+    /// [adr-0016]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+    #[must_use]
+    pub fn references_object(&self, target: CapObject) -> bool {
+        self.slots
+            .iter()
+            .filter_map(|s| s.entry.as_ref())
+            .any(|entry| entry.capability.object() == target)
+    }
+
     // ----- internals -----
 
     /// Validate a handle and return the underlying slot index.
@@ -548,14 +565,22 @@ impl CapabilityTable {
 mod tests {
     use super::{CapHandle, CapabilityTable, CAP_TABLE_CAPACITY, MAX_DERIVATION_DEPTH};
     use crate::cap::{CapError, CapKind, CapObject, CapRights, Capability};
+    use crate::obj::TaskHandle;
 
     /// All v1 rights set.
     fn all_rights() -> CapRights {
         CapRights::DUPLICATE | CapRights::DERIVE | CapRights::REVOKE | CapRights::TRANSFER
     }
 
+    /// Build a task-kind `CapObject` with a synthesized handle — for
+    /// tests that need distinct capability values without allocating
+    /// through a real arena.
+    fn task_object(tag: u16) -> CapObject {
+        CapObject::Task(TaskHandle::test_handle(tag, 0))
+    }
+
     fn root_cap() -> Capability {
-        Capability::new(CapKind::Task, all_rights(), CapObject::new(0xAA))
+        Capability::new(all_rights(), task_object(0xAA))
     }
 
     #[test]
@@ -565,7 +590,7 @@ mod tests {
         let cap = t.lookup(h).unwrap();
         assert_eq!(cap.kind(), CapKind::Task);
         assert_eq!(cap.rights(), all_rights());
-        assert_eq!(cap.object(), CapObject::new(0xAA));
+        assert_eq!(cap.object(), task_object(0xAA));
     }
 
     #[test]
@@ -621,7 +646,7 @@ mod tests {
     #[test]
     fn cap_copy_rejects_widened_rights() {
         let mut t = CapabilityTable::new();
-        let narrow = Capability::new(CapKind::Task, CapRights::DUPLICATE, CapObject::new(0));
+        let narrow = Capability::new(CapRights::DUPLICATE, task_object(0));
         let src = t.insert_root(narrow).unwrap();
         let wider = CapRights::DUPLICATE | CapRights::REVOKE;
         assert_eq!(t.cap_copy(src, wider).unwrap_err(), CapError::WidenedRights);
@@ -630,7 +655,7 @@ mod tests {
     #[test]
     fn cap_copy_without_duplicate_right_fails() {
         let mut t = CapabilityTable::new();
-        let no_dup = Capability::new(CapKind::Task, CapRights::DERIVE, CapObject::new(0));
+        let no_dup = Capability::new(CapRights::DERIVE, task_object(0));
         let src = t.insert_root(no_dup).unwrap();
         assert_eq!(
             t.cap_copy(src, CapRights::EMPTY).unwrap_err(),
@@ -643,21 +668,19 @@ mod tests {
         let mut t = CapabilityTable::new();
         let src = t.insert_root(root_cap()).unwrap();
         let child_rights = CapRights::DUPLICATE;
-        let child = t
-            .cap_derive(src, child_rights, CapObject::new(0xBB))
-            .unwrap();
+        let child = t.cap_derive(src, child_rights, task_object(0xBB)).unwrap();
         let child_cap = t.lookup(child).unwrap();
         assert_eq!(child_cap.rights(), child_rights);
-        assert_eq!(child_cap.object(), CapObject::new(0xBB));
+        assert_eq!(child_cap.object(), task_object(0xBB));
     }
 
     #[test]
     fn cap_derive_without_derive_right_fails() {
         let mut t = CapabilityTable::new();
-        let no_derive = Capability::new(CapKind::Task, CapRights::DUPLICATE, CapObject::new(0));
+        let no_derive = Capability::new(CapRights::DUPLICATE, task_object(0));
         let src = t.insert_root(no_derive).unwrap();
         assert_eq!(
-            t.cap_derive(src, CapRights::EMPTY, CapObject::new(0))
+            t.cap_derive(src, CapRights::EMPTY, task_object(0))
                 .unwrap_err(),
             CapError::InsufficientRights
         );
@@ -666,11 +689,11 @@ mod tests {
     #[test]
     fn cap_derive_rejects_widened_rights() {
         let mut t = CapabilityTable::new();
-        let narrow = Capability::new(CapKind::Task, CapRights::DERIVE, CapObject::new(0));
+        let narrow = Capability::new(CapRights::DERIVE, task_object(0));
         let src = t.insert_root(narrow).unwrap();
         let wider = CapRights::DERIVE | CapRights::REVOKE;
         assert_eq!(
-            t.cap_derive(src, wider, CapObject::new(0)).unwrap_err(),
+            t.cap_derive(src, wider, task_object(0)).unwrap_err(),
             CapError::WidenedRights
         );
     }
@@ -682,12 +705,10 @@ mod tests {
         // Build MAX_DERIVATION_DEPTH-deep chain (each child gets DERIVE so we
         // can go again); the next derive should fail.
         for _ in 0..MAX_DERIVATION_DEPTH {
-            current = t
-                .cap_derive(current, all_rights(), CapObject::new(0))
-                .unwrap();
+            current = t.cap_derive(current, all_rights(), task_object(0)).unwrap();
         }
         assert_eq!(
-            t.cap_derive(current, all_rights(), CapObject::new(0))
+            t.cap_derive(current, all_rights(), task_object(0))
                 .unwrap_err(),
             CapError::DerivationTooDeep
         );
@@ -697,7 +718,7 @@ mod tests {
     fn cap_revoke_removes_only_descendants() {
         let mut t = CapabilityTable::new();
         let src = t.insert_root(root_cap()).unwrap();
-        let child = t.cap_derive(src, all_rights(), CapObject::new(1)).unwrap();
+        let child = t.cap_derive(src, all_rights(), task_object(1)).unwrap();
 
         t.cap_revoke(src).unwrap();
 
@@ -713,13 +734,9 @@ mod tests {
     fn cap_revoke_cascades_depth_three() {
         let mut t = CapabilityTable::new();
         let root = t.insert_root(root_cap()).unwrap();
-        let child = t.cap_derive(root, all_rights(), CapObject::new(1)).unwrap();
-        let grand = t
-            .cap_derive(child, all_rights(), CapObject::new(2))
-            .unwrap();
-        let great = t
-            .cap_derive(grand, all_rights(), CapObject::new(3))
-            .unwrap();
+        let child = t.cap_derive(root, all_rights(), task_object(1)).unwrap();
+        let grand = t.cap_derive(child, all_rights(), task_object(2)).unwrap();
+        let great = t.cap_derive(grand, all_rights(), task_object(3)).unwrap();
 
         t.cap_revoke(root).unwrap();
 
@@ -730,13 +747,32 @@ mod tests {
     }
 
     #[test]
+    fn references_object_sees_live_caps_only() {
+        // `references_object` supports the ADR-0016 reachability check.
+        // It returns true iff some live capability names the target.
+        let mut t = CapabilityTable::new();
+        let target = task_object(0xCC);
+        let other = task_object(0xDD);
+        assert!(
+            !t.references_object(target),
+            "empty table references nothing"
+        );
+
+        let h = t
+            .insert_root(Capability::new(all_rights(), target))
+            .unwrap();
+        assert!(t.references_object(target));
+        assert!(!t.references_object(other));
+
+        // Cap-drop removes the reference.
+        t.cap_drop(h).unwrap();
+        assert!(!t.references_object(target));
+    }
+
+    #[test]
     fn cap_revoke_without_revoke_right_fails() {
         let mut t = CapabilityTable::new();
-        let no_revoke = Capability::new(
-            CapKind::Task,
-            CapRights::DUPLICATE | CapRights::DERIVE,
-            CapObject::new(0),
-        );
+        let no_revoke = Capability::new(CapRights::DUPLICATE | CapRights::DERIVE, task_object(0));
         let src = t.insert_root(no_revoke).unwrap();
         assert_eq!(t.cap_revoke(src).unwrap_err(), CapError::InsufficientRights);
     }
@@ -761,7 +797,7 @@ mod tests {
     fn copy_of_a_child_shares_parent() {
         let mut t = CapabilityTable::new();
         let root = t.insert_root(root_cap()).unwrap();
-        let child = t.cap_derive(root, all_rights(), CapObject::new(1)).unwrap();
+        let child = t.cap_derive(root, all_rights(), task_object(1)).unwrap();
         let peer = t.cap_copy(child, all_rights()).unwrap();
 
         // Revoking `root` must invalidate both `child` and `peer` — they
@@ -805,9 +841,7 @@ mod tests {
         // refuse rather than orphan the child.
         let mut t = CapabilityTable::new();
         let parent = t.insert_root(root_cap()).unwrap();
-        let _child = t
-            .cap_derive(parent, all_rights(), CapObject::new(1))
-            .unwrap();
+        let _child = t.cap_derive(parent, all_rights(), task_object(1)).unwrap();
 
         assert_eq!(
             t.cap_drop(parent).unwrap_err(),
@@ -826,9 +860,9 @@ mod tests {
         // outer two must remain reachable.
         let mut t = CapabilityTable::new();
         let root = t.insert_root(root_cap()).unwrap();
-        let a = t.cap_derive(root, all_rights(), CapObject::new(1)).unwrap();
-        let b = t.cap_derive(root, all_rights(), CapObject::new(2)).unwrap();
-        let c = t.cap_derive(root, all_rights(), CapObject::new(3)).unwrap();
+        let a = t.cap_derive(root, all_rights(), task_object(1)).unwrap();
+        let b = t.cap_derive(root, all_rights(), task_object(2)).unwrap();
+        let c = t.cap_derive(root, all_rights(), task_object(3)).unwrap();
         t.cap_drop(b).unwrap();
         assert!(t.lookup(a).is_ok());
         assert!(t.lookup(c).is_ok());

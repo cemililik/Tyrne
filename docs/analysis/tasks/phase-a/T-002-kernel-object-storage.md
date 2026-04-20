@@ -2,7 +2,7 @@
 
 - **Phase:** A
 - **Milestone:** A3 — Kernel objects
-- **Status:** Ready
+- **Status:** In Review
 - **Created:** 2026-04-21
 - **Author:** @cemililik
 - **Dependencies:** T-001 — Capability table foundation (must reach `Done`; A3 is blocked on A2 closure per [phase-a.md](../../../roadmap/phases/phase-a.md))
@@ -98,3 +98,4 @@ Sketch; real design in ADR-0016.
 |------|----------|------|
 | 2026-04-21 | @cemililik | opened; status Draft (A3 blocked until A2 Done) |
 | 2026-04-21 | @cemililik | A2 Done + A2 business review committed; status → Ready. ADR-0016 Accepted the same day; implementation may begin. |
+| 2026-04-21 | @cemililik | implementation landed on `development`; status → In Review. `umbrix_kernel::obj` module (generic `Arena<T, N>`, `Task`/`Endpoint`/`Notification` + typed handles + create/destroy APIs); `CapObject` rewired to a typed enum; `Capability` loses its redundant `kind` field (derived from object). 14 new host tests on top of the 63 T-001 baseline (77/77 total). |

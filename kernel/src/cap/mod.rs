@@ -11,21 +11,24 @@
 //! [`security-model.md`][sec] and [architectural principle P1][p1].
 //!
 //! [adr-0014]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0014-capability-representation.md
+//! [adr-0016]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0016-kernel-object-storage.md
 //! [sec]: https://github.com/cemililik/UmbrixOS/blob/main/docs/architecture/security-model.md
 //! [p1]: https://github.com/cemililik/UmbrixOS/blob/main/docs/standards/architectural-principles.md#p1--no-ambient-authority
 //!
-//! ## Status (v1, T-001)
+//! ## Status (T-001 + T-002)
 //!
 //! - [`Capability`] is move-only (not `Copy`, not `Clone`).
 //! - [`CapRights`] carries four v1 rights (`DUPLICATE`, `DERIVE`, `REVOKE`,
 //!   `TRANSFER`); more rights land with their subsystems.
-//! - [`CapObject`] is a placeholder for the kernel object the capability
-//!   points at; Milestone A3 replaces it with a typed reference.
+//! - [`CapObject`] is a typed enum that names a kernel object by its
+//!   typed handle — [`super::obj::TaskHandle`] / [`super::obj::EndpointHandle`]
+//!   / [`super::obj::NotificationHandle`] — following [ADR-0016][adr-0016].
+//!   `MemoryRegion` arrives in Phase B.
 //! - [`CapabilityTable`] implements
 //!   [`cap_copy`][CapabilityTable::cap_copy],
 //!   [`cap_derive`][CapabilityTable::cap_derive],
 //!   [`cap_revoke`][CapabilityTable::cap_revoke], and
-//!   [`cap_drop`][CapabilityTable::cap_drop] with `zero` `unsafe`.
+//!   [`cap_drop`][CapabilityTable::cap_drop] with zero `unsafe`.
 //!
 //! What v1 deliberately omits: IPC integration, multi-core safety,
 //! persistent capabilities, badge schemes. Each has a named open question
@@ -37,12 +40,13 @@ mod table;
 pub use rights::CapRights;
 pub use table::{CapHandle, CapabilityTable, CAP_TABLE_CAPACITY, MAX_DERIVATION_DEPTH};
 
+use crate::obj::{EndpointHandle, NotificationHandle, TaskHandle};
+
 /// Kinds of kernel object a capability can refer to.
 ///
-/// The variants are placeholders in v1: they discriminate the capability
-/// by *kind* but the actual kernel-object references are encoded as
-/// opaque [`CapObject`] values until Milestone A3 introduces real
-/// kernel-object types.
+/// The discriminator for a capability's [`CapObject`]; `CapObject`
+/// carries the actual typed handle. `MemoryRegion` is reserved here but
+/// has no `CapObject` variant until Phase B introduces the MMU.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CapKind {
     /// Refers to a task kernel object.
@@ -51,33 +55,36 @@ pub enum CapKind {
     Endpoint,
     /// Refers to an asynchronous notification kernel object.
     Notification,
-    /// Refers to a physical memory region.
+    /// Refers to a physical memory region (Phase B).
     MemoryRegion,
 }
 
-/// Opaque reference to a kernel object.
+/// Typed reference to a kernel object.
 ///
-/// In v1 this wraps a plain `u64` identifier whose interpretation is left
-/// to the caller (kernel-internal). Milestone A3 replaces `CapObject` with
-/// a typed reference; the outer API of the capability table does not
-/// change. The wrapped value is kept private and read through
-/// [`CapObject::raw`] so that every construction or inspection site goes
-/// through an auditable function — a small safeguard for when the typed
-/// replacement lands.
+/// Each variant carries the [typed handle][crate::obj] of its kind, so
+/// passing a `TaskHandle` where an `EndpointHandle` is expected is a
+/// compile-time error. The discriminator matches [`CapKind`] one-to-one.
+/// `MemoryRegion` is deferred to Phase B; a capability with that kind
+/// cannot be constructed in v1.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct CapObject(u64);
+pub enum CapObject {
+    /// Capability naming a [`Task`][crate::obj::Task] kernel object.
+    Task(TaskHandle),
+    /// Capability naming an [`Endpoint`][crate::obj::Endpoint] kernel object.
+    Endpoint(EndpointHandle),
+    /// Capability naming a [`Notification`][crate::obj::Notification] kernel object.
+    Notification(NotificationHandle),
+}
 
 impl CapObject {
-    /// Construct a capability-object reference from its raw identifier.
+    /// Return the [`CapKind`] discriminator matching this object.
     #[must_use]
-    pub const fn new(id: u64) -> Self {
-        Self(id)
-    }
-
-    /// Return the raw identifier this `CapObject` wraps.
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
+    pub const fn kind(self) -> CapKind {
+        match self {
+            Self::Task(_) => CapKind::Task,
+            Self::Endpoint(_) => CapKind::Endpoint,
+            Self::Notification(_) => CapKind::Notification,
+        }
     }
 }
 
@@ -89,30 +96,26 @@ impl CapObject {
 /// Rust type system enforces the move-only discipline by construction.
 ///
 /// `Debug` is derived so that test assertions can format capabilities;
-/// the derived impl does not expose any unforgeable bits because
-/// [`CapObject`] is an opaque `u64` in v1.
+/// the derived impl exposes typed handles but no other unforgeable bits.
 #[derive(Debug)]
 pub struct Capability {
-    kind: CapKind,
     rights: CapRights,
     object: CapObject,
 }
 
 impl Capability {
-    /// Construct a capability with the given kind, rights, and object.
+    /// Construct a capability with the given rights over `object`. The
+    /// [`CapKind`] is derived from the `object`'s variant, so
+    /// kind-and-object cannot disagree by construction.
     #[must_use]
-    pub const fn new(kind: CapKind, rights: CapRights, object: CapObject) -> Self {
-        Self {
-            kind,
-            rights,
-            object,
-        }
+    pub const fn new(rights: CapRights, object: CapObject) -> Self {
+        Self { rights, object }
     }
 
-    /// Return the capability's kind.
+    /// Return the capability's kind, derived from its object variant.
     #[must_use]
     pub const fn kind(&self) -> CapKind {
-        self.kind
+        self.object.kind()
     }
 
     /// Return the capability's rights.
@@ -121,7 +124,7 @@ impl Capability {
         self.rights
     }
 
-    /// Return the capability's opaque object reference.
+    /// Return the capability's typed object reference.
     #[must_use]
     pub const fn object(&self) -> CapObject {
         self.object

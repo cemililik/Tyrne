@@ -18,10 +18,13 @@
 //!
 //! ## Subsystems
 //!
+//! - [`obj`] — kernel-object subsystem (Phase A3 / [T-002]): per-type
+//!   arenas holding the concrete entities capabilities name.
 //! - [`cap`] — capability subsystem (Phase A2 / [T-001]), the substrate every
 //!   later subsystem refers through for authority.
 //!
 //! [T-001]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-001-capability-table-foundation.md
+//! [T-002]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-002-kernel-object-storage.md
 
 #![cfg_attr(not(test), no_std)]
 // Kernel-specific stricter lints on top of the workspace set.
@@ -34,6 +37,7 @@
 #![deny(clippy::float_arithmetic)]
 
 pub mod cap;
+pub mod obj;
 
 use umbrix_hal::Console;
 
