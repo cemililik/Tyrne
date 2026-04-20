@@ -15,28 +15,22 @@
 //! ## Status
 //!
 //! In progress. Traits are pinned down one at a time, each behind a dedicated
-//! ADR. Accepted so far: [`Console`] (ADR-0007), [`Cpu`] (ADR-0008). The
-//! remaining trait stubs below are placeholders whose method surfaces will be
-//! pinned by their own ADRs at Phase 4b implementation time.
+//! ADR. Accepted so far: [`Console`] (ADR-0007), [`Cpu`] (ADR-0008),
+//! [`Mmu`] (ADR-0009). The remaining trait stubs below are placeholders whose
+//! method surfaces will be pinned by their own ADRs at Phase 4b
+//! implementation time.
 
 #![no_std]
 
 mod console;
 mod cpu;
+mod mmu;
 
 pub use console::{Console, FmtWriter};
 pub use cpu::{CoreId, Cpu, IrqGuard, IrqState};
-
-/// Memory management unit interaction.
-///
-/// Responsibilities: translation-table activation, entry installation and
-/// removal, `TLB` invalidation (per-`ASID`, global, per-address), and the
-/// cache maintenance sequences the architecture requires between page-table
-/// writes and `MMU` reads.
-///
-/// Memory allocation for page tables is not the HAL's job — the kernel owns
-/// a physical-frame allocator and hands the HAL frames to fill in.
-pub trait Mmu {}
+pub use mmu::{
+    FrameProvider, MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE,
+};
 
 /// Interrupt controller dispatch and control.
 ///
