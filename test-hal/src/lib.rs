@@ -17,13 +17,16 @@
 //!
 //! In progress. Fakes are added alongside the HAL traits they mirror, each
 //! after its trait's ADR is accepted. Available so far: [`FakeConsole`]
-//! (ADR-0007), [`FakeCpu`] (ADR-0008), [`FakeMmu`] (ADR-0009). Additional
-//! fakes land as their traits are pinned down.
+//! (ADR-0007), [`FakeCpu`] (ADR-0008), [`FakeMmu`] (ADR-0009),
+//! [`FakeTimer`] (ADR-0010). Additional fakes land as their traits are
+//! pinned down.
 
 mod console;
 mod cpu;
 mod mmu;
+mod timer;
 
 pub use console::FakeConsole;
 pub use cpu::FakeCpu;
 pub use mmu::{FakeAddressSpace, FakeMmu, VecFrameProvider};
+pub use timer::FakeTimer;

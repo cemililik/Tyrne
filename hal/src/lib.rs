@@ -16,21 +16,23 @@
 //!
 //! In progress. Traits are pinned down one at a time, each behind a dedicated
 //! ADR. Accepted so far: [`Console`] (ADR-0007), [`Cpu`] (ADR-0008),
-//! [`Mmu`] (ADR-0009). The remaining trait stubs below are placeholders whose
-//! method surfaces will be pinned by their own ADRs at Phase 4b
-//! implementation time.
+//! [`Mmu`] (ADR-0009), [`Timer`] (ADR-0010). The remaining trait stub below
+//! is a placeholder whose method surface will be pinned by its own ADR at
+//! Phase 4b implementation time.
 
 #![no_std]
 
 mod console;
 mod cpu;
 mod mmu;
+mod timer;
 
 pub use console::{Console, FmtWriter};
 pub use cpu::{CoreId, Cpu, IrqGuard, IrqState};
 pub use mmu::{
     FrameProvider, MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE,
 };
+pub use timer::Timer;
 
 /// Interrupt controller dispatch and control.
 ///
@@ -42,13 +44,6 @@ pub use mmu::{
 /// this interface; they receive asynchronous notifications on their
 /// `IrqCap`'s endpoint.
 pub trait IrqController {}
-
-/// Monotonic time and deadline arming.
-///
-/// Responsibilities: report nanoseconds since boot (monotonic, never goes
-/// backwards across suspend), arm a one-shot deadline that arrives as an
-/// `IRQ`, and cancel a deadline.
-pub trait Timer {}
 
 /// System `IOMMU` interaction, on platforms that have one.
 ///
