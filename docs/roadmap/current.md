@@ -10,8 +10,8 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 - **Working branch:** `development`.
 - **Last completed milestone:** A2 — Capability table foundation, on 2026-04-21 (PR #1 merged to `main`).
 - **Last completed task:** [T-001 — Capability table foundation](../analysis/tasks/phase-a/T-001-capability-table-foundation.md) — `Done` 2026-04-21.
-- **Last review:** none yet; the first business review — covering A2 completion — follows next.
-- **Next review trigger:** A2 business review, immediate.
+- **Last review:** [A2 completion business review](../analysis/reviews/business-reviews/2026-04-21-A2-completion.md) — 2026-04-21.
+- **Next review trigger:** code + security review of T-002's implementation when it reaches `In Review`; business review waits for A6 per [phase-a.md closure](phases/phase-a.md).
 
 ## Notes
 

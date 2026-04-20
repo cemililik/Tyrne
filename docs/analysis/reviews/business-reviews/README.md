@@ -22,8 +22,6 @@ A business review may point at outcomes from those other reviews as part of "wha
 
 ## Index
 
-_No reviews yet._ The first business review will accompany the completion of Milestone A2.
-
 | Date | Scope | File |
 |------|-------|------|
-| _pending_ | Milestone A2 | — |
+| 2026-04-21 | Milestone A2 — Capability table foundation | [2026-04-21-A2-completion.md](2026-04-21-A2-completion.md) |
