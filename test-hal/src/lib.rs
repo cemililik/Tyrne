@@ -17,8 +17,11 @@
 //!
 //! In progress. Fakes are added alongside the HAL traits they mirror, each
 //! after its trait's ADR is accepted. Available so far: [`FakeConsole`]
-//! (ADR-0007). Additional fakes land as their traits are pinned down.
+//! (ADR-0007), [`FakeCpu`] (ADR-0008). Additional fakes land as their traits
+//! are pinned down.
 
 mod console;
+mod cpu;
 
 pub use console::FakeConsole;
+pub use cpu::FakeCpu;

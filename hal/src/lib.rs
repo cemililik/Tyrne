@@ -15,27 +15,17 @@
 //! ## Status
 //!
 //! In progress. Traits are pinned down one at a time, each behind a dedicated
-//! ADR. Accepted so far: [`Console`] (ADR-0007). The remaining trait stubs
-//! below are placeholders whose method surfaces will be pinned by their own
-//! ADRs at Phase 4b implementation time.
+//! ADR. Accepted so far: [`Console`] (ADR-0007), [`Cpu`] (ADR-0008). The
+//! remaining trait stubs below are placeholders whose method surfaces will be
+//! pinned by their own ADRs at Phase 4b implementation time.
 
 #![no_std]
 
 mod console;
+mod cpu;
 
 pub use console::{Console, FmtWriter};
-
-/// Privileged CPU state and control.
-///
-/// Implementations are architecture-specific (aarch64 for the initial BSPs;
-/// RISC-V planned). Responsibilities: core identification, CPU-level interrupt
-/// masking, wait-for-interrupt, context-switch primitives, memory barriers
-/// that Rust's atomics do not cover, and secondary-core start via `PSCI` or
-/// an architecturally equivalent mechanism.
-///
-/// Final method signatures to be settled in a dedicated ADR at Phase 4b
-/// implementation time.
-pub trait Cpu {}
+pub use cpu::{CoreId, Cpu, IrqGuard, IrqState};
 
 /// Memory management unit interaction.
 ///
