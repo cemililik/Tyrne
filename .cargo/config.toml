@@ -19,6 +19,10 @@ rustflags = [
     # Frame pointers aid panic backtraces and debugger unwinding.
     "-C", "force-frame-pointers=yes",
 ]
+# `cargo run --target aarch64-unknown-none -p umbrix-bsp-qemu-virt` boots the
+# built ELF under QEMU virt with a single Cortex-A72 core, 128 MiB RAM, and
+# the serial multiplexed onto the terminal. See docs/guides/run-under-qemu.md.
+runner = "qemu-system-aarch64 -M virt -cpu cortex-a72 -m 128M -smp 1 -nographic -serial mon:stdio -kernel"
 
 # Convenience aliases.
 [alias]
@@ -26,7 +30,16 @@ rustflags = [
 kernel-build = "build --target aarch64-unknown-none -p umbrix-bsp-qemu-virt"
 
 # Run clippy against the kernel image with warnings as errors.
-kernel-clippy = "clippy --target aarch64-unknown-none -p umbrix-bsp-qemu-virt --all-targets -- -D warnings"
+# No `--all-targets`: the BSP is no_main and has no test target to build.
+kernel-clippy = "clippy --target aarch64-unknown-none -p umbrix-bsp-qemu-virt -- -D warnings"
 
-# Run host-side unit tests across the workspace.
-host-test = "test --workspace"
+# Boot the built image under QEMU (requires `cargo kernel-build` first).
+kernel-run = "run --target aarch64-unknown-none -p umbrix-bsp-qemu-virt"
+
+# Run host-side unit tests (uses workspace default-members, which excludes
+# the bare-metal BSP). Run `cargo kernel-build` separately to exercise
+# the aarch64 build.
+host-test = "test"
+
+# Run clippy on every host-buildable crate.
+host-clippy = "clippy --all-targets -- -D warnings"

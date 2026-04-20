@@ -17,7 +17,7 @@ The architecture is being written in phases. Many documents listed below are pla
 | `scheduling.md` | Scheduler design, priorities, real-time considerations. | Planned |
 | `ipc.md` | Inter-process communication, message passing, endpoints, capability transfer. | Planned |
 | [`hal.md`](hal.md) | Hardware Abstraction Layer: trait surfaces, board support packages, portability. | Accepted |
-| `boot.md` | Boot flow from reset vector through kernel init to first userspace task. | Planned |
+| [`boot.md`](boot.md) | Boot flow from reset vector through kernel init to first userspace task. | Accepted (v0.0.1 — QEMU virt only) |
 | `drivers.md` | Userspace driver model, capability grants, driver API. | Planned |
 | `userspace.md` | Init process, system services, shell, root of trust. | Planned |
 

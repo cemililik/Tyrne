@@ -16,9 +16,10 @@
 //!
 //! ## Status
 //!
-//! Scaffolding only. Subsystems (capabilities, scheduler, IPC, memory,
-//! interrupt dispatch) land in subsequent commits per the architecture
-//! documents in [`docs/architecture/`][arch-docs].
+//! Phase 4c v0.0.1: a single public entry point, [`run`], that writes a
+//! greeting to the console and halts. Subsystems (capabilities, scheduler,
+//! IPC, memory management, interrupt dispatch) land in subsequent phases
+//! per the architecture documents in [`docs/architecture/`][arch-docs].
 //!
 //! [arch-docs]: https://github.com/cemililik/UmbrixOS/tree/main/docs/architecture
 
@@ -31,3 +32,24 @@
 #![deny(clippy::todo)]
 #![deny(clippy::arithmetic_side_effects)]
 #![deny(clippy::float_arithmetic)]
+
+use umbrix_hal::Console;
+
+/// Portable kernel entry, called by the BSP after early init.
+///
+/// In Phase 4c v0.0.1 this writes a greeting to the console and idles
+/// the CPU in a `spin_loop`. Subsequent phases will bring up the
+/// scheduler, IPC, capability system, and userspace init here before
+/// reaching steady state.
+///
+/// # Never returns
+///
+/// This function is `-> !`. A return would be a kernel bug; the BSP's
+/// reset stub halts defensively if it ever does.
+pub fn run<C: Console>(console: &C) -> ! {
+    console.write_bytes(b"umbrix: hello from kernel_main\n");
+
+    loop {
+        core::hint::spin_loop();
+    }
+}

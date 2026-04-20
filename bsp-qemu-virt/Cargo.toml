@@ -6,9 +6,11 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Umbrix BSP for QEMU aarch64 virt machine (primary development target)."
+build = "build.rs"
 
-[lib]
-name = "umbrix_bsp_qemu_virt"
+[[bin]]
+name = "umbrix-bsp-qemu-virt"
+path = "src/main.rs"
 
 [dependencies]
 umbrix-hal = { path = "../hal" }

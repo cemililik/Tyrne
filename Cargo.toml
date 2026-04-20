@@ -11,6 +11,15 @@ members = [
     "bsp-qemu-virt",
     "test-hal",
 ]
+# Default set for workspace-wide commands (`cargo check`, `cargo test`, etc.):
+# everything host-buildable. The BSP is #![no_std, no_main] and requires the
+# explicit bare-metal target; build it via `cargo kernel-build` (or
+# `cargo build --target aarch64-unknown-none -p umbrix-bsp-qemu-virt`).
+default-members = [
+    "kernel",
+    "hal",
+    "test-hal",
+]
 
 [workspace.package]
 version = "0.0.1"
