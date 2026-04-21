@@ -2,7 +2,7 @@
 
 - **Phase:** A
 - **Milestone:** A3 — Kernel objects
-- **Status:** In Review
+- **Status:** Done
 - **Created:** 2026-04-21
 - **Author:** @cemililik
 - **Dependencies:** T-001 — Capability table foundation (must reach `Done`; A3 is blocked on A2 closure per [phase-a.md](../../../roadmap/phases/phase-a.md))
@@ -26,18 +26,18 @@ This task is **structure and lifecycle only**, not behaviour. The scheduler (A5)
 ## Acceptance criteria
 
 - [x] **ADR-0016 Accepted.** Settles storage strategy (per-type arena vs. shared pool), handle type (generation-tagged or equivalent), ownership (global vs. per-task), and explicit-destruction semantics.
-- [ ] **Kernel-object module** `umbrix_kernel::obj` (or equivalent) with three types: `Task`, `Endpoint`, `Notification`. Minimal fields per ADR-0016; no scheduler / IPC logic.
-- [ ] **Per-type arenas** with bounded capacity (compile-time constants, revisited when a real use case demands more).
-- [ ] **Handle types** (`TaskHandle`, `EndpointHandle`, `NotificationHandle`) or a unified typed handle — whichever ADR-0016 chooses. Use-after-destroy structurally impossible (generation check, typed arena, or equivalent).
-- [ ] **`CapObject` wiring.** The placeholder `CapObject` becomes a typed reference to a kernel object (enum over the three kinds, carrying the appropriate handle). [ADR-0014](../../../decisions/0014-capability-representation.md) said the outer API of the capability table does not change; this task verifies that claim holds.
-- [ ] **Create / destroy APIs.**
+- [x] **Kernel-object module** `umbrix_kernel::obj` (or equivalent) with three types: `Task`, `Endpoint`, `Notification`. Minimal fields per ADR-0016; no scheduler / IPC logic.
+- [x] **Per-type arenas** with bounded capacity (compile-time constants, revisited when a real use case demands more).
+- [x] **Handle types** (`TaskHandle`, `EndpointHandle`, `NotificationHandle`) or a unified typed handle — whichever ADR-0016 chooses. Use-after-destroy structurally impossible (generation check, typed arena, or equivalent).
+- [x] **`CapObject` wiring.** The placeholder `CapObject` becomes a typed reference to a kernel object (enum over the three kinds, carrying the appropriate handle). [ADR-0014](../../../decisions/0014-capability-representation.md) said the outer API of the capability table does not change; this task verifies that claim holds.
+- [x] **Create / destroy APIs.**
   - `create_task(initial_state) -> Result<TaskHandle, ObjError>`
-  - `destroy_task(handle) -> Result<(), ObjError>` (symmetric; fails if already destroyed or if any capability still names it — exact policy per ADR-0016).
+  - `destroy_task(handle) -> Result<Task, ObjError>` (returns the freed value; reachability is caller-managed per ADR-0016).
   - Symmetric pair for `Endpoint` and `Notification`.
-- [ ] **Capability flow.** Creating a kernel object produces the capability that names it (with all v1 rights on that kind); dropping the last such capability's behaviour is per ADR-0016 (explicit destruction vs. reference-counted).
-- [ ] **Host tests** covering: create / lookup / destroy happy path; handle invalidation after destroy; arena exhaustion returns typed error; capability-to-object lookup resolves correctly; dropping capabilities vs. destroying objects produces the ADR-0016-documented outcome.
-- [ ] **No new `unsafe`** if achievable. If any lands, an audit entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
-- [ ] **Move-only where correctness demands.** Kernel-object types that encode ownership (e.g., "the endpoint's blocked-sender list") should not be `Copy` / `Clone`; the compiler enforces the ownership story.
+- [x] **Capability flow.** Caller installs the initial capability via `CapabilityTable::insert_root(Capability::new(all_rights(), CapObject::Task(handle)))`; which table receives it is caller-decided. Drop behaviour is explicit destruction per ADR-0016 (no reference counting in v1).
+- [x] **Host tests** covering: create / lookup / destroy happy path; handle invalidation after destroy; arena exhaustion returns typed error; capability-to-object lookup resolves correctly; dropping capabilities vs. destroying objects produces the ADR-0016-documented outcome.
+- [x] **No new `unsafe`** if achievable. If any lands, an audit entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
+- [x] **Move-only where correctness demands.** Kernel-object types that encode ownership (e.g., "the endpoint's blocked-sender list") should not be `Copy` / `Clone`; the compiler enforces the ownership story.
 
 ## Out of scope
 
@@ -68,14 +68,14 @@ Sketch; real design in ADR-0016.
 
 ## Definition of done
 
-- [ ] `cargo fmt --all -- --check` clean.
-- [ ] `cargo host-clippy` clean.
-- [ ] `cargo kernel-clippy` clean.
-- [ ] `cargo host-test` passes with the new tests.
-- [ ] No new `unsafe` without an audit entry.
-- [ ] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md); at minimum: ADR-0016 as one commit, `umbrix_kernel::obj` module as one commit, `CapObject` wiring as one commit.
-- [ ] [`current.md`](../../../roadmap/current.md) updated on each status transition.
-- [ ] Milestone A3 is **not** closed by this task alone — A3 closes when subsequent work (if any) lands. Current plan: T-002 covers A3 in one task.
+- [x] `cargo fmt --all -- --check` clean.
+- [x] `cargo host-clippy` clean.
+- [x] `cargo kernel-clippy` clean.
+- [x] `cargo host-test` passes with the new tests.
+- [x] No new `unsafe` without an audit entry.
+- [x] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md); at minimum: ADR-0016 as one commit, `umbrix_kernel::obj` module as one commit, `CapObject` wiring as one commit.
+- [x] [`current.md`](../../../roadmap/current.md) updated on each status transition.
+- [x] Milestone A3 closed by this task alone — T-002 covered A3 in one task as planned.
 
 ## Design notes
 
@@ -99,3 +99,4 @@ Sketch; real design in ADR-0016.
 | 2026-04-21 | @cemililik | opened; status Draft (A3 blocked until A2 Done) |
 | 2026-04-21 | @cemililik | A2 Done + A2 business review committed; status → Ready. ADR-0016 Accepted the same day; implementation may begin. |
 | 2026-04-21 | @cemililik | implementation landed on `development`; status → In Review. `umbrix_kernel::obj` module (generic `Arena<T, N>`, `Task`/`Endpoint`/`Notification` + typed handles + create/destroy APIs); `CapObject` rewired to a typed enum; `Capability` loses its redundant `kind` field (derived from object). 14 new host tests on top of the 63 T-001 baseline (77/77 total). |
+| 2026-04-21 | @cemililik | PR merged to `main`; status → Done. Review findings applied (fa21f16): T-001 checkboxes, ADR-0016 destroy signature, cap_derive docstring, ObjError::StillReachable clarification, arena debug_assert, notification realloc test, cap_revoke_clears_references_object test. 44/44 host tests green. Milestone A3 closed. |

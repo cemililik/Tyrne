@@ -59,7 +59,7 @@ Milestone A3 cannot start until A2 is Done — kernel objects need a capability 
 
 ---
 
-## Milestone A3 — Kernel objects
+## Milestone A3 — Kernel objects ✓ (done 2026-04-21)
 
 Introduce the first concrete kernel objects — `Task`, `Endpoint`, `Notification` — that capabilities point at. Scheduler and IPC still absent; this milestone is about **storage and lifecycle**.
 
@@ -84,7 +84,7 @@ Introduce the first concrete kernel objects — `Task`, `Endpoint`, `Notificatio
 
 ### Tasks under A3
 
-- [T-002 — Kernel object storage foundation](../../analysis/tasks/phase-a/T-002-kernel-object-storage.md) — In Review.
+- [T-002 — Kernel object storage foundation](../../analysis/tasks/phase-a/T-002-kernel-object-storage.md) — Done.
 
 ### Informs
 
@@ -115,6 +115,10 @@ Synchronous rendezvous endpoints and asynchronous notifications. Capability tran
 - Capability transfer is atomic with delivery (partial-transfer failure modes ruled out by construction or by test).
 - Cross-task tests (two stub "tasks" in kernel code) demonstrate the round trip.
 - No new `unsafe` beyond what A3 already introduced, or each new `unsafe` is justified and audited.
+
+### Tasks under A4
+
+- [T-003 — IPC primitives](../../analysis/tasks/phase-a/T-003-ipc-primitives.md) — In Review.
 
 ### Informs
 

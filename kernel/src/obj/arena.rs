@@ -31,15 +31,15 @@ pub struct SlotId {
 }
 
 impl SlotId {
-    /// Raw index component. Crate-internal; exposed for tests.
-    #[cfg(test)]
+    /// Raw index component. Crate-internal; used by the IPC layer to index
+    /// into parallel state arrays.
     #[must_use]
-    pub(crate) const fn index(self) -> Index {
+    pub(crate) const fn index(self) -> u16 {
         self.index
     }
 
-    /// Raw generation component. Crate-internal; exposed for tests.
-    #[cfg(test)]
+    /// Raw generation component. Crate-internal; used by the IPC layer to
+    /// detect stale waiter state after endpoint slot reuse.
     #[must_use]
     pub(crate) const fn generation(self) -> Generation {
         self.generation
