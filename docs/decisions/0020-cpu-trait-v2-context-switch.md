@@ -1,6 +1,6 @@
 # 0020 — `Cpu` trait v2: context-switch extension
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-21
 - **Deciders:** @cemililik
 

@@ -150,7 +150,7 @@ The first real scheduler: cooperative yield-based, with a context-switch primiti
 
 ### Tasks under A5
 
-- [T-004 — Cooperative scheduler](../../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) — Draft.
+- [T-004 — Cooperative scheduler](../../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) — Ready.
 
 ### Informs
 

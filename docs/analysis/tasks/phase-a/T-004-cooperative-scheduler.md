@@ -2,12 +2,12 @@
 
 - **Phase:** A
 - **Milestone:** A5 — Cooperative scheduler and context switch
-- **Status:** Draft
+- **Status:** Ready
 - **Created:** 2026-04-21
 - **Author:** @cemililik
 - **Dependencies:** T-003 — IPC primitives (Done)
 - **Informs:** T-005 (two-task IPC demo — A6)
-- **ADRs required:** ADR-0019 (Scheduler shape) — must be Accepted before implementation; ADR-0020 (`Cpu` trait v2 / context-switch extension) — must be Accepted before assembly or context-switch code lands.
+- **ADRs required:** ADR-0019 (Scheduler shape) — Accepted 2026-04-21; ADR-0020 (`Cpu` trait v2 / context-switch extension) — Accepted 2026-04-21.
 
 ---
 
@@ -30,8 +30,8 @@ The actual assembly for saving and restoring aarch64 register state (callee-save
 
 ## Acceptance criteria
 
-- [ ] **ADR-0019 Accepted** before any scheduler implementation lands. Settles: queue structure (single FIFO vs. priority queues), yield semantics, blocked-task lifecycle.
-- [ ] **ADR-0020 Accepted** before any context-switch code lands. Settles: `Cpu` trait v2 shape (`save_context`, `restore_context`, `TaskContext` associated type), safety contract.
+- [x] **ADR-0019 Accepted** — 2026-04-21. Settles: single bounded FIFO queue, yield-to-next-ready, `TaskState { Idle, Ready, Blocked }`, scheduler as IPC orchestration layer.
+- [x] **ADR-0020 Accepted** — 2026-04-21. Settles: separate `ContextSwitch` trait, `unsafe context_switch` / `init_context`, aarch64 frame (x19–x28 + fp + lr + sp = 104 bytes).
 - [ ] **`Cpu` trait v2** lands in `umbrix-hal`; the BSP `QemuVirtCpu` implements it.
 - [ ] **Context-switch assembly** in `bsp-qemu-virt`, behind a safe Rust wrapper; `unsafe` block audited per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
 - [ ] **Scheduler queue** in `kernel::sched`: bounded, heap-free. Shape decided by ADR-0019.
@@ -91,3 +91,4 @@ Design is delegated to ADR-0019 and ADR-0020. At a sketch level:
 | Date | Reviewer | Note |
 |------|----------|------|
 | 2026-04-21 | @cemililik | opened; status Draft — ADR-0019 and ADR-0020 not yet written; A5 blocked until both Accepted. |
+| 2026-04-21 | @cemililik | ADR-0019 and ADR-0020 both Accepted; status → Ready. Implementation may begin. |

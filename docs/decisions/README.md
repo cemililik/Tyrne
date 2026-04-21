@@ -48,7 +48,7 @@ Each ADR contains:
 | 0017 | [IPC primitive set](0017-ipc-primitive-set.md) | Accepted | 2026-04-21 |
 | 0018 | [Badge scheme and `reply_recv` fastpath: formal deferral](0018-badge-scheme-and-reply-recv-deferral.md) | Accepted | 2026-04-21 |
 | 0019 | [Scheduler shape](0019-scheduler-shape.md) | Accepted | 2026-04-21 |
-| 0020 | [`ContextSwitch` trait and `Cpu` v2](0020-cpu-trait-v2-context-switch.md) | Proposed | 2026-04-21 |
+| 0020 | [`ContextSwitch` trait and `Cpu` v2](0020-cpu-trait-v2-context-switch.md) | Accepted | 2026-04-21 |
 
 ## Creating a new ADR
 
