@@ -46,6 +46,7 @@ Each ADR contains:
 | 0015 | [AI integration stance: userspace-only, kernel-neutral](0015-ai-integration-stance.md) | Accepted | 2026-04-20 |
 | 0016 | [Kernel object storage](0016-kernel-object-storage.md) | Accepted | 2026-04-21 |
 | 0017 | [IPC primitive set](0017-ipc-primitive-set.md) | Accepted | 2026-04-21 |
+| 0019 | [Scheduler shape](0019-scheduler-shape.md) | Proposed | 2026-04-21 |
 
 ## Creating a new ADR
 
