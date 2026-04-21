@@ -180,7 +180,7 @@ Integration: the kernel runs a deterministic two-task scenario where Task A send
 
 ### Tasks under A6
 
-- [T-005 — Two-task IPC demo](../../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — In Progress.
+- [T-005 — Two-task IPC demo](../../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — Done (2026-04-21).
 
 ### Phase A closure
 

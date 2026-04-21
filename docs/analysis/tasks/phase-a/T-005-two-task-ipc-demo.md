@@ -2,7 +2,7 @@
 
 - **Phase:** A
 - **Milestone:** A6 — Two-task IPC demo
-- **Status:** In Progress
+- **Status:** Done
 - **Created:** 2026-04-21
 - **Author:** @cemililik
 - **Dependencies:** T-004 — Cooperative scheduler (Done)
@@ -102,3 +102,4 @@ The guide and review documents are written after the QEMU smoke confirms the tra
 | Date | Reviewer | Note |
 |------|----------|------|
 | 2026-04-21 | @cemililik | opened; T-004 Done → T-005 In Progress; A6 work begins. |
+| 2026-04-21 | @cemililik | implementation complete; QEMU trace confirms IPC round-trip; guide, perf review, and business review committed. Status → Done. Phase A exit bar met. |

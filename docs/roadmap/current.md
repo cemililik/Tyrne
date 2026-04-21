@@ -4,14 +4,14 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 
 ---
 
-- **Active phase:** A — Kernel core on QEMU `virt`.
-- **Active milestone:** A6 — Two-task IPC demo.
-- **Active task:** [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — `In Progress` since 2026-04-21.
+- **Active phase:** B — next phase (not yet planned in detail).
+- **Active milestone:** Phase A complete; Phase B not yet opened.
+- **Active task:** none; Phase A closed 2026-04-21.
 - **Working branch:** `development`.
-- **Last completed milestone:** A5 — Cooperative scheduler and context switch, on 2026-04-21.
-- **Last completed task:** [T-004 — Cooperative scheduler](../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) — `Done` 2026-04-21.
-- **Last review:** [A2 completion business review](../analysis/reviews/business-reviews/2026-04-21-A2-completion.md) — 2026-04-21.
-- **Next review trigger:** code + security review before A6 work lands; A4/A5/A6 business review at Phase A closure.
+- **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.**
+- **Last completed task:** [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — `Done` 2026-04-21.
+- **Last review:** [A6 completion / Phase A retrospective](../analysis/reviews/business-reviews/2026-04-21-A6-completion.md) — 2026-04-21.
+- **Next milestone trigger:** open Phase B plan — first tasks are timer initialisation, raw-pointer API refactor (UNSAFE-2026-0012), and MMU setup.
 
 ## Notes
 

@@ -138,7 +138,7 @@ impl Cpu for QemuVirtCpu {
 /// - General-purpose: x19–x28, x29 (fp), x30 (lr), sp
 /// - SIMD/FP: the lower 64 bits of v8–v15 (i.e. d8–d15)
 ///
-/// d8–d15 must be saved whenever CPACR_EL1.FPEN is non-zero, because the
+/// d8–d15 must be saved whenever `CPACR_EL1.FPEN` is non-zero, because the
 /// compiler may allocate those registers for any kernel-level task and will
 /// not emit callee-save spills across a cooperative yield.
 ///
@@ -211,28 +211,26 @@ unsafe extern "C" fn context_switch_asm(
         "stp x23, x24, [x0,  #32]",
         "stp x25, x26, [x0,  #48]",
         "stp x27, x28, [x0,  #64]",
-        "stp x29, x30, [x0,  #80]",    // fp, lr
+        "stp x29, x30, [x0,  #80]", // fp, lr
         "mov x8,  sp",
-        "str x8,  [x0,  #96]",          // sp
+        "str x8,  [x0,  #96]", // sp
         "stp d8,  d9,  [x0,  #104]",
         "stp d10, d11, [x0,  #120]",
         "stp d12, d13, [x0,  #136]",
         "stp d14, d15, [x0,  #152]",
-
         // ── restore next (x1) ─────────────────────────────────────────
         "ldp d14, d15, [x1,  #152]",
         "ldp d12, d13, [x1,  #136]",
         "ldp d10, d11, [x1,  #120]",
         "ldp d8,  d9,  [x1,  #104]",
-        "ldr x8,  [x1,  #96]",          // sp
+        "ldr x8,  [x1,  #96]", // sp
         "mov sp,  x8",
-        "ldp x29, x30, [x1,  #80]",    // fp, lr
+        "ldp x29, x30, [x1,  #80]", // fp, lr
         "ldp x27, x28, [x1,  #64]",
         "ldp x25, x26, [x1,  #48]",
         "ldp x23, x24, [x1,  #32]",
         "ldp x21, x22, [x1,  #16]",
         "ldp x19, x20, [x1,   #0]",
-
         // ret jumps to the lr just loaded from `next`.
         // On a task's first run that lr was set by init_context to the
         // entry function; on subsequent runs it is the return address

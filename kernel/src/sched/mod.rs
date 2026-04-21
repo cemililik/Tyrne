@@ -632,12 +632,8 @@ mod tests {
         // SAFETY: stacks are 512 bytes and 16-byte aligned (AlignedStack repr).
         // FakeCpu::init_context is a no-op so the stacks are never actually used.
         unsafe {
-            sched
-                .add_task(&cpu, h0, spin_entry(), s0.top())
-                .unwrap();
-            sched
-                .add_task(&cpu, h1, spin_entry(), s1.top())
-                .unwrap();
+            sched.add_task(&cpu, h0, spin_entry(), s0.top()).unwrap();
+            sched.add_task(&cpu, h1, spin_entry(), s1.top()).unwrap();
         }
         // Simulate h0 running: it was dequeued when it started running.
         sched.ready.dequeue(); // removes h0 (head of queue)

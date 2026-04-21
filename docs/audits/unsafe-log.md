@@ -143,16 +143,16 @@ Entries are **append-only**. When an `unsafe` region is removed, its entry gains
 - **Reviewed by:** @cemililik.
 - **Status:** Active.
 
-### UNSAFE-2026-0012 — `&mut Scheduler` aliasing across cooperative yield
+### UNSAFE-2026-0012 — `&mut` aliasing on shared kernel state across cooperative yields
 
-- **Introduced:** 2026-04-21, T-004 / A5 BSP bootstrap.
-- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `task_a`, `task_b` — `assume_init_mut().yield_now(...)` call.
-- **Operation:** `(*SCHED.0.get()).assume_init_mut()` creates a `&mut Scheduler` that is technically alive across the cooperative context switch inside `yield_now`. When another task calls the same expression, a second `&mut Scheduler` is derived from the same `UnsafeCell`, creating aliased mutable references — undefined behaviour under Rust's strict aliasing rules.
+- **Introduced:** 2026-04-21, T-004 / A5 BSP bootstrap. Extended in T-005 / A6 to cover IPC statics.
+- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `task_a`, `task_b` — every `assume_init_mut()` call on `SCHED`, `EP_ARENA`, `IPC_QUEUES`, `TABLE_A`, and `TABLE_B`.
+- **Operation:** In A5, `(*SCHED.0.get()).assume_init_mut()` creates a `&mut Scheduler` that is technically alive across the cooperative context switch inside `yield_now` and `ipc_recv_and_yield`. In A6, the pattern extends to `EP_ARENA`, `IPC_QUEUES`, and the per-task capability tables: `ipc_recv_and_yield` holds `&mut` references to all three across the `cpu.context_switch` call. When the suspended task later resumes, the same statics are accessed again from the same stack frame. When the other task runs concurrently (within the context switch), it derives its own `&mut` references to `SCHED`, `EP_ARENA`, and `IPC_QUEUES` from the same `UnsafeCell`s — technically creating aliased mutable references, which is undefined behaviour under Rust's strict aliasing rules.
 - **Invariants relied on:**
-  - Single-core cooperative model: no two tasks execute simultaneously; there is no concurrent access to the Scheduler's memory.
-  - The `&mut` is not bound to a named variable; its scope is limited to the single `yield_now` call expression. After `yield_now` suspends, the scheduler's data is not modified by the suspended frame's stack.
-  - `yield_now` does not read `self` after the `cpu.context_switch` call within its body (only the `IrqGuard` drop and `Ok(())` return occur, both stack-local).
-  - LLVM's context switch (`naked_asm!` with `ret`) acts as a full memory barrier, preventing the compiler from caching or reordering accesses across the switch point.
-- **Rejected alternatives:** A raw-pointer API (`yield_raw(*mut Scheduler, &C)`) would eliminate the aliasing entirely by ensuring no `&mut Scheduler` is live across the context switch. This refactor is the correct long-term fix but requires restructuring the BSP task functions and potentially the Scheduler API; it is deferred to a future ADR. A `Mutex<Scheduler>` would introduce lock overhead and a blocking primitive before the kernel has blocking support.
+  - Single-core cooperative model: no two tasks execute simultaneously; there is no concurrent memory access to any of these statics.
+  - The references on a suspended task's stack frame are not accessed while that task is suspended (the context-switch `naked_asm!` barrier prevents the compiler from observing or reordering accesses across the switch point).
+  - `ipc_recv_and_yield` does not access `ep_arena`, `queues`, or `caller_table` between the `cpu.context_switch` call (suspend) and the second `ipc_recv` call (resume) — the only intervening code is the `IrqGuard` drop and some `TaskState` manipulation on `self`, all stack-local or on the `Scheduler` struct which is owned by `self`.
+  - The per-task `TABLE_A` / `TABLE_B` statics are disjoint: tasks never access each other's tables, so those never alias between concurrent frames.
+- **Rejected alternatives:** A raw-pointer API would eliminate the aliasing entirely. This refactor is the correct long-term fix but requires restructuring the BSP task functions and potentially the Scheduler API; it is deferred to a future ADR. A `Mutex<Scheduler>` would introduce lock overhead and a blocking primitive before the kernel has blocking support.
 - **Reviewed by:** @cemililik.
 - **Status:** Active — to be resolved by raw-pointer API refactor (future ADR).

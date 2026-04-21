@@ -7,10 +7,10 @@
 //! This crate is the bootable binary: it provides the reset vector
 //! (`_start`, assembled from `boot.s` via [`core::arch::global_asm!`]),
 //! the Rust entry `kernel_entry`, a panic handler, and the hardware
-//! implementations of the HAL traits. The A5 milestone adds the
-//! [`cpu::QemuVirtCpu`] implementation of [`umbrix_hal::Cpu`] and
-//! [`umbrix_hal::ContextSwitch`], and a two-task cooperative scheduler
-//! smoke test.
+//! implementations of the HAL traits. The A6 milestone demonstrates an
+//! end-to-end IPC round trip: Task B registers as receiver on a capability-
+//! gated endpoint, Task A sends a message, B replies, and A receives the
+//! reply — proving the Phase A exit bar.
 //!
 //! The boot flow is documented in [`docs/architecture/boot.md`][boot-doc]
 //! and the memory-layout decisions in [ADR-0012][adr-0012].
@@ -32,6 +32,9 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
 use umbrix_hal::{Console, FmtWriter};
+use umbrix_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
+use umbrix_kernel::ipc::{IpcQueues, Message, RecvOutcome};
+use umbrix_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
 use umbrix_kernel::obj::task::{create_task, Task, TaskArena};
 use umbrix_kernel::sched::Scheduler;
 
@@ -53,10 +56,10 @@ const PL011_UART_BASE: usize = 0x0900_0000;
 // ─── StaticCell ───────────────────────────────────────────────────────────────
 //
 // Task entry functions are `fn() -> !` — they cannot capture environment.
-// The scheduler, CPU, and console are stored as immutable statics wrapping
-// `UnsafeCell<MaybeUninit<T>>` so all tasks can reach them without `static mut`.
-// All accesses remain `unsafe`; safety is ensured by the single-core,
-// cooperative execution model (no two tasks run simultaneously).
+// The scheduler, CPU, console, and IPC infrastructure are stored as immutable
+// statics wrapping `UnsafeCell<MaybeUninit<T>>` so all tasks can reach them
+// without `static mut`. All accesses remain `unsafe`; safety is ensured by the
+// single-core, cooperative execution model (no two tasks run simultaneously).
 
 /// `Sync` wrapper around `UnsafeCell<MaybeUninit<T>>` for write-once globals.
 ///
@@ -71,7 +74,7 @@ struct StaticCell<T>(UnsafeCell<MaybeUninit<T>>);
 // Rejected alternatives: `Mutex` / `RwLock` require a runtime (heap, OS) or
 // a spin implementation that itself relies on `unsafe` and adds overhead
 // inappropriate for a bare-metal `static`. `OnceCell` / `LazyCell` from
-// `core` are not available in `no_std` without an allocator in A5.
+// `core` are not available in `no_std` without an allocator in A5/A6.
 // Audit: UNSAFE-2026-0010.
 unsafe impl<T> Sync for StaticCell<T> {}
 
@@ -123,89 +126,197 @@ static TASK_A_STACK: TaskStack = TaskStack::new();
 /// Stack for task B.
 static TASK_B_STACK: TaskStack = TaskStack::new();
 
+// ─── Global kernel state ──────────────────────────────────────────────────────
+
 /// The cooperative scheduler, concrete over the QEMU BSP CPU type.
-///
-/// Written once in `kernel_entry` before `start()`. Tasks access it via
-/// `SCHED` to yield control cooperatively.
 static SCHED: StaticCell<Scheduler<QemuVirtCpu>> = StaticCell::new();
 
-/// The CPU handle — needed by `yield_now` to mask IRQs during the switch.
+/// The CPU handle — needed by `yield_now` and IPC bridge to mask IRQs.
 static CPU: StaticCell<QemuVirtCpu> = StaticCell::new();
 
 /// The PL011 console — used by task functions for diagnostic output.
 static CONSOLE: StaticCell<Pl011Uart> = StaticCell::new();
 
-// ─── Task A ───────────────────────────────────────────────────────────────────
+// ─── IPC infrastructure ───────────────────────────────────────────────────────
 
-/// First smoke-test task. Prints its iteration index and yields three times,
-/// then spins. The alternating output with task B confirms context switching.
-fn task_a() -> ! {
-    for i in 0u32..3 {
-        // SAFETY: CONSOLE is fully initialised in `kernel_entry` before
-        // `start()` transfers control; no other task writes concurrently
-        // (cooperative scheduling). Audit: UNSAFE-2026-0010.
-        let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
-        let mut w = FmtWriter(console);
-        let _ = writeln!(w, "umbrix: task A — iteration {i}");
+/// Endpoint arena — the kernel-object pool backing the IPC demo endpoint.
+static EP_ARENA: StaticCell<EndpointArena> = StaticCell::new();
 
-        // SAFETY: SCHED and CPU are both fully initialised before `start()`.
-        //
-        // Aliasing note (Audit: UNSAFE-2026-0012): `assume_init_mut` creates
-        // a `&mut Scheduler` that is technically alive when `yield_now`
-        // suspends this task and another task creates its own `&mut Scheduler`.
-        // This relaxes Rust's strict aliasing rules. It is safe under the
-        // single-core cooperative model because:
-        //   (a) no two tasks execute simultaneously — there is no concurrent
-        //       memory access;
-        //   (b) `yield_now` does not observe `self` after the context switch
-        //       returns (the only post-switch code is the `IrqGuard` drop and
-        //       the `Ok(())` return, both of which operate on stack locals
-        //       within yield_now's own frame, not on `self`).
-        // The `&mut` is not bound to a named variable so its scope is limited
-        // to the duration of the `yield_now` call expression.
-        // A raw-pointer API would eliminate the aliasing entirely; that refactor
-        // is deferred to a future ADR. Audit: UNSAFE-2026-0010.
-        //
-        // yield_now returns Err only when current == None, which cannot happen
-        // once the scheduler has started.
-        unsafe {
-            let _ = (*SCHED.0.get())
-                .assume_init_mut()
-                .yield_now((*CPU.0.get()).assume_init_ref());
-        }
-    }
+/// IPC queue state for all endpoint slots.
+static IPC_QUEUES: StaticCell<IpcQueues> = StaticCell::new();
 
-    // SAFETY: CONSOLE is fully initialised; no concurrent access.
+/// Task A's capability table — contains Task A's cap on the demo endpoint.
+static TABLE_A: StaticCell<CapabilityTable> = StaticCell::new();
+
+/// Task B's capability table — contains Task B's cap on the demo endpoint.
+static TABLE_B: StaticCell<CapabilityTable> = StaticCell::new();
+
+/// Task A's endpoint capability handle (index into `TABLE_A`).
+static EP_CAP_A: StaticCell<CapHandle> = StaticCell::new();
+
+/// Task B's endpoint capability handle (index into `TABLE_B`).
+static EP_CAP_B: StaticCell<CapHandle> = StaticCell::new();
+
+// ─── Task B ───────────────────────────────────────────────────────────────────
+
+/// IPC demo — receiver side. Registers as receiver on the endpoint, waits for
+/// Task A's message, then sends a reply. Yields cooperatively before spinning.
+fn task_b() -> ! {
+    // SAFETY: CONSOLE is fully initialised in `kernel_entry` before `start()`;
+    // single-core cooperative scheduling prevents concurrent access.
     // Audit: UNSAFE-2026-0010.
     let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
-    console.write_bytes(b"umbrix: task A done; spinning\n");
+    let mut w = FmtWriter(console);
+    let _ = writeln!(w, "umbrix: task B \u{2014} waiting for IPC");
+
+    // Register as receiver on the endpoint. If no sender is ready, blocks and
+    // yields to Task A. Resumes when Task A delivers a message.
+    //
+    // SAFETY (aliasing): `assume_init_mut` on SCHED, EP_ARENA, IPC_QUEUES, and
+    // TABLE_B creates `&mut` references that are alive across the cooperative
+    // context switch inside `ipc_recv_and_yield`. When Task A runs during the
+    // suspension, it creates its own `&mut` references to SCHED, EP_ARENA, and
+    // IPC_QUEUES from the same UnsafeCells — technically aliasing mutable
+    // references. This is safe under the single-core cooperative invariant
+    // (no two tasks execute simultaneously) and the same reasoning documented
+    // in UNSAFE-2026-0012: the suspended task's stack frame does not access any
+    // of these references after the context switch returns, and the compiler
+    // cannot observe the aliasing across the assembly context-switch barrier.
+    // SAFETY: see aliasing note above. Audit: UNSAFE-2026-0012.
+    let recv_outcome = unsafe {
+        (*SCHED.0.get())
+            .assume_init_mut()
+            .ipc_recv_and_yield(
+                (*CPU.0.get()).assume_init_ref(),
+                (*EP_ARENA.0.get()).assume_init_mut(),
+                (*IPC_QUEUES.0.get()).assume_init_mut(),
+                (*TABLE_B.0.get()).assume_init_mut(),
+                *(*EP_CAP_B.0.get()).assume_init_ref(),
+            )
+            .expect("task B: ipc_recv failed")
+    };
+
+    let RecvOutcome::Received { msg, .. } = recv_outcome else {
+        panic!("task B: expected Received outcome from ipc_recv_and_yield")
+    };
+
+    // SAFETY: CONSOLE initialised in kernel_entry; single-core cooperative. Audit: UNSAFE-2026-0010.
+    let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
+    let mut w = FmtWriter(console);
+    let _ = writeln!(
+        w,
+        "umbrix: task B \u{2014} received IPC (label=0x{:x}); replying",
+        msg.label
+    );
+
+    // Send reply. Since Task A is in the ready queue (not yet blocked on recv),
+    // this transitions the endpoint to SendPending and returns Enqueued — no
+    // auto-yield. An explicit yield_now follows so Task A can collect the reply.
+    let reply = Message {
+        label: 0xBBBB,
+        params: [0; 3],
+    };
+    // SAFETY: same aliasing invariants as the ipc_recv_and_yield call above.
+    // Audit: UNSAFE-2026-0012.
+    unsafe {
+        (*SCHED.0.get())
+            .assume_init_mut()
+            .ipc_send_and_yield(
+                (*CPU.0.get()).assume_init_ref(),
+                (*EP_ARENA.0.get()).assume_init_mut(),
+                (*IPC_QUEUES.0.get()).assume_init_mut(),
+                (*TABLE_B.0.get()).assume_init_mut(),
+                *(*EP_CAP_B.0.get()).assume_init_ref(),
+                reply,
+                None,
+            )
+            .expect("task B: ipc_send reply failed");
+
+        // Yield explicitly so Task A can receive the reply that was just queued
+        // as SendPending. Without this yield, A's ipc_recv_and_yield would never
+        // run (cooperative scheduling; B never blocks again after the send).
+        // yield_now returns Err only when current == None, which cannot happen
+        // once the scheduler has started.
+        let _ = (*SCHED.0.get())
+            .assume_init_mut()
+            .yield_now((*CPU.0.get()).assume_init_ref());
+    }
+
+    // SAFETY: CONSOLE initialised in kernel_entry; single-core cooperative. Audit: UNSAFE-2026-0010.
+    let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
+    console.write_bytes(b"umbrix: task B -- done; spinning\n");
     loop {
         core::hint::spin_loop();
     }
 }
 
-// ─── Task B ───────────────────────────────────────────────────────────────────
+// ─── Task A ───────────────────────────────────────────────────────────────────
 
-/// Second smoke-test task. Symmetric to task A.
-fn task_b() -> ! {
-    for i in 0u32..3 {
-        // SAFETY: same invariants as task_a. Audit: UNSAFE-2026-0010.
-        let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
-        let mut w = FmtWriter(console);
-        let _ = writeln!(w, "umbrix: task B — iteration {i}");
-
-        // SAFETY: same aliasing invariants as task_a. Audit: UNSAFE-2026-0012.
-        unsafe {
-            let _ = (*SCHED.0.get())
-                .assume_init_mut()
-                .yield_now((*CPU.0.get()).assume_init_ref());
-        }
-    }
-
-    // SAFETY: CONSOLE is fully initialised; no concurrent access.
+/// IPC demo — initiator side. Sends a message to Task B, then waits for
+/// the reply. On receiving the reply, prints the Phase A completion banner.
+fn task_a() -> ! {
+    // SAFETY: CONSOLE initialised in kernel_entry; single-core cooperative.
     // Audit: UNSAFE-2026-0010.
     let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
-    console.write_bytes(b"umbrix: task B done; spinning\n");
+    console.write_bytes(b"umbrix: task A -- sending IPC\n");
+
+    let msg = Message {
+        label: 0xAAAA,
+        params: [1, 2, 3],
+    };
+
+    // Send to Task B. Because the scheduler adds B before A, B has already
+    // called ipc_recv_and_yield and is in RecvWaiting state. The send delivers
+    // immediately (Delivered) and ipc_send_and_yield yields to B.
+    //
+    // SAFETY: same aliasing invariants as task_b. Audit: UNSAFE-2026-0012.
+    unsafe {
+        (*SCHED.0.get())
+            .assume_init_mut()
+            .ipc_send_and_yield(
+                (*CPU.0.get()).assume_init_ref(),
+                (*EP_ARENA.0.get()).assume_init_mut(),
+                (*IPC_QUEUES.0.get()).assume_init_mut(),
+                (*TABLE_A.0.get()).assume_init_mut(),
+                *(*EP_CAP_A.0.get()).assume_init_ref(),
+                msg,
+                None,
+            )
+            .expect("task A: ipc_send failed");
+    }
+
+    // Task A resumes here after B delivered the reply. The endpoint is now in
+    // SendPending (B's reply). Calling ipc_recv_and_yield collects it immediately
+    // without blocking (SendPending → Received → Idle).
+    //
+    // SAFETY: same aliasing invariants as task_b's ipc_recv_and_yield call. Audit: UNSAFE-2026-0012.
+    let reply_outcome = unsafe {
+        (*SCHED.0.get())
+            .assume_init_mut()
+            .ipc_recv_and_yield(
+                (*CPU.0.get()).assume_init_ref(),
+                (*EP_ARENA.0.get()).assume_init_mut(),
+                (*IPC_QUEUES.0.get()).assume_init_mut(),
+                (*TABLE_A.0.get()).assume_init_mut(),
+                *(*EP_CAP_A.0.get()).assume_init_ref(),
+            )
+            .expect("task A: ipc_recv (reply) failed")
+    };
+
+    let RecvOutcome::Received { msg: reply, .. } = reply_outcome else {
+        panic!("task A: expected Received outcome from reply ipc_recv_and_yield")
+    };
+
+    // SAFETY: CONSOLE initialised in kernel_entry; single-core cooperative. Audit: UNSAFE-2026-0010.
+    let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
+    let mut w = FmtWriter(console);
+    let _ = writeln!(
+        w,
+        "umbrix: task A \u{2014} received reply (label=0x{:x}); done",
+        reply.label
+    );
+    console.write_bytes(b"umbrix: all tasks complete\n");
+
     loop {
         core::hint::spin_loop();
     }
@@ -218,27 +329,27 @@ global_asm!(include_str!("boot.s"));
 
 /// First Rust entry after the assembly stub.
 ///
-/// Initialises the console, CPU, and cooperative scheduler, registers two
-/// smoke-test tasks, then transfers control to the scheduler. This function
-/// never returns — the BSP reset stub halts defensively if it somehow does.
+/// Sets up the console, CPU, kernel objects, capability tables, IPC
+/// infrastructure, and cooperative scheduler. Registers Task B before Task A
+/// so that B runs first and registers as IPC receiver before A sends.
+/// Transfers control to the scheduler. This function never returns.
 ///
 /// # Panics
 ///
-/// Panics if the `TaskArena` cannot accommodate two tasks. The arena capacity
-/// is 16, so in practice this branch is unreachable.
+/// Panics if any kernel-object allocation or capability-table operation fails.
+/// All capacities are statically bounded and the demo uses far fewer objects
+/// than the limits, so in practice none of these branches are reachable.
 #[unsafe(no_mangle)]
 pub extern "C" fn kernel_entry() -> ! {
     // ── Hardware setup ────────────────────────────────────────────────────────
 
     // SAFETY: 0x0900_0000 is the well-known QEMU virt PL011 UART MMIO
-    // base, exclusively owned by this kernel in v1 (single-core, no
-    // concurrent drivers). Audit: UNSAFE-2026-0001.
+    // base, exclusively owned by this kernel in v1. Audit: UNSAFE-2026-0001.
     let console = unsafe { Pl011Uart::new(PL011_UART_BASE) };
     // SAFETY: constructed exactly once in kernel_entry; single-core v1.
     // See QemuVirtCpu::new # Safety. Audit: UNSAFE-2026-0006.
     let cpu = unsafe { QemuVirtCpu::new() };
 
-    // Publish the console and CPU before any task can run.
     // SAFETY: single-core; no concurrent writer exists before `start()`.
     // Audit: UNSAFE-2026-0001.
     unsafe {
@@ -246,10 +357,9 @@ pub extern "C" fn kernel_entry() -> ! {
         (*CPU.0.get()).write(cpu);
     }
 
-    // SAFETY: both cells were initialised in the block above.
-    // Audit: UNSAFE-2026-0001.
+    // SAFETY: CONSOLE was written in the block above. Audit: UNSAFE-2026-0001.
     let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
-    // SAFETY: CPU cell was initialised above. Audit: UNSAFE-2026-0001.
+    // SAFETY: CPU was written in the block above. Audit: UNSAFE-2026-0001.
     let cpu = unsafe { (*CPU.0.get()).assume_init_ref() };
 
     console.write_bytes(b"umbrix: hello from kernel_main\n");
@@ -257,27 +367,62 @@ pub extern "C" fn kernel_entry() -> ! {
     // ── Kernel-object setup ───────────────────────────────────────────────────
 
     let mut arena = TaskArena::default();
-    // Infallible: arena capacity is 16 and we allocate 2 tasks.
-    let handle_a = create_task(&mut arena, Task::new(0)).ok().unwrap();
-    let handle_b = create_task(&mut arena, Task::new(1)).ok().unwrap();
+    let handle_a = create_task(&mut arena, Task::new(0)).expect("create_task A failed");
+    let handle_b = create_task(&mut arena, Task::new(1)).expect("create_task B failed");
+
+    // ── IPC infrastructure ────────────────────────────────────────────────────
+
+    let mut ep_arena = EndpointArena::default();
+    let ep_handle =
+        create_endpoint(&mut ep_arena, Endpoint::new(0)).expect("create_endpoint failed");
+
+    // Both tasks get SEND | RECV so each can both send and receive on the
+    // same endpoint — Task A sends the initial message and receives the reply;
+    // Task B receives the initial message and sends the reply.
+    let ep_rights = CapRights::SEND | CapRights::RECV | CapRights::DUPLICATE;
+
+    let mut table_a = CapabilityTable::new();
+    let mut table_b = CapabilityTable::new();
+
+    let cap_a = Capability::new(ep_rights, CapObject::Endpoint(ep_handle));
+    let cap_b = Capability::new(ep_rights, CapObject::Endpoint(ep_handle));
+
+    let ep_cap_a = table_a
+        .insert_root(cap_a)
+        .expect("table A: insert_root failed");
+    let ep_cap_b = table_b
+        .insert_root(cap_b)
+        .expect("table B: insert_root failed");
+
+    // Publish IPC state before the scheduler starts.
+    // SAFETY: single-core; no task is running yet. Audit: UNSAFE-2026-0001.
+    unsafe {
+        (*EP_ARENA.0.get()).write(ep_arena);
+        (*IPC_QUEUES.0.get()).write(IpcQueues::new());
+        (*TABLE_A.0.get()).write(table_a);
+        (*TABLE_B.0.get()).write(table_b);
+        (*EP_CAP_A.0.get()).write(ep_cap_a);
+        (*EP_CAP_B.0.get()).write(ep_cap_b);
+    }
 
     // ── Scheduler setup ───────────────────────────────────────────────────────
 
     let mut sched = Scheduler::<QemuVirtCpu>::new();
 
-    // SAFETY: add_task calls init_context; the stack tops are 16-byte aligned
+    // Task B is added FIRST so the scheduler runs B before A. B calls
+    // ipc_recv_and_yield and enters RecvWaiting; only then does A call
+    // ipc_send_and_yield, ensuring Delivered (not Enqueued) on the first send.
+    //
+    // SAFETY: add_task calls init_context; stack tops are 16-byte aligned
     // (guaranteed by TaskStack's repr) and remain valid for the process
     // lifetime. Entry functions are `fn() -> !`. Audit: UNSAFE-2026-0009.
-    //
-    // Stack tops are computed inline to avoid introducing two local bindings
-    // with similar names that would trigger the `similar_names` lint.
     unsafe {
-        sched
-            .add_task(cpu, handle_a, task_a, TASK_A_STACK.top())
-            .expect("add_task A failed: queue full or arena exhausted");
         sched
             .add_task(cpu, handle_b, task_b, TASK_B_STACK.top())
             .expect("add_task B failed: queue full or arena exhausted");
+        sched
+            .add_task(cpu, handle_a, task_a, TASK_A_STACK.top())
+            .expect("add_task A failed: queue full or arena exhausted");
     }
 
     // Publish the scheduler before transferring control.
@@ -288,14 +433,11 @@ pub extern "C" fn kernel_entry() -> ! {
 
     console.write_bytes(b"umbrix: starting cooperative scheduler\n");
 
-    // Transfer control to the first ready task. Does not return.
-    // SAFETY: SCHED is fully initialised; the first task's context was set
-    // up by add_task above. Audit: UNSAFE-2026-0008.
+    // Transfer control to Task B (the first ready task). Does not return.
+    // SAFETY: SCHED is fully initialised; contexts set up by add_task.
+    // Audit: UNSAFE-2026-0008.
     unsafe { (*SCHED.0.get()).assume_init_mut() }.start(cpu);
 
-    // Unreachable — start() switches away and the bootstrap context is never
-    // restored. The BSP reset stub halts the core if this line is somehow
-    // reached, which is a kernel bug.
     loop {
         core::hint::spin_loop();
     }
@@ -306,11 +448,9 @@ pub extern "C" fn kernel_entry() -> ! {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     // SAFETY: constructing a fresh Pl011Uart in the panic path is
-    // best-effort diagnostic output. If the original instance is still
-    // reachable in some caller, writes may interleave at the FIFO —
-    // acceptable per the Console contract (ADR-0007). The UART MMIO
-    // window itself is the same one kernel_entry uses.
-    // Audit: UNSAFE-2026-0002.
+    // best-effort diagnostic output. Writes may interleave if the original
+    // instance is still reachable — acceptable per the Console contract
+    // (ADR-0007). Audit: UNSAFE-2026-0002.
     let console = unsafe { Pl011Uart::new(PL011_UART_BASE) };
 
     console.write_bytes(b"\n!! umbrix panic !!\n");

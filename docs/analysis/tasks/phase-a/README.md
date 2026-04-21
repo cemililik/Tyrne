@@ -10,6 +10,6 @@ Tasks belonging to [Phase A — Kernel core on QEMU `virt`](../../../roadmap/pha
 | [T-002](T-002-kernel-object-storage.md) | Kernel object storage foundation | A3 | Done |
 | [T-003](T-003-ipc-primitives.md) | IPC primitives | A4 | Done |
 | [T-004](T-004-cooperative-scheduler.md) | Cooperative scheduler | A5 | Done (2026-04-21) |
-| [T-005](T-005-two-task-ipc-demo.md) | Two-task IPC demo | A6 | In Progress |
+| [T-005](T-005-two-task-ipc-demo.md) | Two-task IPC demo | A6 | Done (2026-04-21) |
 
 Tasks are added here as they become active. See [`../../../roadmap/phases/phase-a.md`](../../../roadmap/phases/phase-a.md) for the full phase plan.
