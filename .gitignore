@@ -47,3 +47,6 @@ __pycache__/
 
 # Local-only technical analyses (reading notes on external codebases)
 docs/analysis/technical-analysis/
+
+# Local-only transient workbooks (follow-up ledgers, drafts, scratch notes)
+docs/analysis/temp/

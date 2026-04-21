@@ -4,20 +4,23 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 
 ---
 
-- **Active phase:** B — next phase (not yet planned in detail).
-- **Active milestone:** Phase A complete; Phase B not yet opened.
-- **Active task:** none; Phase A closed 2026-04-21.
+- **Active phase:** B — opened 2026-04-21 after Phase-A reviews landed; first milestone is B0 (Phase A exit hygiene).
+- **Active milestone:** B0 — Phase A exit hygiene. Contains the three Phase-B blockers surfaced by the 2026-04-21 security review (raw-pointer scheduler API, idle task + typed deadlock, cross-table revocation policy) plus the architecture-doc follow-ups, timer initialisation, and the scheduler/IPC hardening bundle.
+- **Active task:** none in progress. Next task to open is **T-006 — Raw-pointer scheduler API refactor** (ADR-0021 writing is the first step inside that task).
 - **Working branch:** `development`.
 - **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.**
 - **Last completed task:** [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — `Done` 2026-04-21.
-- **Last review:** [A6 completion / Phase A retrospective](../analysis/reviews/business-reviews/2026-04-21-A6-completion.md) — 2026-04-21.
-- **Next milestone trigger:** open Phase B plan — first tasks are timer initialisation, raw-pointer API refactor (UNSAFE-2026-0012), and MMU setup.
+- **Last reviews (2026-04-21):**
+  - [A6 completion / Phase A retrospective](../analysis/reviews/business-reviews/2026-04-21-A6-completion.md)
+  - [Code review — Umbrix → Phase A exit](../analysis/reviews/code-reviews/2026-04-21-umbrix-to-phase-a.md) — Approve (4 non-blocking follow-ups absorbed into B0)
+  - [Security review — Umbrix → Phase A exit](../analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md) — Changes requested (3 Phase-B blockers absorbed into B0)
+  - [A6 baseline performance review](../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md) — baseline-only; full hypothesis-driven cycle blocked on B0 timer initialisation.
+- **Next review trigger:** B0 closure — a business review once ADR-0021..0023 are Accepted and the B0 tasks (T-006..T-011) are all Done.
 
 ## Notes
 
-- The capability subsystem (T-001), kernel-object subsystem (T-002), and IPC-primitive subsystem (T-003) form the Phase A stack. All three shipped with zero `unsafe` and no heap.
-- [ADR-0014](../decisions/0014-capability-representation.md), [ADR-0016](../decisions/0016-kernel-object-storage.md), and [ADR-0017](../decisions/0017-ipc-primitive-set.md) all Accepted.
-- T-003 (A4) delivered `ipc_send` / `ipc_recv` / `ipc_notify` with generation-tracked `IpcQueues`, atomic capability transfer, and TRANSFER-right enforcement. 64 host tests green; status → Done 2026-04-21.
-- T-004 (A5) delivered cooperative context switch (`#[unsafe(naked)]` aarch64 asm), `ContextSwitch` HAL trait, `Scheduler<C>` with `yield_now`, and a QEMU smoke test showing two tasks alternating output across 3 iterations. 75 host tests green; QEMU smoke confirmed 2026-04-21. Status → Done 2026-04-21.
-- Three implementation bugs required fixing in A5: IrqGuard fat-pointer vtable corruption → generic `IrqGuard<C: Cpu>`; CPACR_EL1.FPEN not initialised → NEON trap at EL1; context_switch_asm compiler prologue corrupted saved sp → `#[unsafe(naked)]`.
+- **Phase A stack closed cleanly.** T-001 (caps), T-002 (kernel objects), T-003 (IPC), T-004 (scheduler + context switch), T-005 (IPC demo) all Done. 109 host tests green; QEMU smoke verified. 20 ADRs Accepted (0018 deferred by design). 12 audited `unsafe` entries.
+- **Phase-A reviews produced 3 Phase-B blockers and 13 non-blocking tracking items.** All of them are now mapped to a specific Phase B milestone in [`phases/phase-b.md`](phases/phase-b.md) — none are "open follow-ups sitting in a ledger". Items that need a concrete decision during Phase B are marked with 🚩 in the phase plan and collected under its *Open questions* section.
+- **ADR numbering shifted.** The pre-review phase-b.md reserved ADR-0021..0026 for EL-drop / MMU / userspace. Those are now ADR-0024..0029; the fresh ADR-0021..0023 claim the review blockers. Numbers remain tentative per ADR-0013 (final number assigned at write-time).
+- **Phase-A-era `unsafe` audit status:** UNSAFE-2026-0001..0011 Active (sound under v1 invariants). UNSAFE-2026-0012 Active → to be Removed during T-006 (B0). See [`docs/audits/unsafe-log.md`](../audits/unsafe-log.md).
 - The maintainer updates this file when the active task changes. AI agents update it when they move a task to `In Progress` or `Done` via the [`start-task`](../../.claude/skills/start-task/SKILL.md) and [`conduct-review`](../../.claude/skills/conduct-review/SKILL.md) skills.
