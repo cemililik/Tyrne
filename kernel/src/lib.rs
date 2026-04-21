@@ -22,9 +22,12 @@
 //!   arenas holding the concrete entities that capabilities name.
 //! - [`cap`] — capability subsystem (Phase A2 / [T-001]), the substrate every
 //!   later subsystem refers through for authority.
+//! - [`ipc`] — IPC subsystem (Phase A4 / [T-003]): `send` / `recv` / `notify`
+//!   primitives over the A3 kernel objects, gated by capabilities.
 //!
 //! [T-001]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-001-capability-table-foundation.md
 //! [T-002]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-002-kernel-object-storage.md
+//! [T-003]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-003-ipc-primitives.md
 
 #![cfg_attr(not(test), no_std)]
 // Kernel-specific stricter lints on top of the workspace set.
@@ -37,6 +40,7 @@
 #![deny(clippy::float_arithmetic)]
 
 pub mod cap;
+pub mod ipc;
 pub mod obj;
 
 use umbrix_hal::Console;

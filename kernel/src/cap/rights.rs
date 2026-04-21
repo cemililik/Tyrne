@@ -24,8 +24,14 @@ impl CapRights {
     pub const DERIVE: Self = Self(1 << 1);
     /// The bearer may invoke `cap_revoke` on this capability to destroy its subtree.
     pub const REVOKE: Self = Self(1 << 2);
-    /// The bearer may include this capability in an IPC message (placeholder for A4).
+    /// The bearer may include this capability in an IPC message transfer.
     pub const TRANSFER: Self = Self(1 << 3);
+    /// The bearer may call `ipc_send` targeting the endpoint this capability names.
+    pub const SEND: Self = Self(1 << 4);
+    /// The bearer may call `ipc_recv` on the endpoint this capability names.
+    pub const RECV: Self = Self(1 << 5);
+    /// The bearer may call `ipc_notify` on the notification this capability names.
+    pub const NOTIFY: Self = Self(1 << 6);
 
     /// Union of every bit defined by this version of the rights bitfield.
     ///
@@ -34,8 +40,15 @@ impl CapRights {
     /// through [`from_raw`][Self::from_raw], which silently masks reserved
     /// bits away so an untrusted caller cannot smuggle unknown rights past
     /// `contains` / subset checks.
-    pub const KNOWN_BITS: Self =
-        Self(Self::DUPLICATE.0 | Self::DERIVE.0 | Self::REVOKE.0 | Self::TRANSFER.0);
+    pub const KNOWN_BITS: Self = Self(
+        Self::DUPLICATE.0
+            | Self::DERIVE.0
+            | Self::REVOKE.0
+            | Self::TRANSFER.0
+            | Self::SEND.0
+            | Self::RECV.0
+            | Self::NOTIFY.0,
+    );
 
     /// Construct an empty flag set.
     #[must_use]

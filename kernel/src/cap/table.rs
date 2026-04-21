@@ -429,6 +429,51 @@ impl CapabilityTable {
         Ok(())
     }
 
+    /// Remove the capability at `handle` from this table and return it,
+    /// transferring ownership to the caller. Behaves like [`cap_drop`] but
+    /// gives the caller the capability value instead of discarding it.
+    ///
+    /// Used by the IPC layer ([`crate::ipc`]) to atomically move a capability
+    /// from a sender's table into an in-flight message during `ipc_send`.
+    ///
+    /// # Errors
+    ///
+    /// - [`CapError::InvalidHandle`] if `handle` is stale.
+    /// - [`CapError::HasChildren`] if the capability still has descendants;
+    ///   the caller must `cap_revoke` first.
+    pub fn cap_take(&mut self, handle: CapHandle) -> Result<Capability, CapError> {
+        let index = self.resolve_handle(handle)?;
+        let has_children = match &self.slots[index as usize].entry {
+            Some(entry) => entry.first_child.is_some(),
+            None => return Err(CapError::InvalidHandle),
+        };
+        if has_children {
+            return Err(CapError::HasChildren);
+        }
+        self.unlink_from_siblings(index)?;
+        // Take the SlotEntry out of the slot before bumping the generation.
+        let entry = self.slots[index as usize]
+            .entry
+            .take()
+            .ok_or(CapError::InvalidHandle)?;
+        // Free-slot bookkeeping (mirrors free_slot, but entry is already None).
+        let old_head = self.free_head;
+        self.free_head = Some(index);
+        self.slots[index as usize].generation =
+            self.slots[index as usize].generation.wrapping_add(1);
+        self.slots[index as usize].next_free = old_head;
+        Ok(entry.capability)
+    }
+
+    /// Return `true` when every slot in this table is occupied.
+    ///
+    /// Used by the IPC layer to pre-flight-check that a receiver's table has
+    /// room for a transferred capability before the transfer is committed.
+    #[must_use]
+    pub fn is_full(&self) -> bool {
+        self.free_head.is_none()
+    }
+
     /// Return the capability at `handle`, if the handle is still valid.
     ///
     /// # Errors
