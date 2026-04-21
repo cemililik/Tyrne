@@ -92,6 +92,46 @@ unsafe impl Send for PageFrame {}
 - **FFI at the kernel/HAL boundary.** Calls to assembly stubs or firmware services (PSCI, SMC).
 - **Intrinsics and inline assembly** that `cargo check` cannot reason about.
 
+### 5a. Context-switch functions must use `#[unsafe(naked)]`
+
+Any function whose asm body saves or restores the stack pointer (SP), or
+whose correctness depends on SP having the caller's exact value on entry,
+**must** be declared `#[unsafe(naked)]` and use `naked_asm!` as its sole
+body. Use `extern "C"` so arguments arrive in x0, x1, … per AAPCS64.
+
+**Why `#[inline(never)]` is not enough.** The compiler generates a standard
+function prologue (`stp x29, x30, [sp, #-N]!`) for every non-naked function,
+even when `#[inline(never)]` is set. This adjusts SP *before* inline asm
+runs. A context-switch routine that reads SP after the prologue saves the
+wrong value; on restore the caller's stack frame is misaligned by N bytes and
+its epilogue reads callee-saved registers from incorrect addresses.
+
+```rust
+// CORRECT — no prologue/epilogue; sp is exactly the caller's sp.
+#[unsafe(naked)]
+unsafe extern "C" fn context_switch_asm(
+    current: *mut TaskContext,
+    next: *const TaskContext,
+) {
+    naked_asm!(
+        "mov x8, sp",
+        "str x8, [x0, #96]",
+        // … save/restore …
+        "ret",
+    );
+}
+
+// WRONG — compiler adds stp x29,x30,[sp,#-16]! before the asm;
+// saved sp is 16 bytes too low.
+#[inline(never)]
+unsafe fn context_switch_asm_broken(…) {
+    unsafe { asm!("mov x8, sp", "str x8, [x0, #96]", …, options(nostack)); }
+}
+```
+
+This rule is documented in `docs/standards/bsp-boot-checklist.md` §6 with
+the diagnostic procedure.
+
 ### 6. Where `unsafe` is not permitted
 
 - **Ergonomic shortcuts.** Bypassing a borrow check because it is inconvenient.
