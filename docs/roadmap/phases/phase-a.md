@@ -178,6 +178,10 @@ Integration: the kernel runs a deterministic two-task scenario where Task A send
 - Business-review artifact exists.
 - Phase A exit bar met: two kernel tasks exchange IPC messages under capability control.
 
+### Tasks under A6
+
+- [T-005 — Two-task IPC demo](../../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — In Progress.
+
 ### Phase A closure
 
 When A6 is Done, run a full business review covering the whole phase. The review's output is the trigger for Phase B to become active.

@@ -6,7 +6,7 @@
 - **Created:** 2026-04-21
 - **Author:** @cemililik
 - **Dependencies:** T-003 — IPC primitives (Done)
-- **Informs:** T-005 (two-task IPC demo — A6)
+- **Informs:** [T-005 — Two-task IPC demo](T-005-two-task-ipc-demo.md) (A6)
 - **ADRs required:** ADR-0019 (Scheduler shape) — Accepted 2026-04-21; ADR-0020 (`Cpu` trait v2 / context-switch extension) — Accepted 2026-04-21.
 
 ---
