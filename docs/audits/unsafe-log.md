@@ -154,6 +154,47 @@ Entries are **append-only**. When an `unsafe` region is removed, its entry gains
   - The references on a suspended task's stack frame are not accessed while that task is suspended (the context-switch `naked_asm!` barrier prevents the compiler from observing or reordering accesses across the switch point).
   - `ipc_recv_and_yield` does not access `ep_arena`, `queues`, or `caller_table` between the `cpu.context_switch` call (suspend) and the second `ipc_recv` call (resume) — the only intervening code is the `IrqGuard` drop and some `TaskState` manipulation on `self`, all stack-local or on the `Scheduler` struct which is owned by `self`.
   - The per-task `TABLE_A` / `TABLE_B` statics are disjoint: tasks never access each other's tables, so those never alias between concurrent frames.
-- **Rejected alternatives:** A raw-pointer API eliminates the aliasing entirely — see [ADR-0021](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) (Proposed 2026-04-22). A `Mutex<Scheduler>` would introduce lock overhead and a blocking primitive before the kernel has blocking support; Option B ("scheduler owns the arenas") and Options C/D are weighed in ADR-0021.
+- **Rejected alternatives:** A raw-pointer API eliminates the aliasing entirely — see [ADR-0021](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) (Accepted 2026-04-22). A `Mutex<Scheduler>` would introduce lock overhead and a blocking primitive before the kernel has blocking support; Option B ("scheduler owns the arenas") and Options C/D are weighed in ADR-0021.
 - **Reviewed by:** @cemililik.
-- **Status:** Active — resolution in progress via [T-006](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) under ADR-0021 (Proposed 2026-04-22). Will move to `Removed — <commit SHA>` when T-006 lands, or be explicitly narrowed if ADR-0021 identifies a residual window.
+- **Status:** Removed — 2026-04-22, commit `f9b72f8`. T-006 / ADR-0021 reshaped the scheduler's IPC bridge (`Scheduler::ipc_send_and_yield`, `Scheduler::ipc_recv_and_yield`, `Scheduler::yield_now`) from `&mut self` methods into `unsafe fn` free functions over `*mut Scheduler<C>` with `*mut` parameters for every arena and capability table. The BSP's `task_a` / `task_b` now produce each pointer via `StaticCell::as_mut_ptr()` (a plain `UnsafeCell::get().cast()` — see UNSAFE-2026-0013) and never materialise a `&mut` at the call site. Inside the kernel, momentary `&mut` references to `Scheduler`, arenas, queues, and tables live only inside narrow inner blocks that end strictly before `cpu.context_switch` and are reacquired strictly after it returns (see UNSAFE-2026-0014). No `&mut` is alive across the switch. Commit `f9b72f8` lands the refactor; commit `1746bc8` completes the related `TaskArena` migration to a `StaticCell` global. QEMU smoke trace matches the A6 baseline; all 109 host tests remain green.
+
+### UNSAFE-2026-0013 — `StaticCell::as_mut_ptr` BSP helper
+
+- **Introduced:** 2026-04-22, commit `f9b72f8` (T-006 / ADR-0021).
+- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — inherent `impl<T> StaticCell<T>` method `as_mut_ptr`.
+- **Operation:** Returns a `*mut T` pointer to the cell's storage via `self.0.get().cast::<T>()`. `UnsafeCell::get` returns `*mut MaybeUninit<T>`, which shares layout with `T`; the `.cast::<T>()` is a zero-cost reinterpretation. No borrow (`&` or `&mut`) is materialised at any point.
+- **Invariants relied on:**
+  - `MaybeUninit<T>` and `T` share layout (guaranteed by the standard library).
+  - The cell has been initialised by a prior `(*cell.0.get()).write(...)` before any caller dereferences the returned pointer. Every BSP call site runs `write` in `kernel_entry` before `Scheduler::start` — see `kernel_entry`'s publish blocks for each static cell.
+  - The caller does not use the returned pointer to create a `&mut T` that outlives a cooperative context switch. This is the ADR-0021 contract that governs every caller and is re-stated at each caller's `// SAFETY:` comment.
+- **Rejected alternatives:** Returning a `&mut T` is the bug UNSAFE-2026-0012 describes. Returning an `Option<*mut T>` with a runtime-checked initialised flag would add a per-access branch and violate the "zero-runtime-cost" framing of `StaticCell`'s use as a `static` construct. Exposing `self.0.get()` raw and letting callers `cast::<T>()` themselves would scatter the cast across every call site; centralising the cast makes the aliasing contract a single documented helper.
+- **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
+- **Status:** Active — this helper is the foundation on which UNSAFE-2026-0012's retirement rests.
+
+### UNSAFE-2026-0014 — Scheduler free-function momentary `&mut` pattern
+
+- **Introduced:** 2026-04-22, commit `f9b72f8` (T-006 / ADR-0021).
+- **Location:** [`kernel/src/sched/mod.rs`](../../kernel/src/sched/mod.rs) — inside the `unsafe fn` free functions `yield_now`, `ipc_send_and_yield`, `ipc_recv_and_yield` (the raw-pointer bridge introduced by ADR-0021). Also at the `create_task` call site in [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) `kernel_entry` where `TASK_ARENA` is accessed via a momentary `&mut`.
+- **Operation:** Dereferences a `*mut T` into a `&mut T` inside a narrow inner block. The block is structured so that the resulting `&mut` is dropped strictly before any `cpu.context_switch` call and is reacquired strictly after the switch returns. The pattern looks like:
+
+  ```rust
+  // SAFETY: caller contract — pointers valid, distinct, and exclusive
+  // for this block; the &muts do not cross cpu.context_switch.
+  let (…) = unsafe {
+      let s: &mut Scheduler<C> = &mut *sched;
+      let arena_ref: &mut EndpointArena = &mut *ep_arena;
+      // … pre-switch work …
+      (…)
+  }; // all &muts drop here
+  unsafe { /* context_switch uses raw pointer arithmetic on s.contexts */ }
+  // Phase 3: new &muts may be acquired in another inner block.
+  ```
+
+- **Invariants relied on:**
+  - Every `*mut` pointer passed in is valid, non-null, properly aligned, and refers to an exclusively-owned object for the block's duration (caller's responsibility, established by the shared safety contract at the top of the raw-pointer-bridge section).
+  - No `&mut` produced by this pattern is live across `cpu.context_switch`; the block's lexical scope ends before the switch site.
+  - The two cross-switch `&mut` borrows that **do** exist (`&mut (*sched).contexts[current_idx]` and `&(*sched).contexts[next_idx]`) are at provably distinct indices and therefore non-aliasing — already covered by UNSAFE-2026-0008.
+  - Interrupts are masked by `IrqGuard` for the duration of the switch.
+- **Rejected alternatives:** Extending the `&mut self` signatures is the hazard UNSAFE-2026-0012 describes; see ADR-0021 §Decision outcome. Using `NonNull<T>` instead of `*mut T` throughout would add a `NonNull::as_mut` call at every site and does not strengthen the aliasing contract (the caller already guarantees non-null via the shared safety contract). `core::ptr::addr_of_mut!` can avoid constructing an intermediate `&mut` to the parent scheduler when walking into `self.contexts`, but the context-switch call still uses the split-borrow idiom documented under UNSAFE-2026-0008; no net change.
+- **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
+- **Status:** Active.
