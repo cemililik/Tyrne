@@ -29,8 +29,6 @@ A security review is a **separate pass** from the code review — it is performe
 
 ## Index
 
-_No reviews yet._ Security-review artifacts will begin once changes reach subsystems that trigger a security pass (starting with T-001 — the capability table, which is security-sensitive by construction).
-
-| Date | Scope | File |
-|------|-------|------|
-| _pending_ | T-001 (capability table) | — |
+| Date | Scope | Verdict | File |
+|------|-------|---------|------|
+| 2026-04-21 | Umbrix project → Phase A exit (Phase 1–4c bootstrap + A1–A6 kernel core) | Changes requested (3 Phase-B blockers; no Phase-A exit blocker) | [2026-04-21-umbrix-to-phase-a.md](2026-04-21-umbrix-to-phase-a.md) |

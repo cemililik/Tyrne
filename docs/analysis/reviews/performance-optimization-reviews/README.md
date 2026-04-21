@@ -20,8 +20,8 @@ A dated file `YYYY-MM-DD-<context>.md` in this folder, following the shape in [`
 
 ## Index
 
-_No reviews yet._ Performance reviews begin when the project has enough running code to measure something meaningful — probably during or after Phase A6 (first end-to-end IPC demo).
-
 | Date | Scope | File |
 |------|-------|------|
-| _pending_ | _first IPC benchmark_ | — |
+| 2026-04-21 | A6 baseline — v0.0.1 kernel footprint after Phase A exit (no hypothesis; baseline exploration per master-plan §Pre-flight) | [2026-04-21-A6-baseline.md](2026-04-21-A6-baseline.md) |
+
+> First full hypothesis-driven cycle is blocked on Phase B's timer initialisation — IPC round-trip latency cannot be measured without a free-running counter. The baseline above records size / section / instruction-count metrics that can be measured statically.

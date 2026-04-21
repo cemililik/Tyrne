@@ -20,8 +20,6 @@ For security-sensitive changes, a code review is **not** sufficient — a securi
 
 ## Index
 
-_No reviews yet._ Code-review artifacts begin once the PR workflow starts; during the bootstrap phase the maintainer's self-review is covered by commit messages and the audit log.
-
 | Date | Scope | File |
 |------|-------|------|
-| _pending_ | _first PR_ | — |
+| 2026-04-21 | Umbrix project → Phase A exit (Phase 1–4c bootstrap + A1–A6 kernel core) | [2026-04-21-umbrix-to-phase-a.md](2026-04-21-umbrix-to-phase-a.md) |
