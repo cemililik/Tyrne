@@ -22,7 +22,7 @@ T-003 gave us `ipc_send` / `ipc_recv` / `ipc_notify` with correct waiter-state m
 The scheduler itself is deliberately simple: cooperative yield (no preemption, no timer tick in A5). Two design decisions drive the shape:
 
 - **ADR-0019** settles the scheduler's data structure (queue type, yield semantics, blocked-task representation).
-- **ADR-0020** extends the [`umbrix-hal::Cpu`](../../../hal/src/cpu.rs) trait with `save_context` / `restore_context` and a `TaskContext` associated type, so the context-switch assembly lives in the BSP rather than the kernel crate.
+- **ADR-0020** introduces a separate [`umbrix-hal::ContextSwitch`](../../../hal/src/context_switch.rs) trait with `unsafe context_switch` / `init_context` and a `TaskContext` associated type, so the context-switch assembly lives in the BSP rather than the kernel crate.
 
 The actual assembly for saving and restoring aarch64 register state (callee-saved registers, SP, LR/PC) lives in `bsp-qemu-virt` behind a safe Rust wrapper with a documented `# Safety` contract. The kernel crate calls the HAL trait and stays `unsafe`-free.
 
@@ -31,8 +31,8 @@ The actual assembly for saving and restoring aarch64 register state (callee-save
 ## Acceptance criteria
 
 - [x] **ADR-0019 Accepted** — 2026-04-21. Settles: single bounded FIFO queue, yield-to-next-ready, `TaskState { Idle, Ready, Blocked }`, scheduler as IPC orchestration layer.
-- [x] **ADR-0020 Accepted** — 2026-04-21. Settles: separate `ContextSwitch` trait, `unsafe context_switch` / `init_context`, aarch64 frame (x19–x28 + fp + lr + sp = 104 bytes).
-- [x] **`Cpu` trait v2** lands in `umbrix-hal`; the BSP `QemuVirtCpu` implements it.
+- [x] **ADR-0020 Accepted** — 2026-04-21. Settles: separate `ContextSwitch` trait, `unsafe context_switch` / `init_context`, aarch64 frame (x19–x28 + fp + lr + sp + d8–d15 = 168 bytes).
+- [x] **`ContextSwitch` trait** lands in `umbrix-hal`; the BSP `QemuVirtCpu` implements it alongside `Cpu`.
 - [x] **Context-switch assembly** in `bsp-qemu-virt`, behind a safe Rust wrapper; `unsafe` block audited per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
 - [x] **Scheduler queue** in `kernel::sched`: bounded, heap-free. Shape decided by ADR-0019.
 - [x] **`yield_now` kernel operation**: moves the current task to the back of the ready queue and switches to the head.
@@ -73,7 +73,7 @@ Design is delegated to ADR-0019 and ADR-0020. At a sketch level:
 ## Design notes
 
 - **Why cooperative-only?** Preemption requires a timer IRQ and safe IRQ entry/exit, which pulls in interrupt handling before the scheduler is even proven. Starting cooperative keeps the first context switch auditable and testable without hardware interrupt complexity.
-- **Why `Cpu` trait extension rather than a separate trait?** The context-switch primitive is a fundamental CPU operation, like `write_bytes` on `Console`. Extending `Cpu` keeps the HAL surface minimal and avoids a proliferation of single-method traits. ADR-0020 may decide otherwise if the extension is large or awkward.
+- **Why a separate `ContextSwitch` trait rather than extending `Cpu`?** ADR-0020 settled this: `Cpu` is object-safe (`&dyn Cpu` is used in the kernel for IRQ masking) whereas `ContextSwitch` has an associated type (`TaskContext`) that makes it non-object-safe. Merging the two would require removing `&dyn Cpu` usage or adding complex workarounds. A separate trait keeps each interface coherent and independently usable.
 - **Safety of context switch.** The save/restore assembly is the first `unsafe` in the kernel that is not structurally impossible to make safe. The invariants (stack pointer valid, registers stable, interrupts disabled during switch) must be stated explicitly and checked in review.
 - **IPC bridge complexity.** Parking a task on `RecvOutcome::Pending` requires knowing which task is the caller — in A5, "task" is a kernel-level stub with an ID and a `TaskContext`; the scheduler maps task ID to ready/blocked state. This is the first time the kernel has a concept of "current task."
 

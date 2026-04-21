@@ -20,7 +20,7 @@ Before any implementation lands, four inter-related questions must be settled:
 - All kernel state is statically bounded — no heap ([ADR-0016](0016-kernel-object-storage.md)).
 - The kernel crate is `no_std`, HAL-dependent only through traits ([ADR-0006](0006-workspace-layout.md), [ADR-0008](0008-cpu-trait.md)).
 - IPC is cooperative in A4/A5; preemption is Phase B ([ADR-0017](0017-ipc-primitive-set.md)).
-- Context-switch assembly lives in the BSP, exposed through the `Cpu` trait (ADR-0020); the scheduler calls the trait, not the assembly.
+- Context-switch assembly lives in the BSP, exposed through the `ContextSwitch` trait (ADR-0020); the scheduler calls the trait, not the assembly.
 - Only one CPU core is in scope (single-core aarch64 QEMU `virt`).
 
 **A5 scale.** Two kernel-level task stubs, cooperative yield, no timer tick. Complexity should match scale: a design that works perfectly for 2 tasks and is straightforward to extend later is better than a general scheduler written before there is a workload to validate it against.
@@ -212,7 +212,7 @@ impl Scheduler {
 ## References
 
 - [ADR-0017: IPC primitive set](0017-ipc-primitive-set.md) — the IPC layer this scheduler wires up.
-- [ADR-0008: `Cpu` HAL trait v1](0008-cpu-trait.md) — v2 (ADR-0020) extends this with context-switch primitives.
+- [ADR-0008: `Cpu` HAL trait v1](0008-cpu-trait.md) — ADR-0020 introduces the separate `ContextSwitch` trait alongside it.
 - [T-004: Cooperative scheduler](../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) — the task this ADR gates.
 - seL4 scheduler — strict priority, bounded queues; Phase B reference.
 - Hubris task-dispatch model — cooperative, bounded task set; closest prior art to the A5 design.

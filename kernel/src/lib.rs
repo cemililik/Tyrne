@@ -46,23 +46,3 @@ pub mod cap;
 pub mod ipc;
 pub mod obj;
 pub mod sched;
-
-use umbrix_hal::{Console, Cpu};
-
-/// Portable kernel entry, called by the BSP after early init.
-///
-/// Accepts the BSP's console and CPU implementations. In the current phase
-/// (A5) this prints a greeting and idles. Future milestones will wire up
-/// the scheduler, task creation, and IPC here.
-///
-/// # Never returns
-///
-/// This function is `-> !`. A return would be a kernel bug; the BSP's
-/// reset stub halts defensively if it ever does.
-pub fn run<Con: Console, C: Cpu>(console: &Con, _cpu: &C) -> ! {
-    console.write_bytes(b"umbrix: hello from kernel_main\n");
-
-    loop {
-        core::hint::spin_loop();
-    }
-}

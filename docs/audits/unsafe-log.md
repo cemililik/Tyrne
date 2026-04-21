@@ -117,3 +117,42 @@ Entries are **append-only**. When an `unsafe` region is removed, its entry gains
 - **Rejected alternatives:** Initialising a context requires writing raw register values; no safe abstraction exists.
 - **Reviewed by:** @cemililik.
 - **Status:** Active.
+
+### UNSAFE-2026-0010 — `unsafe impl Sync for StaticCell<T>`
+
+- **Introduced:** 2026-04-21, T-004 / A5 BSP bootstrap.
+- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `unsafe impl<T> Sync for StaticCell<T>`.
+- **Operation:** Declares that `&StaticCell<T>` can be shared across threads, allowing `StaticCell` to appear in `static` position.
+- **Invariants relied on:**
+  - Umbrix v1 is single-core and cooperative: no two tasks ever run simultaneously, so no two threads can reach a `StaticCell` concurrently.
+  - Each cell is written exactly once from `kernel_entry` before `start()` is called; subsequent accesses are read-only (via `assume_init_ref`) or guarded by the cooperative schedule.
+- **Rejected alternatives:** `Mutex` / `RwLock` require a runtime or a spin implementation that itself uses `unsafe`; using them would defer rather than eliminate the unsafety. `OnceCell` / `LazyLock` are not available without `std` in A5. `static mut` would expose the interior to safe code via aliasing.
+- **Reviewed by:** @cemililik.
+- **Status:** Active.
+
+### UNSAFE-2026-0011 — `unsafe impl Sync for TaskStack`
+
+- **Introduced:** 2026-04-21, T-004 / A5 BSP bootstrap.
+- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `unsafe impl Sync for TaskStack`.
+- **Operation:** Declares that `&TaskStack` can be shared across threads, allowing `static TASK_A_STACK` / `TASK_B_STACK` to satisfy the `Sync` bound on `static`.
+- **Invariants relied on:**
+  - Single-core cooperative kernel: only one task uses each stack at a time.
+  - The inner `UnsafeCell<[u8; 4096]>` is only accessed via `TaskStack::top`, which returns a raw pointer; no safe reference to the interior is ever materialised.
+  - Stack lifetimes exceed the tasks that use them (static storage).
+- **Rejected alternatives:** Wrapping in `Mutex` adds lock overhead inappropriate for a bare-metal stack. `static mut` exposes the interior unsafely and makes aliasing analysis harder. `UnsafeCell` with manual discipline is the minimal and standard pattern for bare-metal static storage.
+- **Reviewed by:** @cemililik.
+- **Status:** Active.
+
+### UNSAFE-2026-0012 — `&mut Scheduler` aliasing across cooperative yield
+
+- **Introduced:** 2026-04-21, T-004 / A5 BSP bootstrap.
+- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `task_a`, `task_b` — `assume_init_mut().yield_now(...)` call.
+- **Operation:** `(*SCHED.0.get()).assume_init_mut()` creates a `&mut Scheduler` that is technically alive across the cooperative context switch inside `yield_now`. When another task calls the same expression, a second `&mut Scheduler` is derived from the same `UnsafeCell`, creating aliased mutable references — undefined behaviour under Rust's strict aliasing rules.
+- **Invariants relied on:**
+  - Single-core cooperative model: no two tasks execute simultaneously; there is no concurrent access to the Scheduler's memory.
+  - The `&mut` is not bound to a named variable; its scope is limited to the single `yield_now` call expression. After `yield_now` suspends, the scheduler's data is not modified by the suspended frame's stack.
+  - `yield_now` does not read `self` after the `cpu.context_switch` call within its body (only the `IrqGuard` drop and `Ok(())` return occur, both stack-local).
+  - LLVM's context switch (`naked_asm!` with `ret`) acts as a full memory barrier, preventing the compiler from caching or reordering accesses across the switch point.
+- **Rejected alternatives:** A raw-pointer API (`yield_raw(*mut Scheduler, &C)`) would eliminate the aliasing entirely by ensuring no `&mut Scheduler` is live across the context switch. This refactor is the correct long-term fix but requires restructuring the BSP task functions and potentially the Scheduler API; it is deferred to a future ADR. A `Mutex<Scheduler>` would introduce lock overhead and a blocking primitive before the kernel has blocking support.
+- **Reviewed by:** @cemililik.
+- **Status:** Active — to be resolved by raw-pointer API refactor (future ADR).

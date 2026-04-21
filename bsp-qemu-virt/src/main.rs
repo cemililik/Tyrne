@@ -66,9 +66,13 @@ const PL011_UART_BASE: usize = 0x0900_0000;
 /// `static` requires.
 struct StaticCell<T>(UnsafeCell<MaybeUninit<T>>);
 
-// SAFETY: Umbrix v1 is single-core and cooperative. No two tasks ever run
+// SAFETY: Umbrix v1 is single-core and cooperative; no two tasks ever run
 // simultaneously, so there are no data races on `StaticCell` contents.
-// Audit: UNSAFE-2026-0001.
+// Rejected alternatives: `Mutex` / `RwLock` require a runtime (heap, OS) or
+// a spin implementation that itself relies on `unsafe` and adds overhead
+// inappropriate for a bare-metal `static`. `OnceCell` / `LazyCell` from
+// `core` are not available in `no_std` without an allocator in A5.
+// Audit: UNSAFE-2026-0010.
 unsafe impl<T> Sync for StaticCell<T> {}
 
 impl<T> StaticCell<T> {
@@ -87,8 +91,14 @@ impl<T> StaticCell<T> {
 #[repr(C, align(16))]
 struct TaskStack(UnsafeCell<[u8; 4096]>);
 
-// SAFETY: single-core cooperative kernel; only one task touches each stack
-// at a time. Audit: UNSAFE-2026-0001.
+// SAFETY: single-core cooperative kernel; only one task touches each stack at
+// a time, and no task can interrupt another (cooperative scheduling).
+// Rejected alternatives: wrapping in `Mutex` would add lock overhead and
+// require a runtime or spin implementation. Making the static `mut` would
+// expose the interior to safe code via `static mut` aliasing, which is
+// worse. `UnsafeCell` with manual discipline is the standard bare-metal
+// pattern and is the minimal wrapper that satisfies the `Sync` bound.
+// Audit: UNSAFE-2026-0011.
 unsafe impl Sync for TaskStack {}
 
 impl TaskStack {
@@ -133,24 +143,40 @@ fn task_a() -> ! {
     for i in 0u32..3 {
         // SAFETY: CONSOLE is fully initialised in `kernel_entry` before
         // `start()` transfers control; no other task writes concurrently
-        // (cooperative scheduling). Audit: UNSAFE-2026-0001.
+        // (cooperative scheduling). Audit: UNSAFE-2026-0010.
         let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
         let mut w = FmtWriter(console);
         let _ = writeln!(w, "umbrix: task A — iteration {i}");
 
-        // SAFETY: SCHED and CPU are fully initialised before `start()`.
-        // Cooperative scheduling ensures no concurrent mutation.
-        // Audit: UNSAFE-2026-0001.
-        let sched = unsafe { (*SCHED.0.get()).assume_init_mut() };
-        // SAFETY: same invariants as SCHED above. Audit: UNSAFE-2026-0001.
-        let cpu = unsafe { (*CPU.0.get()).assume_init_ref() };
-        // yield_now returns Err only if current == None, which cannot
-        // happen once the scheduler has started.
-        let _ = sched.yield_now(cpu);
+        // SAFETY: SCHED and CPU are both fully initialised before `start()`.
+        //
+        // Aliasing note (Audit: UNSAFE-2026-0012): `assume_init_mut` creates
+        // a `&mut Scheduler` that is technically alive when `yield_now`
+        // suspends this task and another task creates its own `&mut Scheduler`.
+        // This relaxes Rust's strict aliasing rules. It is safe under the
+        // single-core cooperative model because:
+        //   (a) no two tasks execute simultaneously — there is no concurrent
+        //       memory access;
+        //   (b) `yield_now` does not observe `self` after the context switch
+        //       returns (the only post-switch code is the `IrqGuard` drop and
+        //       the `Ok(())` return, both of which operate on stack locals
+        //       within yield_now's own frame, not on `self`).
+        // The `&mut` is not bound to a named variable so its scope is limited
+        // to the duration of the `yield_now` call expression.
+        // A raw-pointer API would eliminate the aliasing entirely; that refactor
+        // is deferred to a future ADR. Audit: UNSAFE-2026-0010.
+        //
+        // yield_now returns Err only when current == None, which cannot happen
+        // once the scheduler has started.
+        unsafe {
+            let _ = (*SCHED.0.get())
+                .assume_init_mut()
+                .yield_now((*CPU.0.get()).assume_init_ref());
+        }
     }
 
     // SAFETY: CONSOLE is fully initialised; no concurrent access.
-    // Audit: UNSAFE-2026-0001.
+    // Audit: UNSAFE-2026-0010.
     let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
     console.write_bytes(b"umbrix: task A done; spinning\n");
     loop {
@@ -163,20 +189,21 @@ fn task_a() -> ! {
 /// Second smoke-test task. Symmetric to task A.
 fn task_b() -> ! {
     for i in 0u32..3 {
-        // SAFETY: same invariants as task_a. Audit: UNSAFE-2026-0001.
+        // SAFETY: same invariants as task_a. Audit: UNSAFE-2026-0010.
         let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
         let mut w = FmtWriter(console);
         let _ = writeln!(w, "umbrix: task B — iteration {i}");
 
-        // SAFETY: same invariants as task_a. Audit: UNSAFE-2026-0001.
-        let sched = unsafe { (*SCHED.0.get()).assume_init_mut() };
-        // SAFETY: same invariants as task_a. Audit: UNSAFE-2026-0001.
-        let cpu = unsafe { (*CPU.0.get()).assume_init_ref() };
-        let _ = sched.yield_now(cpu);
+        // SAFETY: same aliasing invariants as task_a. Audit: UNSAFE-2026-0012.
+        unsafe {
+            let _ = (*SCHED.0.get())
+                .assume_init_mut()
+                .yield_now((*CPU.0.get()).assume_init_ref());
+        }
     }
 
     // SAFETY: CONSOLE is fully initialised; no concurrent access.
-    // Audit: UNSAFE-2026-0001.
+    // Audit: UNSAFE-2026-0010.
     let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
     console.write_bytes(b"umbrix: task B done; spinning\n");
     loop {
@@ -207,7 +234,9 @@ pub extern "C" fn kernel_entry() -> ! {
     // base, exclusively owned by this kernel in v1 (single-core, no
     // concurrent drivers). Audit: UNSAFE-2026-0001.
     let console = unsafe { Pl011Uart::new(PL011_UART_BASE) };
-    let cpu = QemuVirtCpu::new();
+    // SAFETY: constructed exactly once in kernel_entry; single-core v1.
+    // See QemuVirtCpu::new # Safety. Audit: UNSAFE-2026-0006.
+    let cpu = unsafe { QemuVirtCpu::new() };
 
     // Publish the console and CPU before any task can run.
     // SAFETY: single-core; no concurrent writer exists before `start()`.
@@ -245,10 +274,10 @@ pub extern "C" fn kernel_entry() -> ! {
     unsafe {
         sched
             .add_task(cpu, handle_a, task_a, TASK_A_STACK.top())
-            .ok();
+            .expect("add_task A failed: queue full or arena exhausted");
         sched
             .add_task(cpu, handle_b, task_b, TASK_B_STACK.top())
-            .ok();
+            .expect("add_task B failed: queue full or arena exhausted");
     }
 
     // Publish the scheduler before transferring control.

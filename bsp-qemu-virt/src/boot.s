@@ -28,9 +28,10 @@ _start:
     mov     sp, x0
 
     /* Enable FP/SIMD at EL1 and EL0 (CPACR_EL1.FPEN = 0b11 = bits[21:20]).
-     * 0x300000 = 3 << 20.  CPACR_EL1 resets to zero, so only FPEN needs
-     * setting; all other fields remain 0 (no ZEN, no TTA traps).
-     * ISB ensures the write is visible before the first NEON instruction. */
+     * 0x300000 = 3 << 20.  We do not rely on the reset value of CPACR_EL1;
+     * we write FPEN = 0b11 explicitly and leave all other fields zero (no
+     * ZEN, no TTA traps).  ISB ensures the write takes effect before the
+     * first NEON instruction in BSS zeroing or Rust code. */
     mov     x0, #0x300000
     msr     cpacr_el1, x0
     isb

@@ -35,10 +35,12 @@ impl QemuVirtCpu {
     ///
     /// There must be at most one `QemuVirtCpu` instance driving a given
     /// physical core. Creating a second instance on the same core and calling
-    /// `restore_irq_state` on both may produce inconsistent DAIF state.
-    /// In v1 (single-core), construct exactly once in `kernel_entry`.
+    /// `restore_irq_state` on both may produce inconsistent DAIF state —
+    /// the second instance's saved `IrqState` would reflect a different DAIF
+    /// snapshot and restoring it would silently override the first instance's
+    /// state. In v1 (single-core), construct exactly once in `kernel_entry`.
     #[must_use]
-    pub const fn new() -> Self {
+    pub const unsafe fn new() -> Self {
         Self { _priv: () }
     }
 }
@@ -46,11 +48,19 @@ impl QemuVirtCpu {
 // SAFETY: `QemuVirtCpu` is a zero-size marker; it has no interior mutability
 // and holds no pointers. Sending it between threads is safe — the only shared
 // hardware resource (DAIF) is accessed via per-core system registers that are
-// inherently thread-local in a single-core system. Audit: UNSAFE-2026-0006.
+// inherently thread-local in a single-core system.
+// Rejected alternatives: wrapping in a `Mutex` or `AtomicUsize` would add
+// overhead with no benefit — DAIF is already a per-core register, not shared
+// memory; there is nothing to protect with a software lock.
+// Audit: UNSAFE-2026-0006.
 unsafe impl Send for QemuVirtCpu {}
 
 // SAFETY: Same reasoning as the `Send` impl — no interior mutability; DAIF
-// reads/writes are atomic per-core register operations. Audit: UNSAFE-2026-0006.
+// reads/writes are atomic per-core register operations. A `RefCell` or similar
+// interior-mutability wrapper would not help because the resource (DAIF) is
+// a hardware register, not a Rust data structure; the safe abstraction is
+// already the `Cpu` trait methods.
+// Audit: UNSAFE-2026-0006.
 unsafe impl Sync for QemuVirtCpu {}
 
 impl Cpu for QemuVirtCpu {
@@ -71,9 +81,11 @@ impl Cpu for QemuVirtCpu {
 
     fn disable_irqs(&self) -> IrqState {
         let daif: usize;
-        // SAFETY: `MRS x, DAIF` reads the current interrupt mask; `MSR DAIF, #0xF`
-        // masks all DAIF bits (D, A, I, F). Both are EL1-privileged register
-        // operations. The returned `IrqState` captures the prior value so that
+        // SAFETY: `MRS x, DAIF` reads the current interrupt mask; `MSR DAIFSet, #0xf`
+        // sets all four DAIF mask bits (D, A, I, F) atomically via the write-only
+        // DAIFSet encoding — this is distinct from `MSR DAIF, #imm` which would
+        // require a 9-bit immediate. Both are EL1-privileged register operations.
+        // The returned `IrqState` captures the prior value so that
         // `restore_irq_state` can restore it exactly. Audit: UNSAFE-2026-0007.
         unsafe {
             asm!(
@@ -122,7 +134,15 @@ impl Cpu for QemuVirtCpu {
 /// Layout must match the field offsets used by [`context_switch_asm`].
 /// `#[repr(C)]` prevents field reordering.
 ///
-/// Total size: 13 × 8 = 104 bytes per task context.
+/// Per AAPCS64, callee-saved registers are:
+/// - General-purpose: x19–x28, x29 (fp), x30 (lr), sp
+/// - SIMD/FP: the lower 64 bits of v8–v15 (i.e. d8–d15)
+///
+/// d8–d15 must be saved whenever CPACR_EL1.FPEN is non-zero, because the
+/// compiler may allocate those registers for any kernel-level task and will
+/// not emit callee-save spills across a cooperative yield.
+///
+/// Total size: (10 + 1 + 1 + 1) × 8 + 8 × 8 = 104 + 64 = 168 bytes.
 #[derive(Default)]
 #[repr(C)]
 pub struct Aarch64TaskContext {
@@ -134,18 +154,25 @@ pub struct Aarch64TaskContext {
     pub lr: u64,
     /// Stack pointer — saved explicitly (not a general-purpose register).
     pub sp: u64,
+    /// Lower 64 bits of `v8`–`v15` (`d8`–`d15`): AAPCS64 callee-saved
+    /// SIMD/FP registers. Only the lower 8 bytes need to be preserved;
+    /// the upper 64 bits are caller-saved.
+    pub d8_d15: [u64; 8],
 }
 
 // ─── context_switch_asm ──────────────────────────────────────────────────────
 
-/// Save `x19`–`x28`, fp, lr, sp into `*current` and restore from `*next`.
+/// Save all AAPCS64 callee-saved registers into `*current` and restore from `*next`.
+///
+/// Saves: x19–x28, x29 (fp), x30 (lr), sp, d8–d15.
+/// Restores: same set from `*next`, then `ret`s to the restored lr.
 ///
 /// # Safety
 ///
 /// - Both pointers must be 8-byte-aligned and valid for the duration of the
 ///   switch.
 /// - `next` must have been written by a prior call to `context_switch_asm`
-///   or fully initialised by `init_context_inner`.
+///   or fully initialised by [`QemuVirtCpu::init_context`].
 /// - The caller is responsible for disabling interrupts before calling this
 ///   function.
 ///
@@ -156,7 +183,7 @@ pub struct Aarch64TaskContext {
 /// callee-saved registers from the wrong stack addresses after a context switch.
 ///
 /// Registers arrive per AAPCS64: `current` → x0, `next` → x1.
-/// x8 is used as a scratch register (caller-saved; the asm clobbers it).
+/// x8 is used as a scratch register (caller-saved; clobbered by the asm).
 ///
 /// Audit: UNSAFE-2026-0008.
 #[unsafe(naked)]
@@ -169,29 +196,42 @@ unsafe extern "C" fn context_switch_asm(
     //   fp       offset  80
     //   lr       offset  88
     //   sp       offset  96
+    //   d8_d15   offset 104  ( 8 × 8 = 64 bytes)
+    //   total          168 bytes
     //
     // sp cannot appear as a source operand in most AArch64 store instructions,
     // so we move it through x8 (a caller-saved scratch register).
+    //
+    // d8–d15 are saved as 64-bit values (lower half of v8–v15). AAPCS64
+    // requires preserving only the lower 8 bytes of each v8–v15 register.
     naked_asm!(
-        // ── save current (x0) ───────────────────────────────────────────
+        // ── save current (x0) ─────────────────────────────────────────
         "stp x19, x20, [x0,  #0]",
         "stp x21, x22, [x0,  #16]",
         "stp x23, x24, [x0,  #32]",
         "stp x25, x26, [x0,  #48]",
         "stp x27, x28, [x0,  #64]",
-        "stp x29, x30, [x0,  #80]",   // fp, lr
+        "stp x29, x30, [x0,  #80]",    // fp, lr
         "mov x8,  sp",
-        "str x8,  [x0, #96]",          // sp
+        "str x8,  [x0,  #96]",          // sp
+        "stp d8,  d9,  [x0,  #104]",
+        "stp d10, d11, [x0,  #120]",
+        "stp d12, d13, [x0,  #136]",
+        "stp d14, d15, [x0,  #152]",
 
-        // ── restore next (x1) ───────────────────────────────────────────
-        "ldr x8,  [x1, #96]",          // sp
+        // ── restore next (x1) ─────────────────────────────────────────
+        "ldp d14, d15, [x1,  #152]",
+        "ldp d12, d13, [x1,  #136]",
+        "ldp d10, d11, [x1,  #120]",
+        "ldp d8,  d9,  [x1,  #104]",
+        "ldr x8,  [x1,  #96]",          // sp
         "mov sp,  x8",
-        "ldp x29, x30, [x1, #80]",    // fp, lr
-        "ldp x27, x28, [x1, #64]",
-        "ldp x25, x26, [x1, #48]",
-        "ldp x23, x24, [x1, #32]",
-        "ldp x21, x22, [x1, #16]",
-        "ldp x19, x20, [x1,  #0]",
+        "ldp x29, x30, [x1,  #80]",    // fp, lr
+        "ldp x27, x28, [x1,  #64]",
+        "ldp x25, x26, [x1,  #48]",
+        "ldp x23, x24, [x1,  #32]",
+        "ldp x21, x22, [x1,  #16]",
+        "ldp x19, x20, [x1,   #0]",
 
         // ret jumps to the lr just loaded from `next`.
         // On a task's first run that lr was set by init_context to the

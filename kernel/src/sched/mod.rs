@@ -150,7 +150,7 @@ impl From<IpcError> for SchedError {
 /// Generic over `C: ContextSwitch + Cpu` — the BSP provides both the
 /// interrupt-masking needed for safe context switches and the register-save
 /// assembly.
-pub struct Scheduler<C: ContextSwitch> {
+pub struct Scheduler<C: ContextSwitch + Cpu> {
     ready: SchedQueue<TASK_ARENA_CAPACITY>,
     task_states: [TaskState; TASK_ARENA_CAPACITY],
     /// Stored handles, indexed by slot index, so the scheduler can find
@@ -214,11 +214,14 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
         unsafe {
             cpu.init_context(&mut self.contexts[idx], entry, stack_top);
         }
-        self.task_states[idx] = TaskState::Ready;
-        self.task_handles[idx] = Some(handle);
+        // Enqueue before writing task_states / task_handles so that a
+        // QueueFull error leaves no partial registration in those arrays.
         self.ready
             .enqueue(handle)
-            .map_err(|_| SchedError::QueueFull)
+            .map_err(|_| SchedError::QueueFull)?;
+        self.task_states[idx] = TaskState::Ready;
+        self.task_handles[idx] = Some(handle);
+        Ok(())
     }
 
     /// Start the scheduler by switching to the first ready task.
@@ -226,6 +229,16 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
     /// Saves throwaway state for the bootstrap context (which is never
     /// resumed) and restores the first task. Intended to be called exactly
     /// once from `kernel_main` after tasks have been added.
+    ///
+    /// # IRQ state on task entry
+    ///
+    /// This method creates an `IrqGuard` immediately before the context switch.
+    /// The guard is on the bootstrap stack frame, which is abandoned (never
+    /// resumed). Tasks therefore begin executing with interrupts **masked**
+    /// (DAIF = 0xF). In A5 this is acceptable because no interrupt sources
+    /// are configured; a task that needs interrupts enabled must call
+    /// `cpu.restore_irq_state(IrqState(0))` explicitly. This will be
+    /// revisited when Phase B introduces a timer or other interrupt source.
     ///
     /// # Panics
     ///
@@ -276,7 +289,9 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
         let next_handle = match self.ready.dequeue() {
             Some(h) if h != current_handle => h,
             _ => {
-                // Only one task exists or same handle returned — no switch.
+                // Only one ready task exists. The queue is transiently empty
+                // and self.current is unchanged. The next yield will re-enqueue
+                // the current task; no switch is performed here.
                 return Ok(());
             }
         };
@@ -396,7 +411,15 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
             }
 
             // Resumed here: the sender has delivered; collect the message.
-            return ipc_recv(ep_arena, queues, ep_cap, caller_table).map_err(SchedError::Ipc);
+            // A second Pending result would be a scheduler bug — the sender
+            // should have queued a message before unblocking this task.
+            let result = ipc_recv(ep_arena, queues, ep_cap, caller_table);
+            debug_assert!(
+                !matches!(result, Ok(RecvOutcome::Pending)),
+                "ipc_recv returned Pending after context-switch resume — \
+                 sender must deliver before unblocking receiver"
+            );
+            return result.map_err(SchedError::Ipc);
         }
 
         Ok(outcome)
@@ -419,6 +442,11 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
     }
 
     /// Scan `task_states` for a task blocked on `ep` and re-enqueue it.
+    ///
+    /// **Single-waiter semantics.** Only the first blocked task found is
+    /// woken; subsequent blocked tasks (if any) remain blocked. In A5 at
+    /// most one task waits per endpoint at a time (ADR-0019), so this is
+    /// correct. Multi-waiter wake-up is deferred to a future ADR.
     ///
     /// O(N) scan — acceptable at `TASK_ARENA_CAPACITY ≤ 16` (ADR-0019).
     fn unblock_receiver_on(&mut self, ep: EndpointHandle) {
@@ -513,6 +541,23 @@ mod tests {
         }
     }
 
+    /// Test-only stack with guaranteed 16-byte alignment, satisfying the
+    /// contract of [`ContextSwitch::init_context`]. `FakeCpu::init_context`
+    /// is a no-op, so the alignment is not strictly required by the tests,
+    /// but it is stated here so the SAFETY comment is accurate and so the
+    /// helper is reusable if a real init_context is ever wired into tests.
+    #[repr(C, align(16))]
+    struct AlignedStack<const N: usize>([u8; N]);
+
+    impl<const N: usize> AlignedStack<N> {
+        fn new() -> Self {
+            Self([0u8; N])
+        }
+        fn top(&mut self) -> *mut u8 {
+            self.0.as_mut_ptr_range().end
+        }
+    }
+
     // ── SchedQueue tests ──────────────────────────────────────────────────────
 
     #[test]
@@ -567,10 +612,10 @@ mod tests {
         let cpu = FakeCpu;
         let mut sched: Scheduler<FakeCpu> = Scheduler::new();
         let h = task_handle(0);
-        let mut stack = [0u8; 512];
-        let stack_top = stack.as_mut_ptr_range().end;
-        // SAFETY: stack is 512 bytes; FakeCpu::init_context is a no-op.
-        unsafe { sched.add_task(&cpu, h, spin_entry(), stack_top).unwrap() };
+        let mut stack = AlignedStack::<512>::new();
+        // SAFETY: stack is 512 bytes and 16-byte aligned (AlignedStack repr).
+        // FakeCpu::init_context is a no-op so the stack is never actually used.
+        unsafe { sched.add_task(&cpu, h, spin_entry(), stack.top()).unwrap() };
         assert_eq!(sched.task_states[0], TaskState::Ready);
         assert_eq!(sched.task_handles[0], Some(h));
         assert_eq!(sched.ready.len(), 1);
@@ -582,15 +627,16 @@ mod tests {
         let mut sched: Scheduler<FakeCpu> = Scheduler::new();
         let h0 = task_handle(0);
         let h1 = task_handle(1);
-        let mut s0 = [0u8; 512];
-        let mut s1 = [0u8; 512];
-        // SAFETY: stacks are 512 bytes; FakeCpu::init_context is a no-op.
+        let mut s0 = AlignedStack::<512>::new();
+        let mut s1 = AlignedStack::<512>::new();
+        // SAFETY: stacks are 512 bytes and 16-byte aligned (AlignedStack repr).
+        // FakeCpu::init_context is a no-op so the stacks are never actually used.
         unsafe {
             sched
-                .add_task(&cpu, h0, spin_entry(), s0.as_mut_ptr_range().end)
+                .add_task(&cpu, h0, spin_entry(), s0.top())
                 .unwrap();
             sched
-                .add_task(&cpu, h1, spin_entry(), s1.as_mut_ptr_range().end)
+                .add_task(&cpu, h1, spin_entry(), s1.top())
                 .unwrap();
         }
         // Simulate h0 running: it was dequeued when it started running.
