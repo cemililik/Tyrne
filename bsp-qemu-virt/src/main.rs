@@ -36,7 +36,7 @@ use umbrix_kernel::cap::{CapHandle, CapObject, CapRights, Capability, Capability
 use umbrix_kernel::ipc::{IpcQueues, Message, RecvOutcome};
 use umbrix_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
 use umbrix_kernel::obj::task::{create_task, Task, TaskArena};
-use umbrix_kernel::sched::Scheduler;
+use umbrix_kernel::sched::{ipc_recv_and_yield, ipc_send_and_yield, yield_now, Scheduler};
 
 mod console;
 mod cpu;
@@ -81,6 +81,37 @@ unsafe impl<T> Sync for StaticCell<T> {}
 impl<T> StaticCell<T> {
     const fn new() -> Self {
         Self(UnsafeCell::new(MaybeUninit::uninit()))
+    }
+
+    /// Return a raw `*mut T` pointer to the cell's storage without
+    /// materialising a `&mut` to the underlying `MaybeUninit<T>`.
+    ///
+    /// Used by the raw-pointer scheduler bridge per [ADR-0021]: the BSP
+    /// hands `*mut T` to the kernel's `ipc_send_and_yield` /
+    /// `ipc_recv_and_yield` / `yield_now` entry points so that no `&mut`
+    /// reference to any shared kernel state is alive across
+    /// `cpu.context_switch`.
+    ///
+    /// The implementation is a plain pointer cast (`UnsafeCell::get()`
+    /// returns `*mut MaybeUninit<T>`, then `cast::<T>` is a zero-cost
+    /// reinterpretation permitted because `MaybeUninit<T>` shares `T`'s
+    /// layout), so no borrow of any kind is produced here.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the cell has been initialised via a prior
+    /// `(*cell.0.get()).write(...)` before dereferencing the returned pointer,
+    /// and must not use the pointer to create a `&mut T` that outlives a
+    /// cooperative context switch (ADR-0021). Audit: UNSAFE-2026-0013.
+    ///
+    /// [ADR-0021]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
+    #[inline]
+    #[allow(
+        clippy::mut_from_ref,
+        reason = "returns a raw pointer, not a reference; aliasing discipline documented in ADR-0021"
+    )]
+    const fn as_mut_ptr(&self) -> *mut T {
+        self.0.get().cast::<T>()
     }
 }
 
@@ -176,36 +207,26 @@ fn task_b() -> ! {
     // Register as receiver on the endpoint. If no sender is ready, blocks and
     // yields to Task A. Resumes when Task A delivers a message.
     //
-    // SAFETY (aliasing): `assume_init_mut` on SCHED, EP_ARENA, IPC_QUEUES, and
-    // TABLE_B creates `&mut` references that are alive across the cooperative
-    // context switch inside `ipc_recv_and_yield`. When Task A runs during the
-    // suspension, it creates its own `&mut` references to SCHED, EP_ARENA, and
-    // IPC_QUEUES from the same UnsafeCells — technically aliasing mutable
-    // references. This is safe under the single-core cooperative invariant
-    // (no two tasks execute simultaneously): the suspended task's stack frame
-    // does not access any of these references after the context switch
-    // returns, and the compiler cannot observe the aliasing across the
-    // assembly context-switch barrier.
-    // Rejected alternatives: a raw-pointer scheduler API would remove the
-    // aliasing entirely, but the v1 scheduler bridge signatures take `&mut`
-    // across the suspension point — switching to raw pointers requires
-    // reshaping `Scheduler::ipc_recv_and_yield` and is scheduled as a
-    // Phase B refactor (see UNSAFE-2026-0012 status). A Mutex<Scheduler> or
-    // similar runtime lock would defer rather than eliminate the unsafety
-    // and pay lock overhead for a kernel that has no blocking primitive yet.
-    // SAFETY: see aliasing and rejected-alternatives notes above.
-    // Audit: UNSAFE-2026-0012.
+    // SAFETY: per ADR-0021 — every `*mut` here is produced by
+    // `StaticCell::as_mut_ptr()`, which is a pure pointer cast and never
+    // materialises a `&mut`. `ipc_recv_and_yield` itself takes raw pointers
+    // and only creates momentary `&mut`s strictly outside its
+    // `cpu.context_switch` window (per the scheduler module's shared safety
+    // contract). The four statics (`SCHED`, `EP_ARENA`, `IPC_QUEUES`,
+    // `TABLE_B`) refer to distinct referents. `CPU` is accessed via `&`, an
+    // immutable borrow which is always aliasing-safe. No `&mut` in this
+    // task's stack frame crosses the cooperative switch — this is the
+    // pattern that retires UNSAFE-2026-0012. Audit: UNSAFE-2026-0014.
     let recv_outcome = unsafe {
-        (*SCHED.0.get())
-            .assume_init_mut()
-            .ipc_recv_and_yield(
-                (*CPU.0.get()).assume_init_ref(),
-                (*EP_ARENA.0.get()).assume_init_mut(),
-                (*IPC_QUEUES.0.get()).assume_init_mut(),
-                (*TABLE_B.0.get()).assume_init_mut(),
-                *(*EP_CAP_B.0.get()).assume_init_ref(),
-            )
-            .expect("task B: ipc_recv failed")
+        ipc_recv_and_yield(
+            SCHED.as_mut_ptr(),
+            (*CPU.0.get()).assume_init_ref(),
+            EP_ARENA.as_mut_ptr(),
+            IPC_QUEUES.as_mut_ptr(),
+            TABLE_B.as_mut_ptr(),
+            *(*EP_CAP_B.0.get()).assume_init_ref(),
+        )
+        .expect("task B: ipc_recv failed")
     };
 
     let RecvOutcome::Received { msg, .. } = recv_outcome else {
@@ -228,33 +249,29 @@ fn task_b() -> ! {
         label: 0xBBBB,
         params: [0; 3],
     };
-    // SAFETY: same aliasing invariants and rejected alternatives as the
-    // ipc_recv_and_yield call above; raw-pointer refactor deferred to
-    // Phase B, Mutex rejected for same reasons.
-    // Audit: UNSAFE-2026-0012.
+    // SAFETY: per ADR-0021 — same raw-pointer discipline as the
+    // `ipc_recv_and_yield` call above. `yield_now` follows the same shared
+    // safety contract — caller-side never materialises a `&mut` across the
+    // switch. Audit: UNSAFE-2026-0014.
     unsafe {
-        (*SCHED.0.get())
-            .assume_init_mut()
-            .ipc_send_and_yield(
-                (*CPU.0.get()).assume_init_ref(),
-                (*EP_ARENA.0.get()).assume_init_mut(),
-                (*IPC_QUEUES.0.get()).assume_init_mut(),
-                (*TABLE_B.0.get()).assume_init_mut(),
-                *(*EP_CAP_B.0.get()).assume_init_ref(),
-                reply,
-                None,
-            )
-            .expect("task B: ipc_send reply failed");
+        ipc_send_and_yield(
+            SCHED.as_mut_ptr(),
+            (*CPU.0.get()).assume_init_ref(),
+            EP_ARENA.as_mut_ptr(),
+            IPC_QUEUES.as_mut_ptr(),
+            TABLE_B.as_mut_ptr(),
+            *(*EP_CAP_B.0.get()).assume_init_ref(),
+            reply,
+            None,
+        )
+        .expect("task B: ipc_send reply failed");
 
         // Yield explicitly so Task A can receive the reply that was just queued
         // as SendPending. Without this yield, A's ipc_recv_and_yield would never
         // run (cooperative scheduling; B never blocks again after the send).
         // `yield_now` only errors with `NoCurrentTask`, which cannot happen
-        // once the scheduler has started — using `.expect` keeps error handling
-        // consistent with the surrounding IPC calls.
-        (*SCHED.0.get())
-            .assume_init_mut()
-            .yield_now((*CPU.0.get()).assume_init_ref())
+        // once the scheduler has started.
+        yield_now(SCHED.as_mut_ptr(), (*CPU.0.get()).assume_init_ref())
             .expect("task B: yield_now after reply failed");
     }
 
@@ -288,42 +305,38 @@ fn task_a() -> ! {
     // called ipc_recv_and_yield and is in RecvWaiting state. The send delivers
     // immediately (Delivered) and ipc_send_and_yield yields to B.
     //
-    // SAFETY: same aliasing invariants and rejected alternatives as task_b
-    // (raw-pointer refactor deferred to Phase B; Mutex rejected).
-    // Audit: UNSAFE-2026-0012.
+    // SAFETY: per ADR-0021 — same raw-pointer discipline as task_b.
+    // Audit: UNSAFE-2026-0014.
     unsafe {
-        (*SCHED.0.get())
-            .assume_init_mut()
-            .ipc_send_and_yield(
-                (*CPU.0.get()).assume_init_ref(),
-                (*EP_ARENA.0.get()).assume_init_mut(),
-                (*IPC_QUEUES.0.get()).assume_init_mut(),
-                (*TABLE_A.0.get()).assume_init_mut(),
-                *(*EP_CAP_A.0.get()).assume_init_ref(),
-                msg,
-                None,
-            )
-            .expect("task A: ipc_send failed");
+        ipc_send_and_yield(
+            SCHED.as_mut_ptr(),
+            (*CPU.0.get()).assume_init_ref(),
+            EP_ARENA.as_mut_ptr(),
+            IPC_QUEUES.as_mut_ptr(),
+            TABLE_A.as_mut_ptr(),
+            *(*EP_CAP_A.0.get()).assume_init_ref(),
+            msg,
+            None,
+        )
+        .expect("task A: ipc_send failed");
     }
 
     // Task A resumes here after B delivered the reply. The endpoint is now in
     // SendPending (B's reply). Calling ipc_recv_and_yield collects it immediately
     // without blocking (SendPending → Received → Idle).
     //
-    // SAFETY: same aliasing invariants and rejected alternatives as task_b's
-    // ipc_recv_and_yield call (raw-pointer refactor deferred to Phase B;
-    // Mutex rejected). Audit: UNSAFE-2026-0012.
+    // SAFETY: per ADR-0021 — same raw-pointer discipline as task_b's
+    // ipc_recv_and_yield call. Audit: UNSAFE-2026-0014.
     let reply_outcome = unsafe {
-        (*SCHED.0.get())
-            .assume_init_mut()
-            .ipc_recv_and_yield(
-                (*CPU.0.get()).assume_init_ref(),
-                (*EP_ARENA.0.get()).assume_init_mut(),
-                (*IPC_QUEUES.0.get()).assume_init_mut(),
-                (*TABLE_A.0.get()).assume_init_mut(),
-                *(*EP_CAP_A.0.get()).assume_init_ref(),
-            )
-            .expect("task A: ipc_recv (reply) failed")
+        ipc_recv_and_yield(
+            SCHED.as_mut_ptr(),
+            (*CPU.0.get()).assume_init_ref(),
+            EP_ARENA.as_mut_ptr(),
+            IPC_QUEUES.as_mut_ptr(),
+            TABLE_A.as_mut_ptr(),
+            *(*EP_CAP_A.0.get()).assume_init_ref(),
+        )
+        .expect("task A: ipc_recv (reply) failed")
     };
 
     let RecvOutcome::Received { msg: reply, .. } = reply_outcome else {

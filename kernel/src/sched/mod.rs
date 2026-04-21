@@ -266,165 +266,6 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
         }
     }
 
-    /// Yield the current task: re-enqueue it as ready and switch to the
-    /// next task at the head of the ready queue.
-    ///
-    /// If only one task exists (the queue is empty after re-enqueue), the
-    /// function returns without switching — the single task keeps running.
-    ///
-    /// # Errors
-    ///
-    /// [`SchedError::NoCurrentTask`] if called before [`Scheduler::start`].
-    pub fn yield_now(&mut self, cpu: &C) -> Result<(), SchedError> {
-        let current_handle = self.current.ok_or(SchedError::NoCurrentTask)?;
-        let current_idx = current_handle.slot().index() as usize;
-
-        // Re-enqueue current as ready. Cannot be full: the running task was
-        // not in the ready queue (it was dequeued when it started running),
-        // so at most TASK_ARENA_CAPACITY-1 other tasks are queued.
-        self.task_states[current_idx] = TaskState::Ready;
-        let _ = self.ready.enqueue(current_handle);
-
-        // Dequeue the next task.
-        let next_handle = match self.ready.dequeue() {
-            Some(h) if h != current_handle => h,
-            _ => {
-                // Only one ready task exists. The queue is transiently empty
-                // and self.current is unchanged. The next yield will re-enqueue
-                // the current task; no switch is performed here.
-                return Ok(());
-            }
-        };
-
-        let next_idx = next_handle.slot().index() as usize;
-        self.task_states[next_idx] = TaskState::Ready;
-        self.current = Some(next_handle);
-
-        let _guard = IrqGuard::new(cpu);
-        // SAFETY: current_idx != next_idx — they are two distinct tasks;
-        // current was the running task (not in the queue) while next was
-        // dequeued from the ready queue. Both indices are within
-        // [0, TASK_ARENA_CAPACITY). Interrupts disabled by IrqGuard.
-        // Audit: UNSAFE-2026-0008.
-        unsafe {
-            let ctx_ptr = self.contexts.as_mut_ptr();
-            // Split-borrow: current and next are at distinct indices,
-            // so the two resulting references do not alias.
-            let cur_ctx = &mut *ctx_ptr.add(current_idx);
-            let nxt_ctx = &*ctx_ptr.add(next_idx);
-            cpu.context_switch(cur_ctx, nxt_ctx);
-        }
-
-        Ok(())
-    }
-
-    // ── IPC bridge ────────────────────────────────────────────────────────────
-
-    /// Send a message; if it was delivered to a waiting receiver, unblock
-    /// that receiver and yield the current task.
-    ///
-    /// # Errors
-    ///
-    /// Propagates [`IpcError`] as [`SchedError::Ipc`].
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "IPC bridge must forward all parameters that ipc_send requires"
-    )]
-    pub fn ipc_send_and_yield(
-        &mut self,
-        cpu: &C,
-        ep_arena: &mut EndpointArena,
-        queues: &mut IpcQueues,
-        caller_table: &mut CapabilityTable,
-        ep_cap: CapHandle,
-        msg: Message,
-        transfer: Option<CapHandle>,
-    ) -> Result<SendOutcome, SchedError> {
-        // Resolve the endpoint handle before calling ipc_send so we can
-        // identify the blocked receiver even after state has changed.
-        let ep_handle = Self::resolve_ep_cap(caller_table, ep_cap)?;
-
-        let outcome = ipc_send(ep_arena, queues, ep_cap, caller_table, msg, transfer)?;
-
-        if outcome == SendOutcome::Delivered {
-            self.unblock_receiver_on(ep_handle);
-            self.yield_now(cpu)?;
-        }
-
-        Ok(outcome)
-    }
-
-    /// Receive a message; if none is ready, block and yield to another task.
-    ///
-    /// When the blocked task is resumed (after a sender delivers), calls
-    /// `ipc_recv` again to collect the delivered message.
-    ///
-    /// # Panics
-    ///
-    /// Panics when all tasks (including this one) are blocked on IPC
-    /// simultaneously, producing a deadlock with no idle task to run.
-    ///
-    /// # Errors
-    ///
-    /// Propagates [`IpcError`] as [`SchedError::Ipc`].
-    pub fn ipc_recv_and_yield(
-        &mut self,
-        cpu: &C,
-        ep_arena: &mut EndpointArena,
-        queues: &mut IpcQueues,
-        caller_table: &mut CapabilityTable,
-        ep_cap: CapHandle,
-    ) -> Result<RecvOutcome, SchedError> {
-        let ep_handle = Self::resolve_ep_cap(caller_table, ep_cap)?;
-
-        let outcome = ipc_recv(ep_arena, queues, ep_cap, caller_table)?;
-
-        if matches!(outcome, RecvOutcome::Pending) {
-            let current_handle = self.current.ok_or(SchedError::NoCurrentTask)?;
-            let current_idx = current_handle.slot().index() as usize;
-            self.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
-            self.current = None;
-
-            #[allow(
-                clippy::panic,
-                reason = "deadlock with no idle task is a fatal A5 condition; \
-                          an idle task is Phase B work (ADR-0019 open questions)"
-            )]
-            let Some(next_handle) = self.ready.dequeue() else {
-                panic!("deadlock: all tasks blocked on IPC and no idle task available");
-            };
-            let next_idx = next_handle.slot().index() as usize;
-            self.task_states[next_idx] = TaskState::Ready;
-            self.current = Some(next_handle);
-
-            let _guard = IrqGuard::new(cpu);
-            // SAFETY: current_idx != next_idx; both valid indices; IRQs
-            // disabled. When this task is later resumed (by another task
-            // calling ipc_send_and_yield → unblock_receiver_on → yield_now),
-            // execution resumes after this context_switch call.
-            // Audit: UNSAFE-2026-0008.
-            unsafe {
-                let ctx_ptr = self.contexts.as_mut_ptr();
-                let cur_ctx = &mut *ctx_ptr.add(current_idx);
-                let nxt_ctx = &*ctx_ptr.add(next_idx);
-                cpu.context_switch(cur_ctx, nxt_ctx);
-            }
-
-            // Resumed here: the sender has delivered; collect the message.
-            // A second Pending result would be a scheduler bug — the sender
-            // should have queued a message before unblocking this task.
-            let result = ipc_recv(ep_arena, queues, ep_cap, caller_table);
-            debug_assert!(
-                !matches!(result, Ok(RecvOutcome::Pending)),
-                "ipc_recv returned Pending after context-switch resume — \
-                 sender must deliver before unblocking receiver"
-            );
-            return result.map_err(SchedError::Ipc);
-        }
-
-        Ok(outcome)
-    }
-
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// Resolve a capability handle to an [`EndpointHandle`].
@@ -462,6 +303,296 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
             }
         }
     }
+}
+
+// ─── Raw-pointer bridge (ADR-0021) ────────────────────────────────────────────
+//
+// The three entry points below replace the former `&mut self` methods
+// `Scheduler::yield_now`, `Scheduler::ipc_send_and_yield`, and
+// `Scheduler::ipc_recv_and_yield`. They take `*mut Scheduler<C>` plus raw
+// pointers to any external shared state (arenas, queues, capability tables)
+// so that *no* `&mut` reference to any of those referents is alive across
+// `cpu.context_switch`. Momentary `&mut` references are materialised only
+// inside narrow inner `unsafe` blocks that end strictly before a switch or
+// begin strictly after a switch returns. See [ADR-0021] for the full
+// contract and the reasoning.
+//
+// # Shared safety contract
+//
+// Every function in this block has the same caller-facing contract. Stating
+// it once here and referring to it from each function keeps each body focused
+// on its own logic.
+//
+// - **Pointer validity.** Every `*mut T` pointer passed in must be non-null,
+//   properly aligned for `T`, and point at a valid, exclusively-owned `T`.
+//   "Exclusively-owned" here follows v1's single-core cooperative invariant:
+//   no two tasks ever run simultaneously, so at any given instant only one
+//   task is executing and thus only one dereference site is live. When a task
+//   is suspended mid-bridge, its stack frame holds only raw pointers (never a
+//   `&mut`), so the other task is free to re-derive its own raw pointers
+//   from the same `UnsafeCell` interiors with no aliasing hazard.
+// - **Non-aliasing across the switch.** No `&mut` reference to `Scheduler<C>`,
+//   `EndpointArena`, `IpcQueues`, or `CapabilityTable` may be alive across
+//   `cpu.context_switch`. Each bridge function honours this by confining
+//   `&mut` materialisation to an inner `unsafe` block that ends before the
+//   switch call site.
+// - **Distinct task indices.** The internal split-borrow on
+//   `(*sched).contexts[current_idx]` vs `contexts[next_idx]` is sound because
+//   the scheduler never enqueues the running task twice; the two indices are
+//   therefore distinct, as already audited under UNSAFE-2026-0008.
+// - **Interrupts disabled.** An [`IrqGuard`] is held for the duration of the
+//   context-switch call; the guard is constructed before the switch and
+//   dropped on return.
+//
+// [ADR-0021]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
+
+/// Yield the current task cooperatively.
+///
+/// Re-enqueues the running task as `Ready` and switches to the head of the
+/// ready queue. If the queue contains no other task, returns without a
+/// switch.
+///
+/// # Errors
+///
+/// Returns [`SchedError::NoCurrentTask`] if called before [`Scheduler::start`].
+///
+/// # Safety
+///
+/// See the "Shared safety contract" above this function's definition.
+/// `sched` must satisfy *Pointer validity* and must not alias any live
+/// `&mut Scheduler<C>` in the caller's scope.
+pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
+    sched: *mut Scheduler<C>,
+    cpu: &C,
+) -> Result<(), SchedError> {
+    // Pre-switch work — momentary &mut Scheduler, dropped before the switch.
+    let (current_idx, next_idx) = {
+        // SAFETY: caller contract — `sched` is valid, exclusively-owned for
+        // the duration of this inner block, and this `&mut` does not cross
+        // the `cpu.context_switch` call below because the block ends first.
+        // Audit: UNSAFE-2026-0014.
+        let s = unsafe { &mut *sched };
+
+        let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
+        let current_idx = current_handle.slot().index() as usize;
+
+        // Re-enqueue current as ready. Cannot be full: the running task was
+        // not in the ready queue (it was dequeued when it started running),
+        // so at most TASK_ARENA_CAPACITY-1 other tasks are queued.
+        s.task_states[current_idx] = TaskState::Ready;
+        let _ = s.ready.enqueue(current_handle);
+
+        // Dequeue the next task.
+        let next_handle = match s.ready.dequeue() {
+            Some(h) if h != current_handle => h,
+            _ => {
+                // Only one ready task exists. The queue is transiently empty
+                // and `s.current` is unchanged. The next yield will re-enqueue
+                // the current task; no switch is performed here.
+                return Ok(());
+            }
+        };
+
+        let next_idx = next_handle.slot().index() as usize;
+        s.task_states[next_idx] = TaskState::Ready;
+        s.current = Some(next_handle);
+
+        (current_idx, next_idx)
+    }; // `s: &mut Scheduler<C>` drops here
+
+    // Switch window — no `&mut Scheduler<C>` is live.
+    let _guard = IrqGuard::new(cpu);
+    // SAFETY: `current_idx != next_idx` by construction (the running task is
+    // never in the ready queue, so `next_handle != current_handle` → distinct
+    // indices). Both indices are within [0, TASK_ARENA_CAPACITY). Interrupts
+    // are disabled by `IrqGuard`. Audit: UNSAFE-2026-0008.
+    unsafe {
+        let ctx_ptr = (*sched).contexts.as_mut_ptr();
+        let cur_ctx = &mut *ctx_ptr.add(current_idx);
+        let nxt_ctx = &*ctx_ptr.add(next_idx);
+        cpu.context_switch(cur_ctx, nxt_ctx);
+    }
+
+    Ok(())
+}
+
+/// Send a message; if the send delivers to a waiting receiver, unblock that
+/// receiver and yield the current task so the receiver can run.
+///
+/// # Errors
+///
+/// Propagates [`IpcError`] as [`SchedError::Ipc`]; returns
+/// [`SchedError::NoCurrentTask`] if the caller-yield path has no current
+/// task (cannot happen after `Scheduler::start`).
+///
+/// # Safety
+///
+/// See the "Shared safety contract" above. Every `*mut` parameter must meet
+/// *Pointer validity*. The four pointers must not alias each other or any
+/// live `&mut` in the caller's scope.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "IPC bridge must forward all parameters that ipc_send requires"
+)]
+pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
+    sched: *mut Scheduler<C>,
+    cpu: &C,
+    ep_arena: *mut EndpointArena,
+    queues: *mut IpcQueues,
+    caller_table: *mut CapabilityTable,
+    ep_cap: CapHandle,
+    msg: Message,
+    transfer: Option<CapHandle>,
+) -> Result<SendOutcome, SchedError> {
+    // Pre-switch work — momentary &muts, dropped before the switch.
+    // SAFETY: caller contract — all four pointers are valid, distinct, and
+    // exclusively-owned for the duration of this inner block. Each `&mut`
+    // materialised in the tuple below lives only inside this block and is
+    // dropped before the `yield_now` call site. Audit: UNSAFE-2026-0014.
+    let (outcome, needs_yield) = unsafe {
+        let s: &mut Scheduler<C> = &mut *sched;
+        let arena_ref: &mut EndpointArena = &mut *ep_arena;
+        let queues_ref: &mut IpcQueues = &mut *queues;
+        let table_ref: &mut CapabilityTable = &mut *caller_table;
+
+        // Resolve the endpoint handle up-front so it remains valid even after
+        // `ipc_send` mutates the endpoint state.
+        let ep_handle = Scheduler::<C>::resolve_ep_cap(table_ref, ep_cap)?;
+
+        let outcome = ipc_send(arena_ref, queues_ref, ep_cap, table_ref, msg, transfer)?;
+
+        let needs_yield = if outcome == SendOutcome::Delivered {
+            s.unblock_receiver_on(ep_handle);
+            true
+        } else {
+            false
+        };
+
+        (outcome, needs_yield)
+    }; // All `&mut`s drop here.
+
+    // Switch window — no `&mut` to any shared state is alive.
+    if needs_yield {
+        // SAFETY: `sched` still satisfies the caller contract; we have just
+        // released our `&mut` so the re-entrant `yield_now` can acquire its
+        // own momentary `&mut` without overlapping ours. Audit: UNSAFE-2026-0014.
+        unsafe {
+            yield_now(sched, cpu)?;
+        }
+    }
+
+    Ok(outcome)
+}
+
+/// Receive a message; if none is ready, mark the current task `Blocked`,
+/// switch to another ready task, and on resume collect the now-delivered
+/// message.
+///
+/// # Panics
+///
+/// Panics when every ready task is blocked on IPC (deadlock) and no idle
+/// task exists. Replacing this panic with a typed error + kernel idle task
+/// is [ADR-0022] / T-007 work.
+///
+/// # Errors
+///
+/// Propagates [`IpcError`] as [`SchedError::Ipc`]; returns
+/// [`SchedError::NoCurrentTask`] if there is no running task when blocking
+/// is required.
+///
+/// # Safety
+///
+/// See the "Shared safety contract" above. Every `*mut` parameter must meet
+/// *Pointer validity*. The four pointers must not alias each other or any
+/// live `&mut` in the caller's scope.
+///
+/// [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
+    sched: *mut Scheduler<C>,
+    cpu: &C,
+    ep_arena: *mut EndpointArena,
+    queues: *mut IpcQueues,
+    caller_table: *mut CapabilityTable,
+    ep_cap: CapHandle,
+) -> Result<RecvOutcome, SchedError> {
+    // Phase 1 — try non-blocking recv, momentary &muts.
+    // SAFETY: caller contract — all pointers valid, distinct, and
+    // exclusively-owned for this inner block. Each `&mut` materialised here
+    // is dropped before the switch below. Audit: UNSAFE-2026-0014.
+    let (ep_handle, outcome) = unsafe {
+        let arena_ref: &mut EndpointArena = &mut *ep_arena;
+        let queues_ref: &mut IpcQueues = &mut *queues;
+        let table_ref: &mut CapabilityTable = &mut *caller_table;
+
+        let ep_handle = Scheduler::<C>::resolve_ep_cap(table_ref, ep_cap)?;
+        let outcome = ipc_recv(arena_ref, queues_ref, ep_cap, table_ref)?;
+        (ep_handle, outcome)
+    };
+
+    if !matches!(outcome, RecvOutcome::Pending) {
+        return Ok(outcome);
+    }
+
+    // Phase 2 — block current, dequeue next, switch. Momentary &mut to
+    // scheduler only, dropped before the switch.
+    let (current_idx, next_idx) = {
+        // SAFETY: caller contract — `sched` valid and exclusive for this
+        // block; `&mut` does not cross the switch below. Audit: UNSAFE-2026-0014.
+        let s = unsafe { &mut *sched };
+        let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
+        let current_idx = current_handle.slot().index() as usize;
+        s.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
+        s.current = None;
+
+        #[allow(
+            clippy::panic,
+            reason = "deadlock with no idle task is a fatal A5/B0 condition; \
+                      idle task and typed SchedError::Deadlock land in ADR-0022 / T-007"
+        )]
+        let Some(next_handle) = s.ready.dequeue() else {
+            panic!("deadlock: all tasks blocked on IPC and no idle task available");
+        };
+        let next_idx = next_handle.slot().index() as usize;
+        s.task_states[next_idx] = TaskState::Ready;
+        s.current = Some(next_handle);
+        (current_idx, next_idx)
+    }; // `s: &mut Scheduler<C>` drops here.
+
+    // Switch window — no `&mut` is alive.
+    {
+        let _guard = IrqGuard::new(cpu);
+        // SAFETY: `current_idx != next_idx` (running task was removed from
+        // the ready queue before dequeue); both indices in range. Audit:
+        // UNSAFE-2026-0008.
+        unsafe {
+            let ctx_ptr = (*sched).contexts.as_mut_ptr();
+            let cur_ctx = &mut *ctx_ptr.add(current_idx);
+            let nxt_ctx = &*ctx_ptr.add(next_idx);
+            cpu.context_switch(cur_ctx, nxt_ctx);
+        }
+    }
+
+    // Phase 3 — resumed; collect the delivered message.
+    // SAFETY: caller contract — arenas/queues/table still valid; the
+    // `&mut`s reacquired here did not exist during the switch. Audit:
+    // UNSAFE-2026-0014.
+    let result = unsafe {
+        let arena_ref = &mut *ep_arena;
+        let queues_ref = &mut *queues;
+        let table_ref = &mut *caller_table;
+        ipc_recv(arena_ref, queues_ref, ep_cap, table_ref)
+    };
+
+    // A second `Pending` result is a scheduler bug — the sender should have
+    // queued a message before unblocking this task. Keep the debug_assert as
+    // a test-only guard; in release builds the error propagates via the
+    // Result return below.
+    debug_assert!(
+        !matches!(result, Ok(RecvOutcome::Pending)),
+        "ipc_recv returned Pending after context-switch resume — \
+         sender must deliver before unblocking receiver"
+    );
+    result.map_err(SchedError::Ipc)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -641,7 +772,13 @@ mod tests {
         // h1 is still in the queue.
         assert_eq!(sched.ready.len(), 1);
 
-        sched.yield_now(&cpu).unwrap();
+        // SAFETY: `sched` is a stack-local `Scheduler<FakeCpu>`; no aliasing
+        // with any other task because the test harness is single-threaded.
+        // `FakeCpu::context_switch` is a marker-only no-op, so the switch
+        // never actually runs — the aliasing invariant is trivially satisfied.
+        unsafe {
+            yield_now(core::ptr::from_mut(&mut sched), &cpu).unwrap();
+        }
 
         assert_eq!(sched.current, Some(h1));
         assert_eq!(sched.task_states[0], TaskState::Ready);
@@ -654,7 +791,10 @@ mod tests {
     fn yield_now_with_no_current_returns_error() {
         let cpu = FakeCpu;
         let mut sched: Scheduler<FakeCpu> = Scheduler::new();
-        assert_eq!(sched.yield_now(&cpu), Err(SchedError::NoCurrentTask));
+        // SAFETY: same reasoning as the test above — `sched` is stack-local,
+        // single-threaded test; no aliasing.
+        let result = unsafe { yield_now(core::ptr::from_mut(&mut sched), &cpu) };
+        assert_eq!(result, Err(SchedError::NoCurrentTask));
     }
 
     #[test]
