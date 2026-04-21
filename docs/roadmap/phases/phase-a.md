@@ -118,7 +118,7 @@ Synchronous rendezvous endpoints and asynchronous notifications. Capability tran
 
 ### Tasks under A4
 
-- [T-003 — IPC primitives](../../analysis/tasks/phase-a/T-003-ipc-primitives.md) — In Review.
+- [T-003 — IPC primitives](../../analysis/tasks/phase-a/T-003-ipc-primitives.md) — Done.
 
 ### Informs
 
@@ -147,6 +147,10 @@ The first real scheduler: cooperative yield-based, with a context-switch primiti
 - Cpu trait v2 lands in `umbrix-hal`; BSP provides the asm.
 - Two kernel-level tasks yield back and forth; this is observable via console output from inside QEMU.
 - `unsafe` around the context switch is audited; the safe wrapper's invariants are stated in its `# Safety` doc.
+
+### Tasks under A5
+
+- [T-004 — Cooperative scheduler](../../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) — Draft.
 
 ### Informs
 

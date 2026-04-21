@@ -5,18 +5,18 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 ---
 
 - **Active phase:** A — Kernel core on QEMU `virt`.
-- **Active milestone:** A4 — IPC primitives.
-- **Active task:** [T-003 — IPC primitives](../analysis/tasks/phase-a/T-003-ipc-primitives.md) (status: **In Review**).
+- **Active milestone:** A5 — Cooperative scheduler and context switch.
+- **Active task:** [T-004 — Cooperative scheduler](../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) (status: **Draft**).
 - **Working branch:** `development`.
-- **Last completed milestone:** A3 — Kernel objects, on 2026-04-21 (PR merged to `main`).
-- **Last completed task:** [T-002 — Kernel object storage foundation](../analysis/tasks/phase-a/T-002-kernel-object-storage.md) — `Done` 2026-04-21.
+- **Last completed milestone:** A4 — IPC primitives, on 2026-04-21 (PR merged to `main`).
+- **Last completed task:** [T-003 — IPC primitives](../analysis/tasks/phase-a/T-003-ipc-primitives.md) — `Done` 2026-04-21.
 - **Last review:** [A2 completion business review](../analysis/reviews/business-reviews/2026-04-21-A2-completion.md) — 2026-04-21.
-- **Next review trigger:** PR merge of T-003 to `main` (code + security review currently in progress); A4 business review waits for A6 per [phase-a.md closure](phases/phase-a.md).
+- **Next review trigger:** code + security review of T-004 when it reaches `In Review`; A4/A5 business review waits for A6 per [phase-a.md closure](phases/phase-a.md).
 
 ## Notes
 
-- The capability subsystem (T-001), kernel-object subsystem (T-002), and IPC-primitive subsystem (T-003) form the Phase A stack. T-001 and T-002 both shipped with zero `unsafe` and no heap. Neither subsystem is wired into `run` yet; that is Phase-A later-milestone work.
-- [ADR-0014](../decisions/0014-capability-representation.md) and [ADR-0016](../decisions/0016-kernel-object-storage.md) both Accepted.
-- T-002 introduced `obj::{Arena, Task, Endpoint, Notification}` with typed handles and rewired `CapObject` to a typed enum paralleling `CapKind`. `Capability::new` lost its redundant `kind` parameter (kind is now derived from the object's variant). 44 host tests green (kernel crate).
-- ADR-0017 Accepted: `send` + `recv` + `notify`, fixed-size 4-word `Message`, ≤ 1 cap per message, `reply_recv` and badge scheme deferred to ADR-0018. T-003 implementation complete; 55/55 tests pass; status → In Review.
+- The capability subsystem (T-001), kernel-object subsystem (T-002), and IPC-primitive subsystem (T-003) form the Phase A stack. All three shipped with zero `unsafe` and no heap. None is wired into `run` yet; that is Phase-A later-milestone work.
+- [ADR-0014](../decisions/0014-capability-representation.md), [ADR-0016](../decisions/0016-kernel-object-storage.md), and [ADR-0017](../decisions/0017-ipc-primitive-set.md) all Accepted.
+- T-003 (A4) delivered `ipc_send` / `ipc_recv` / `ipc_notify` with generation-tracked `IpcQueues`, atomic capability transfer, and TRANSFER-right enforcement. 64 host tests green; status → Done 2026-04-21.
+- A5 (T-004) opens: cooperative scheduler with context switch. Requires ADR-0019 (scheduler shape) and ADR-0020 (`Cpu` trait v2 / context-switch extension).
 - The maintainer updates this file when the active task changes. AI agents update it when they move a task to `In Progress` or `Done` via the [`start-task`](../../.claude/skills/start-task/SKILL.md) and [`conduct-review`](../../.claude/skills/conduct-review/SKILL.md) skills.
