@@ -1,11 +1,11 @@
 # Phase B — tasks
 
-Tasks belonging to [Phase B](../../../roadmap/phases/phase-b.md).
+Tasks belonging to [Phase B — Real userspace](../../../roadmap/phases/phase-b.md).
 
 ## Index
 
-_No tasks yet._ Tasks are added here as they become active; see the phase plan for the expected scope and milestones.
-
 | ID | Title | Milestone | Status |
 |----|-------|-----------|--------|
-| _(pending)_ | — | — | — |
+| [T-006](T-006-raw-pointer-scheduler-api.md) | Raw-pointer scheduler API refactor | B0 | In Progress (opened 2026-04-22) |
+
+Tasks are added here as they become active. See [`../../../roadmap/phases/phase-b.md`](../../../roadmap/phases/phase-b.md) for the full phase plan.

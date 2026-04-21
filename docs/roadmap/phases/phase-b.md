@@ -49,12 +49,12 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 
 ### Tasks under B0
 
-- T-006 — Raw-pointer scheduler API refactor + TaskArena global migration
-- T-007 — Idle task + typed scheduler deadlock error + hardening bundle
-- T-008 — Architecture docs for kernel-objects / IPC / scheduler
-- T-009 — Timer initialisation and CNTPCT_EL0-based measurement
-- T-010 — (optional) Split of T-007 if ADR-0022 scope grows past one task
-- T-011 — Missing-tests bundle (ReceiverTableFull + slot-reuse + deadlock-as-error tests)
+- [T-006 — Raw-pointer scheduler API refactor + TaskArena global migration](../../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — In Progress (opened 2026-04-22)
+- T-007 — Idle task + typed scheduler deadlock error + hardening bundle *(not yet opened)*
+- T-008 — Architecture docs for kernel-objects / IPC / scheduler *(not yet opened)*
+- T-009 — Timer initialisation and CNTPCT_EL0-based measurement *(not yet opened)*
+- T-010 — (optional) Split of T-007 if ADR-0022 scope grows past one task *(not yet opened)*
+- T-011 — Missing-tests bundle (ReceiverTableFull + slot-reuse + deadlock-as-error tests) *(not yet opened)*
 
 ### Flags to resolve during B0
 

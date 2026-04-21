@@ -6,7 +6,7 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 
 - **Active phase:** B — opened 2026-04-21 after Phase-A reviews landed; first milestone is B0 (Phase A exit hygiene).
 - **Active milestone:** B0 — Phase A exit hygiene. Contains the three Phase-B blockers surfaced by the 2026-04-21 security review (raw-pointer scheduler API, idle task + typed deadlock, cross-table revocation policy) plus the architecture-doc follow-ups, timer initialisation, and the scheduler/IPC hardening bundle.
-- **Active task:** none in progress. Next task to open is **T-006 — Raw-pointer scheduler API refactor** (ADR-0021 writing is the first step inside that task).
+- **Active task:** [T-006 — Raw-pointer scheduler API refactor](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — `In Progress` since 2026-04-22. Next step inside T-006: write ADR-0021 (raw-pointer scheduler IPC-bridge API) via the [`write-adr`](../../.claude/skills/write-adr/SKILL.md) skill; implementation and tests land after the ADR is Accepted.
 - **Working branch:** `development`.
 - **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.**
 - **Last completed task:** [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — `Done` 2026-04-21.
