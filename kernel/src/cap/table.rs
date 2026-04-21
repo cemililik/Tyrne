@@ -226,9 +226,9 @@ impl CapabilityTable {
     }
 
     /// Install a child capability — one whose parent is `src`. Typically
-    /// used when narrowing the capability's *scope*; v1 passes scope
-    /// narrowing through the opaque `new_object` since kernel objects do
-    /// not yet carry typed scope.
+    /// used when narrowing the capability's *scope*: the caller supplies
+    /// narrowed rights and a `new_object` identifying the target kernel
+    /// object.
     ///
     /// # Errors
     ///
@@ -767,6 +767,26 @@ mod tests {
         // Cap-drop removes the reference.
         t.cap_drop(h).unwrap();
         assert!(!t.references_object(target));
+    }
+
+    #[test]
+    fn cap_revoke_clears_references_object() {
+        // After cap_revoke, references_object must return false for the
+        // objects named only by the revoked descendants.
+        let mut t = CapabilityTable::new();
+        let target = task_object(0xEE);
+        let root = t
+            .insert_root(Capability::new(all_rights(), task_object(0xAA)))
+            .unwrap();
+        let child = t.cap_derive(root, all_rights(), target).unwrap();
+
+        assert!(t.references_object(target), "child names the target");
+        t.cap_revoke(root).unwrap();
+        assert!(
+            !t.references_object(target),
+            "revoke must clear the child's reference"
+        );
+        assert_eq!(t.lookup(child).unwrap_err(), CapError::InvalidHandle);
     }
 
     #[test]

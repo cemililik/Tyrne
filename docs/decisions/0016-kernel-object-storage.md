@@ -137,9 +137,9 @@ The outer API of [`CapabilityTable`](../../kernel/src/cap/table.rs) does not cha
 ### Lifecycle
 
 - **Creation.** `create_task(args) -> Result<TaskHandle, ObjError>` — allocates a slot, fills it, returns the handle. A companion kernel path installs the initial capability in the creator's `CapabilityTable`.
-- **Destruction.** `destroy_task(handle) -> Result<(), ObjError>`:
-  - If any capability still names this object (reachability query), return `ObjError::StillReachable`. v1's reachability check is a simple "is there any live `CapObject` in any known `CapabilityTable` that points at this handle?" — an acceptable O(n) cost at Phase A's scale, replaceable by a per-object refcount in a later ADR if it earns its place.
-  - Otherwise, free the slot (bump the generation, return it to the arena's free list). All stale handles fail their generation check on next lookup.
+- **Destruction.** `destroy_task(handle) -> Result<Task, ObjError>` (symmetric for `Endpoint` and `Notification`):
+  - Frees the slot (bumps the generation, returns it to the arena's free list) and returns the stored value. All stale handles fail their generation check on next lookup.
+  - **Reachability is caller-managed.** The destroy functions do not walk capability tables. Callers that need the reachability invariant check via [`CapabilityTable::references_object`](../../kernel/src/cap/table.rs) before calling destroy, and return `ObjError::StillReachable` to their own callers if any table still names the handle. v1's reachability check is an acceptable O(n) scan at Phase A's scale; a per-object refcount replaces it in a later ADR if measurement demands it.
 - **No drop-on-last-cap-drop in v1.** Capability drops / revocations do not reach into kernel-object arenas; the arenas are separately managed. A future ADR may couple them, but v1 keeps the two concerns distinct.
 
 ### Global state

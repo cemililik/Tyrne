@@ -126,6 +126,7 @@ impl<T, const N: usize> Arena<T, N> {
     /// Returns `None` when every slot is in use.
     pub fn allocate(&mut self, value: T) -> Option<SlotId> {
         let head = self.free_head?;
+        debug_assert!((head as usize) < N, "free_head out of bounds");
         let slot = self.slots.get_mut(head as usize)?;
         let next_free = slot.next_free;
         slot.entry = Some(value);

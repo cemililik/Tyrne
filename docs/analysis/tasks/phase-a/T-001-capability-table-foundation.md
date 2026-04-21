@@ -25,23 +25,23 @@ This task deliberately stops short of introducing the kernel objects capabilitie
 
 ## Acceptance criteria
 
-- [ ] **ADR-0014 Accepted.** Defines: in-kernel capability representation (struct layout, rights bits, object-reference encoding), handle type exposed to callers, derivation-tree storage (intrusive vs. index-based), per-task bound on table size, and the error type for operations.
-- [ ] **`CapabilityTable` type** in a new `umbrix_kernel::cap` module. Bounded capacity (compile-time or per-instance), no heap allocation.
-- [ ] **`Capability` type** (enum or struct with a kind field) covering the v1 placeholder variants. Concrete object references are placeholders until Milestone A3 replaces them — the point is the *table's* correctness, not the objects'.
-- [ ] **Rights** (`CapRights` or similar) represented as a bitfield with the operations exposed so far: duplicate, derive, revoke, transfer-on-IPC (placeholder — no IPC yet).
-- [ ] **Handle-based access.** Callers receive a `CapHandle` (opaque index); raw capability bits are never exposed.
-- [ ] **Four operations** implemented:
+- [x] **ADR-0014 Accepted.** Defines: in-kernel capability representation (struct layout, rights bits, object-reference encoding), handle type exposed to callers, derivation-tree storage (intrusive vs. index-based), per-task bound on table size, and the error type for operations.
+- [x] **`CapabilityTable` type** in a new `umbrix_kernel::cap` module. Bounded capacity (compile-time or per-instance), no heap allocation.
+- [x] **`Capability` type** (enum or struct with a kind field) covering the v1 placeholder variants. Concrete object references are placeholders until Milestone A3 replaces them — the point is the *table's* correctness, not the objects'.
+- [x] **Rights** (`CapRights` or similar) represented as a bitfield with the operations exposed so far: duplicate, derive, revoke, transfer-on-IPC (placeholder — no IPC yet).
+- [x] **Handle-based access.** Callers receive a `CapHandle` (opaque index); raw capability bits are never exposed.
+- [x] **Four operations** implemented:
   - `cap_copy(src, narrower_rights) -> Result<CapHandle, CapError>` — install a peer in the caller's table with the same or narrower rights.
   - `cap_derive(src, narrower_scope) -> Result<CapHandle, CapError>` — install a child capability whose scope is strictly narrower; record the parent-child relationship.
   - `cap_revoke(src) -> Result<(), CapError>` — invalidate the derivation subtree rooted at `src`.
   - `cap_drop(handle) -> Result<(), CapError>` — release a capability from the caller's table with no effect on others.
-- [ ] **Move-only discipline.** The `Capability` type must not be `Copy` or `Clone`. Duplication is strictly through `cap_copy` or an explicit in-kernel duplication operation; the Rust type system enforces this.
-- [ ] **Rights narrowing invariant.** `cap_copy` and `cap_derive` cannot broaden rights; a test demonstrates that attempting to widen returns an error.
-- [ ] **Revocation cascade.** A test constructs a derivation tree of depth ≥ 3 and verifies that revoking a parent invalidates all descendants atomically.
-- [ ] **Bounded state.** A test fills the capability table to capacity and confirms the next insert returns `CapError::CapsExhausted` rather than panicking or allocating. See [architectural-principles.md — bounded kernel state](../../../standards/architectural-principles.md) and [security-model.md — Bounded kernel resources](../../../architecture/security-model.md).
-- [ ] **Documentation:** new rustdoc on every public item; no `missing_docs` warnings.
-- [ ] **Tests:** unit tests in the kernel module (using `#[cfg(test)]`), plus any integration tests that need `test-hal` fakes.
-- [ ] **No new `unsafe`** if achievable; if any is required, audit-log entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
+- [x] **Move-only discipline.** The `Capability` type must not be `Copy` or `Clone`. Duplication is strictly through `cap_copy` or an explicit in-kernel duplication operation; the Rust type system enforces this.
+- [x] **Rights narrowing invariant.** `cap_copy` and `cap_derive` cannot broaden rights; a test demonstrates that attempting to widen returns an error.
+- [x] **Revocation cascade.** A test constructs a derivation tree of depth ≥ 3 and verifies that revoking a parent invalidates all descendants atomically.
+- [x] **Bounded state.** A test fills the capability table to capacity and confirms the next insert returns `CapError::CapsExhausted` rather than panicking or allocating. See [architectural-principles.md — bounded kernel state](../../../standards/architectural-principles.md) and [security-model.md — Bounded kernel resources](../../../architecture/security-model.md).
+- [x] **Documentation:** new rustdoc on every public item; no `missing_docs` warnings.
+- [x] **Tests:** unit tests in the kernel module (using `#[cfg(test)]`), plus any integration tests that need `test-hal` fakes.
+- [x] **No new `unsafe`** if achievable; if any is required, audit-log entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
 
 ## Out of scope
 
@@ -73,14 +73,14 @@ Every step keeps `cargo host-test` green.
 
 ## Definition of done
 
-- [ ] `cargo fmt --all -- --check` clean.
-- [ ] `cargo host-clippy -- -D warnings` clean.
-- [ ] `cargo kernel-clippy` clean (the kernel builds for aarch64 with the new code).
-- [ ] `cargo host-test` passes with the new tests; coverage-of-contract is readable from the test names.
-- [ ] Any new `unsafe` has an audit entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md). Ideally none.
-- [ ] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md). At minimum: ADR-0014 as one commit, implementation as one commit. Trailers `Refs: ADR-0014, ADR-0001`.
-- [ ] [`../../../roadmap/current.md`](../../../roadmap/current.md) updated on status transitions (to `In Progress`, then `In Review`, then `Done`).
-- [ ] Milestone A2 business review written after this task is Done, per [`conduct-review`](../../../../.claude/skills/conduct-review/SKILL.md).
+- [x] `cargo fmt --all -- --check` clean.
+- [x] `cargo host-clippy -- -D warnings` clean.
+- [x] `cargo kernel-clippy` clean (the kernel builds for aarch64 with the new code).
+- [x] `cargo host-test` passes with the new tests; coverage-of-contract is readable from the test names.
+- [x] Any new `unsafe` has an audit entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md). Ideally none.
+- [x] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md). At minimum: ADR-0014 as one commit, implementation as one commit. Trailers `Refs: ADR-0014, ADR-0001`.
+- [x] [`../../../roadmap/current.md`](../../../roadmap/current.md) updated on status transitions (to `In Progress`, then `In Review`, then `Done`).
+- [x] Milestone A2 business review written after this task is Done, per [`conduct-review`](../../../../.claude/skills/conduct-review/SKILL.md).
 
 ## Design notes
 

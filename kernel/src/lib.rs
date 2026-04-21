@@ -19,7 +19,7 @@
 //! ## Subsystems
 //!
 //! - [`obj`] — kernel-object subsystem (Phase A3 / [T-002]): per-type
-//!   arenas holding the concrete entities capabilities name.
+//!   arenas holding the concrete entities that capabilities name.
 //! - [`cap`] — capability subsystem (Phase A2 / [T-001]), the substrate every
 //!   later subsystem refers through for authority.
 //!

@@ -143,5 +143,12 @@ mod tests {
         let handle = create_notification(&mut arena, Notification::new(0)).unwrap();
         destroy_notification(&mut arena, handle).unwrap();
         assert!(get_notification(&arena, handle).is_none());
+        // Reallocating reuses the same slot with a bumped generation; the
+        // original handle must still fail lookup (generation mismatch).
+        let _new_handle = create_notification(&mut arena, Notification::new(1)).unwrap();
+        assert!(
+            get_notification(&arena, handle).is_none(),
+            "stale handle must fail after slot reuse"
+        );
     }
 }

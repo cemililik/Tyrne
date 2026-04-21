@@ -33,7 +33,6 @@ pub mod endpoint;
 pub mod notification;
 pub mod task;
 
-pub use arena::{Arena, SlotId};
 pub use endpoint::{Endpoint, EndpointArena, EndpointHandle};
 pub use notification::{Notification, NotificationArena, NotificationHandle};
 pub use task::{Task, TaskArena, TaskHandle};
@@ -61,8 +60,10 @@ pub enum ObjError {
     /// The handle does not name a live slot — either never allocated,
     /// already freed, or stale after reuse.
     InvalidHandle,
-    /// Destruction was refused because a watcher capability table still
-    /// names the object. The caller must `cap_revoke` or `cap_drop`
-    /// every reaching capability before retrying.
+    /// Returned by callers that enforce the reachability invariant: at
+    /// least one capability table still names the object. The `destroy_*`
+    /// functions themselves do not walk tables; callers check via
+    /// [`crate::cap::CapabilityTable::references_object`] and return this
+    /// variant when any table still names the handle.
     StillReachable,
 }

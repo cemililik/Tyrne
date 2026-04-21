@@ -26,7 +26,7 @@
 
 - **ADR-0014 — Capability representation** (Accepted 2026-04-20). Index-based arena with generation-tagged handles, move-only `Capability`, narrowing-only rights.
 - **ADR-0015 — AI integration stance** (Accepted 2026-04-20). Kernel stays AI-neutral; AI features live opt-in in userspace per Plan C.
-- **ADR-0016 — Kernel object storage** (Proposed 2026-04-21). Per-type fixed-size-block arenas with typed handles, mirroring the capability-table shape.
+- **ADR-0016 — Kernel object storage** (Proposed 2026-04-21 — snapshot; Accepted the same day). Per-type fixed-size-block arenas with typed handles, mirroring the capability-table shape.
 
 ### Tasks reaching `Done`
 
