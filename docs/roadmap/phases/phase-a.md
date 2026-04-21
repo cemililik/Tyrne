@@ -118,7 +118,7 @@ Synchronous rendezvous endpoints and asynchronous notifications. Capability tran
 
 ### Tasks under A4
 
-- [T-003 — IPC primitives](../../analysis/tasks/phase-a/T-003-ipc-primitives.md) — In Progress.
+- [T-003 — IPC primitives](../../analysis/tasks/phase-a/T-003-ipc-primitives.md) — In Review.
 
 ### Informs
 

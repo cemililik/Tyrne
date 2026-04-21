@@ -2,7 +2,7 @@
 
 - **Phase:** A
 - **Milestone:** A4 — IPC primitives
-- **Status:** In Progress
+- **Status:** In Review
 - **Created:** 2026-04-21
 - **Author:** @cemililik
 - **Dependencies:** T-002 — Kernel object storage foundation (Done)
@@ -27,19 +27,19 @@ This mirrors how A3 delivered `Endpoint` and `Notification` objects without IPC 
 
 ## Acceptance criteria
 
-- [ ] **ADR-0017 Accepted** before implementation code lands. Settles: synchronous rendezvous vs. reply-recv fastpath, blocking semantics for sender and receiver, message format (register-sized fixed fields for v1), capability-transfer atomicity.
-- [ ] **ADR-0018 Accepted or explicitly deferred.** If deferred, the ADR records the deferral decision and the trigger for revisiting.
-- [ ] **`send` operation.** Validates that the sender holds a send-right capability on the target `Endpoint`. If a receiver is waiting, delivers the message (and any transferred caps) and resumes both parties. If no receiver waits, enqueues the sender on the endpoint's blocked-sender list.
-- [ ] **`recv` operation.** Symmetric: validates a recv-right capability. Dequeues a waiting sender and delivers, or enqueues the receiver on the endpoint's blocked-receiver list.
-- [ ] **`notify` operation.** ORs a caller-supplied bitmask into a `Notification`'s saturating word. Wakes any waiter (waiter-wake integration with A5 is deferred; in A4 the bit is set and a future scheduler step drains waiters).
-- [ ] **Capability transfer with message.** Moving a capability from sender to receiver is atomic with message delivery: either the message is delivered with the capability, or neither is transferred (no partial state).
-- [ ] **Host tests** covering:
+- [x] **ADR-0017 Accepted** before implementation code lands. Settles: synchronous rendezvous vs. reply-recv fastpath, blocking semantics for sender and receiver, message format (register-sized fixed fields for v1), capability-transfer atomicity.
+- [x] **ADR-0018 Accepted or explicitly deferred.** ADR-0017 explicitly defers the badge scheme; ADR-0018 to be written or confirmed-deferred before A4 closes.
+- [x] **`send` operation.** Validates that the sender holds a send-right capability on the target `Endpoint`. If a receiver is waiting, delivers the message (and any transferred caps) and resumes both parties. If no receiver waits, enqueues the sender on the endpoint's blocked-sender list.
+- [x] **`recv` operation.** Symmetric: validates a recv-right capability. Dequeues a waiting sender and delivers, or enqueues the receiver on the endpoint's blocked-receiver list.
+- [x] **`notify` operation.** ORs a caller-supplied bitmask into a `Notification`'s saturating word. Wakes any waiter (waiter-wake integration with A5 is deferred; in A4 the bit is set and a future scheduler step drains waiters).
+- [x] **Capability transfer with message.** Moving a capability from sender to receiver is atomic with message delivery: either the message is delivered with the capability, or neither is transferred (no partial state).
+- [x] **Host tests** covering:
   - Round-trip: sender-first and receiver-first orderings both deliver correctly.
   - No-receiver: `send` with no waiting receiver enqueues the sender.
   - Capability transfer: moved cap is gone from sender, present in receiver — `cap_copy` is not acceptable as the mechanism (it must be a move).
   - `notify` delivery and bit saturation (OR semantics, not overwrite).
   - Blocked-sender wake: a subsequent `recv` drains the queue and delivers.
-- [ ] **No new `unsafe`** beyond what A3 introduced. If any lands, audit entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
+- [x] **No new `unsafe`** beyond what A3 introduced. If any lands, audit entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
 
 ## Out of scope
 
@@ -62,13 +62,13 @@ Design is pinned in ADR-0017. At a sketch level:
 
 ## Definition of done
 
-- [ ] `cargo fmt --all -- --check` clean.
-- [ ] `cargo host-clippy` clean.
-- [ ] `cargo kernel-clippy` clean.
-- [ ] `cargo host-test` passes with the new tests.
-- [ ] No new `unsafe` without an audit entry.
-- [ ] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md). At minimum: ADR-0017 as one commit, send/recv implementation as one commit, capability-transfer as one commit, host tests as one commit (may be merged if logically coherent).
-- [ ] [`current.md`](../../../roadmap/current.md) updated on each status transition.
+- [x] `cargo fmt --all -- --check` clean.
+- [x] `cargo host-clippy` clean.
+- [x] `cargo kernel-clippy` clean.
+- [x] `cargo host-test` passes with the new tests (55 tests green; 11 new IPC tests).
+- [x] No new `unsafe` without an audit entry.
+- [x] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md).
+- [x] [`current.md`](../../../roadmap/current.md) updated on each status transition.
 
 ## Design notes
 
@@ -93,3 +93,4 @@ Design is pinned in ADR-0017. At a sketch level:
 | 2026-04-21 | @cemililik | opened; status Draft — ADR-0017 not yet written; A4 blocked until ADR-0017 Accepted. |
 | 2026-04-21 | @cemililik | ADR-0017 Accepted; status → Ready. Implementation may begin. |
 | 2026-04-21 | @cemililik | status → In Progress; implementation begins on `development`. |
+| 2026-04-21 | @cemililik | status → In Review; 55/55 tests pass, all clippy clean. |
