@@ -15,6 +15,19 @@
 //! orchestration layer on top of [`crate::ipc`]; the IPC module itself
 //! remains ignorant of scheduling concerns.
 //!
+//! # Idle task
+//!
+//! Per [ADR-0022], the BSP is responsible for registering a kernel idle
+//! task via [`add_task`] during boot. The idle task's entry function loops
+//! `Cpu::wait_for_interrupt` + `yield_now`; it is a regular ready-queue
+//! resident and never leaves it. With idle registered, the ready queue is
+//! structurally never empty, so [`SchedError::Deadlock`] is a defensive
+//! return rather than an everyday path. Without idle, every `ipc_recv_and_yield`
+//! that would have otherwise panicked now returns `Err(SchedError::Deadlock)`
+//! with the scheduler state restored to its pre-call shape.
+//!
+//! [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+//!
 //! [T-004]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
 //! [ADR-0019]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0019-scheduler-shape.md
 //! [ADR-0020]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
@@ -135,6 +148,20 @@ pub enum SchedError {
     QueueFull,
     /// IPC operation failed.
     Ipc(IpcError),
+    /// The ready queue is empty while the current task has just blocked —
+    /// every task in the system is waiting on IPC and no idle task is
+    /// registered. Per [ADR-0022], registering a BSP idle task at boot
+    /// makes this variant structurally unreachable in the v1 cooperative
+    /// workload; it is preserved as a defensive return for preemption /
+    /// SMP / "BSP forgot to register idle" so the kernel never panics on
+    /// a userspace-reachable condition.
+    ///
+    /// When this is returned from [`ipc_recv_and_yield`], the caller's
+    /// scheduler state is restored to what it was before the call — the
+    /// current task is not left marked `Blocked`.
+    ///
+    /// [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+    Deadlock,
 }
 
 impl From<IpcError> for SchedError {
@@ -548,17 +575,21 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
 /// switch to another ready task, and on resume collect the now-delivered
 /// message.
 ///
-/// # Panics
-///
-/// Panics when every ready task is blocked on IPC (deadlock) and no idle
-/// task exists. Replacing this panic with a typed error + kernel idle task
-/// is [ADR-0022] / T-007 work.
-///
 /// # Errors
 ///
-/// Propagates [`IpcError`] as [`SchedError::Ipc`]; returns
-/// [`SchedError::NoCurrentTask`] if there is no running task when blocking
-/// is required.
+/// - [`SchedError::NoCurrentTask`] — no running task when blocking is required.
+/// - [`SchedError::Deadlock`] — the ready queue is empty after blocking
+///   the current task (every task is waiting on IPC and no idle task is
+///   registered). The scheduler state is restored before the return so
+///   this variant leaves the caller's world unchanged. Per [ADR-0022],
+///   registering an idle task at boot makes this variant unreachable in
+///   the v1 cooperative workload.
+/// - [`SchedError::Ipc`] — wraps [`IpcError`] failures from the underlying
+///   [`ipc_recv`] calls. In particular,
+///   [`IpcError::PendingAfterResume`] is returned when the resume-path
+///   `ipc_recv` still returns `Pending` after a cooperative context switch
+///   — a scheduler invariant violation that in debug builds also fires a
+///   `debug_assert!`.
 ///
 /// # Safety
 ///
@@ -595,22 +626,27 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
 
     // Phase 2 — block current, dequeue next, switch. Momentary &mut to
     // scheduler only, dropped before the switch.
+    //
+    // If the ready queue is empty after blocking the current task, every
+    // task in the system is blocked on IPC and no idle task is registered
+    // (ADR-0022). The pre-block scheduler state is restored before
+    // returning `Err(SchedError::Deadlock)` so the caller observes the
+    // same state it had before the bridge was called.
     let (current_idx, next_idx) = {
         // SAFETY: caller contract — `sched` valid and exclusive for this
         // block; `&mut` does not cross the switch below. Audit: UNSAFE-2026-0014.
         let s = unsafe { &mut *sched };
         let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
         let current_idx = current_handle.slot().index() as usize;
+        let prior_state = s.task_states[current_idx];
         s.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
         s.current = None;
 
-        #[allow(
-            clippy::panic,
-            reason = "deadlock with no idle task is a fatal A5/B0 condition; \
-                      idle task and typed SchedError::Deadlock land in ADR-0022 / T-007"
-        )]
         let Some(next_handle) = s.ready.dequeue() else {
-            panic!("deadlock: all tasks blocked on IPC and no idle task available");
+            // Restore so Err(Deadlock) leaves the scheduler unchanged.
+            s.task_states[current_idx] = prior_state;
+            s.current = Some(current_handle);
+            return Err(SchedError::Deadlock);
         };
         let next_idx = next_handle.slot().index() as usize;
         s.task_states[next_idx] = TaskState::Ready;
@@ -648,15 +684,20 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     };
 
     // A second `Pending` result is a scheduler bug — the sender should have
-    // queued a message before unblocking this task. Keep the debug_assert as
-    // a test-only guard; in release builds the error propagates via the
-    // Result return below.
+    // queued a message before unblocking this task. The debug_assert fires
+    // loudly in test/debug builds; release builds propagate the typed
+    // IpcError::PendingAfterResume via SchedError::Ipc per ADR-0022 so a
+    // stripped assert never silently decays into a caller-side panic.
     debug_assert!(
         !matches!(result, Ok(RecvOutcome::Pending)),
         "ipc_recv returned Pending after context-switch resume — \
          sender must deliver before unblocking receiver"
     );
-    result.map_err(SchedError::Ipc)
+    match result {
+        Ok(RecvOutcome::Pending) => Err(SchedError::Ipc(IpcError::PendingAfterResume)),
+        Ok(outcome) => Ok(outcome),
+        Err(e) => Err(SchedError::Ipc(e)),
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

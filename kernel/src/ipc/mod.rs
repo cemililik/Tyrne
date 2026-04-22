@@ -83,6 +83,17 @@ pub enum IpcError {
     /// The receiver's capability table has no free slot; cap transfer aborted.
     /// The message itself is not delivered — retry after freeing a slot.
     ReceiverTableFull,
+    /// The scheduler bridge's resume path observed an `ipc_recv` that still
+    /// returned `Pending` after a cooperative context switch. Per
+    /// [ADR-0022], this indicates a scheduler invariant violation: the
+    /// sender that was supposed to deliver before unblocking the receiver
+    /// either did not deliver or unblocked the wrong task. The bridge
+    /// returns this variant (wrapped as `SchedError::Ipc(PendingAfterResume)`)
+    /// instead of silently decoding as `Ok(Pending)` which the caller would
+    /// turn into a downstream panic.
+    ///
+    /// [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+    PendingAfterResume,
 }
 
 /// Outcome of a successful [`ipc_send`].
