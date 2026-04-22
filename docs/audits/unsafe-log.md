@@ -131,16 +131,17 @@ Entries are **append-only**. When an `unsafe` region is removed, its entry gains
 - **Reviewed by:** @cemililik.
 - **Status:** Active.
 
-### UNSAFE-2026-0011 — `unsafe impl Sync for TaskStack`
+### UNSAFE-2026-0011 — `unsafe impl Sync for TaskStack` + `TaskStack::top` pointer arithmetic
 
-- **Introduced:** 2026-04-21, T-004 / A5 BSP bootstrap.
-- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `unsafe impl Sync for TaskStack`.
-- **Operation:** Declares that `&TaskStack` can be shared across threads, allowing `static TASK_A_STACK` / `TASK_B_STACK` to satisfy the `Sync` bound on `static`.
+- **Introduced:** 2026-04-21, T-004 / A5 BSP bootstrap. Scope extended 2026-04-22 during R1 audit sweep (this commit) to explicitly cover `TaskStack::top`'s inner `unsafe` block.
+- **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `unsafe impl Sync for TaskStack` (the marker) and `TaskStack::top` (the consumer). Both are covered by a single entry because they operate on the same pattern.
+- **Operation:** The `unsafe impl Sync` declares that `&TaskStack` can be shared across threads, allowing `static TASK_A_STACK` / `TASK_B_STACK` / `TASK_IDLE_STACK` to satisfy the `Sync` bound on `static`. `TaskStack::top` dereferences the inner `UnsafeCell<[u8; 4096]>` raw pointer and computes a one-past-end pointer (`add(4096)`) to supply the initial stack pointer to [`ContextSwitch::init_context`].
 - **Invariants relied on:**
   - Single-core cooperative kernel: only one task uses each stack at a time.
-  - The inner `UnsafeCell<[u8; 4096]>` is only accessed via `TaskStack::top`, which returns a raw pointer; no safe reference to the interior is ever materialised.
+  - The inner `UnsafeCell<[u8; 4096]>` is only accessed via `TaskStack::top`, which returns a raw pointer; no safe reference to the interior is ever materialised at the BSP layer (ADR-0021 compliance).
   - Stack lifetimes exceed the tasks that use them (static storage).
-- **Rejected alternatives:** Wrapping in `Mutex` adds lock overhead inappropriate for a bare-metal stack. `static mut` exposes the interior unsafely and makes aliasing analysis harder. `UnsafeCell` with manual discipline is the minimal and standard pattern for bare-metal static storage.
+  - `add(4096)` produces a one-past-end pointer on a `[u8; 4096]`, which is defined behaviour; the returned pointer is never dereferenced by `top()` itself — only by `init_context`, whose `# Safety` contract the caller has already accepted.
+- **Rejected alternatives:** Wrapping in `Mutex` adds lock overhead inappropriate for a bare-metal stack. `static mut` exposes the interior unsafely and makes aliasing analysis harder. For `top()` specifically, safe slice indexing (`&self.0[4096..]`) cannot produce a one-past-end raw pointer without materialising a `&mut [u8]`, which would violate ADR-0021 by carrying a live `&mut` into task setup. `UnsafeCell` with manual discipline is the minimal and standard pattern for bare-metal static storage.
 - **Reviewed by:** @cemililik.
 - **Status:** Active.
 
