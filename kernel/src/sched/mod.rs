@@ -140,6 +140,7 @@ pub enum TaskState {
 // ─── SchedError ──────────────────────────────────────────────────────────────
 
 /// Errors returned by scheduler operations.
+#[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum SchedError {
     /// No task is currently running; the operation requires a current task.
@@ -639,6 +640,11 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
         let current_idx = current_handle.slot().index() as usize;
         let prior_state = s.task_states[current_idx];
+        debug_assert_eq!(
+            prior_state,
+            TaskState::Ready,
+            "scheduler invariant: the running task's slot must be marked Ready"
+        );
         s.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
         s.current = None;
 
@@ -1097,6 +1103,12 @@ mod tests {
         sched.ready.dequeue();
         sched.current = Some(h0);
         let ep = create_endpoint(&mut ep_arena, Endpoint::new(0)).unwrap();
+        // Guard: test correctness depends on the resume-path ipc_recv
+        // seeing state == Idle (so it returns Pending). ResetQueuesCpu
+        // rewrites to IpcQueues::new() whose slot_generations are 0; the
+        // endpoint's generation must match so reset_if_stale_generation
+        // does not bump the state.
+        assert_eq!(ep.slot().generation(), 0);
         let cap = Capability::new(CapRights::RECV, CapObject::Endpoint(ep));
         let ep_cap = table.insert_root(cap).unwrap();
 

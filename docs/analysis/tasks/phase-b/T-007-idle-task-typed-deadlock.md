@@ -55,7 +55,7 @@ Settled in ADR-0022 §Decision outcome. At sketch level, in commit order:
 2. **Extend `SchedError` with `Deadlock`.** One-line variant addition plus doc; keep the existing `Ipc(IpcError)` variant — `PendingAfterResume` propagates through it.
 3. **Rewire `ipc_recv_and_yield`:**
    - Replace the `panic!("deadlock: …")` in the Phase 2 block with `return Err(SchedError::Deadlock)` — and restore `s.current` + `s.task_states[current_idx]` to their pre-block state before returning so the caller is not left in an inconsistent scheduler state.
-   - In Phase 3 (resume), replace the `debug_assert!` + `result.map_err(SchedError::Ipc)` pattern with an explicit match that converts `Ok(RecvOutcome::Pending)` into `Err(SchedError::Ipc(IpcError::PendingAfterResume))`. Keep the `debug_assert!` as a test-mode complement so the invariant is still loudly violated in debug builds.
+   - In Phase 3 (resume), replace the `debug_assert!` + `result.map_err(SchedError::Ipc)` pattern with an explicit match that converts `Ok(RecvOutcome::Pending)` into `Err(SchedError::Ipc(IpcError::PendingAfterResume))`. (During implementation the `debug_assert!` was found redundant with the typed return and blocking the test; it was dropped per ADR-0022 *Revision notes* second rider — the typed `Err` is the observable contract.)
 4. **BSP idle registration.**
    - Add `static TASK_IDLE_STACK: TaskStack = TaskStack::new();` next to the existing stacks.
    - Add `fn idle_entry() -> !` that loops `cpu.wait_for_interrupt()` then `sched::yield_now(SCHED.as_mut_ptr(), cpu)`; `expect`s the `yield_now` Result since it can only error with `NoCurrentTask` (impossible once scheduler has started).
@@ -103,6 +103,13 @@ Settled in ADR-0022 §Decision outcome. At sketch level, in commit order:
 - [Code review — Umbrix → Phase A exit](../../reviews/code-reviews/2026-04-21-umbrix-to-phase-a.md) — *Correctness (Scheduler bullets 2, 4)* flags all three panics.
 - [T-006 mini-retro](../../reviews/business-reviews/2026-04-22-T-006-mini-retro.md) — "post-In-Review second-read" adjustment: schedule a preventative-assert pass at `In Review` before promoting to `Done`.
 - [Phase B plan](../../../roadmap/phases/phase-b.md) — §B0 item 2 bundles this work.
+
+## Deferred follow-ups
+
+Items raised during T-007's post-In-Review second-read that are intentionally out of scope for this task and routed elsewhere:
+
+- **Symmetric state-restore test for `ipc_send_and_yield`.** T-007 verifies that `ipc_recv_and_yield` leaves the scheduler state unchanged on `Err(SchedError::Deadlock)`. The send-side bridge has the same implicit contract (on `Err` from the underlying `ipc_send`, `unblock_receiver_on` is not called and `needs_yield` stays false — state is not mutated), but no direct test asserts this. Routed to **T-011** (missing-tests bundle) alongside the `ReceiverTableFull` + slot-reuse coverage.
+- **Idle `yield_now` failure mode under preemption.** `idle_entry` uses `.expect("idle: yield_now failed")`. In the v1 cooperative kernel `yield_now` can only return `NoCurrentTask`, which is impossible once the scheduler has started — the expect is safe today. When preemption lands (late Phase B or Phase C), the call's failure modes may widen; revisit and prefer `match + debug_assert` so idle degrades to spin instead of panicking. Routed to the **preemption design ADR** whenever it is written.
 
 ## Review history
 
