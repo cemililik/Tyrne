@@ -1,20 +1,20 @@
 [package]
-name = "umbrix-kernel"
+name = "tyrne-kernel"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Umbrix capability-based microkernel core (architecture- and board-agnostic)."
+description = "Tyrne capability-based microkernel core (architecture- and board-agnostic)."
 
 [lib]
-name = "umbrix_kernel"
+name = "tyrne_kernel"
 
 [dependencies]
-umbrix-hal = { path = "../hal" }
+tyrne-hal = { path = "../hal" }
 
 [dev-dependencies]
-umbrix-test-hal = { path = "../test-hal" }
+tyrne-test-hal = { path = "../test-hal" }
 
 [lints]
 workspace = true

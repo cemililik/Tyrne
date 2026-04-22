@@ -1,6 +1,6 @@
 # Error handling
 
-How Umbrix code reports, propagates, and recovers from failures. This standard covers kernel code, HAL, and userspace services uniformly, with explicit carve-outs for contexts where the default rules would be wrong (kernel panics, init paths, ISRs).
+How Tyrne code reports, propagates, and recovers from failures. This standard covers kernel code, HAL, and userspace services uniformly, with explicit carve-outs for contexts where the default rules would be wrong (kernel panics, init paths, ISRs).
 
 ## Scope and goals
 

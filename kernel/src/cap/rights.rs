@@ -3,7 +3,7 @@
 //! Hand-rolled rather than using the `bitflags` crate to keep the kernel
 //! dependency-free for now; see the open question in [ADR-0014][adr-0014].
 //!
-//! [adr-0014]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0014-capability-representation.md
+//! [adr-0014]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0014-capability-representation.md
 
 use core::ops::{BitAnd, BitOr, BitOrAssign};
 

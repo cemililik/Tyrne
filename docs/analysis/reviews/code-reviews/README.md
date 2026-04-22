@@ -22,4 +22,4 @@ For security-sensitive changes, a code review is **not** sufficient — a securi
 
 | Date | Scope | File |
 |------|-------|------|
-| 2026-04-21 | Umbrix project → Phase A exit (Phase 1–4c bootstrap + A1–A6 kernel core) | [2026-04-21-umbrix-to-phase-a.md](2026-04-21-umbrix-to-phase-a.md) |
+| 2026-04-21 | Tyrne project → Phase A exit (Phase 1–4c bootstrap + A1–A6 kernel core) | [2026-04-21-tyrne-to-phase-a.md](2026-04-21-tyrne-to-phase-a.md) |

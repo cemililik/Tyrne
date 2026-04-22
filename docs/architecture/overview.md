@@ -1,10 +1,10 @@
 # Architecture overview
 
-Umbrix is a capability-based microkernel whose system structure is deliberately narrow at the privileged layer and arbitrarily rich in userspace. This document describes the three layers that make up the running system — kernel, hardware abstraction layer, and userspace — what crosses each boundary, and the paths a boot and a message follow through them. It is the first architecture document a reader should open; every other `docs/architecture/` document elaborates one of the pieces summarized here.
+Tyrne is a capability-based microkernel whose system structure is deliberately narrow at the privileged layer and arbitrarily rich in userspace. This document describes the three layers that make up the running system — kernel, hardware abstraction layer, and userspace — what crosses each boundary, and the paths a boot and a message follow through them. It is the first architecture document a reader should open; every other `docs/architecture/` document elaborates one of the pieces summarized here.
 
 ## Context
 
-The overall shape of Umbrix was fixed by the foundational ADRs:
+The overall shape of Tyrne was fixed by the foundational ADRs:
 
 - [ADR-0001: Capability-based microkernel architecture](../decisions/0001-microkernel-architecture.md) — only capabilities, scheduling, IPC, memory, and interrupts live in kernel mode.
 - [ADR-0002: Rust as the implementation language](../decisions/0002-implementation-language-rust.md) — all kernel, HAL, and userspace code is Rust.
@@ -16,7 +16,7 @@ Those decisions leave very little architectural room: the kernel must be small, 
 
 ### Top-level layers
 
-Umbrix has three layers: the **kernel**, a **hardware abstraction layer (HAL)** realized by per-board **Board Support Packages (BSPs)**, and **userspace**.
+Tyrne has three layers: the **kernel**, a **hardware abstraction layer (HAL)** realized by per-board **Board Support Packages (BSPs)**, and **userspace**.
 
 ```mermaid
 flowchart TB
@@ -79,7 +79,7 @@ The kernel depends on HAL traits. It does not `use` a BSP directly; the BSP is s
 
 ### What userspace looks like
 
-Userspace is a collection of tasks. A **task** in Umbrix is:
+Userspace is a collection of tasks. A **task** in Tyrne is:
 
 - One or more threads.
 - A private address space, created by the kernel under capability control.
@@ -90,7 +90,7 @@ Tasks do not share memory by default. Shared memory is always the result of an e
 
 Tasks are composed into a service graph whose shape is set at boot by the **init task** (see *Boot flow* below). The init task is a userspace program: it is not special, except that the kernel hands it the first capability bundle.
 
-Categories of userspace tasks expected to exist in Umbrix:
+Categories of userspace tasks expected to exist in Tyrne:
 
 - **Driver tasks** — one per hardware function, holding `MemoryCap` for that function's MMIO region and `IrqCap` for its interrupts.
 - **Service tasks** — filesystem, network, log, clock, crypto, storage. Stateless services are cheap to restart.
@@ -133,7 +133,7 @@ From that point, no code runs inside the kernel except in response to syscalls, 
 
 ### IPC
 
-IPC is the central operation of a microkernel. Umbrix will offer two IPC flavours, both mediated by the kernel, both capability-controlled.
+IPC is the central operation of a microkernel. Tyrne will offer two IPC flavours, both mediated by the kernel, both capability-controlled.
 
 - **Synchronous rendezvous.** A sender issues `send(endpoint_cap, msg)` and blocks until a receiver pairs with the endpoint. Used for request-response. Inspired by seL4.
 - **Asynchronous notification.** A sender fires a one-bit (or small-bit-field) notification that accumulates on the receiver's endpoint. Used for interrupts and low-rate signals. No block on the sender side.
@@ -220,7 +220,7 @@ These are properties the overall architecture maintains. They are concrete enoug
 The architecture is chosen for the assurance and portability properties above; it pays for them in known ways.
 
 - **IPC on the hot path.** Every cross-task operation crosses an address-space boundary. Mitigation: synchronous rendezvous has a fast path that avoids unnecessary copies; the message encoding is picked to keep common paths small.
-- **More design discipline per subsystem.** Adding a feature to Umbrix usually means designing a service interface, a capability model, and an IPC contract before writing behaviour. This is a feature for long-term reliability and a cost for short-term velocity. We accept it.
+- **More design discipline per subsystem.** Adding a feature to Tyrne usually means designing a service interface, a capability model, and an IPC contract before writing behaviour. This is a feature for long-term reliability and a cost for short-term velocity. We accept it.
 - **Driver authors write constrained userspace.** Drivers run under a scheduler they do not control, with a fixed memory budget they are granted rather than allocated. Tooling and guides (planned) will reduce this cost.
 - **Capability-based thinking is unfamiliar.** Most developers arrive with POSIX intuitions. Documentation, the glossary, and skill files are how we absorb this cost.
 
@@ -229,7 +229,7 @@ The architecture is chosen for the assurance and portability properties above; i
 Each of the following will be answered by a future ADR before the corresponding subsystem is implemented.
 
 - Final IPC primitive set. Pure seL4-style rendezvous? Extended with fast-path fastcalls? Call-with-reply-capability as a single syscall?
-- Async runtime model in userspace. Adopt an existing `no_std` async runtime, or write a minimal Umbrix-specific one?
+- Async runtime model in userspace. Adopt an existing `no_std` async runtime, or write a minimal Tyrne-specific one?
 - Capability derivation tree depth limits. Unbounded, bounded with explicit limit, or bounded with revocation cascade?
 - Behaviour on task fault. Policy decisions pushed to supervisors; kernel mechanism needs to be pinned down.
 - `no_std` allocator in the kernel. First cut: compile-time-sized pools only (Hubris-style). Whether and when to introduce a dynamic allocator is open.

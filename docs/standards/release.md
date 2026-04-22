@@ -1,6 +1,6 @@
 # Release
 
-How Umbrix is versioned, how changes accumulate into a release, what must be true for a release to happen, and how the release is cut and published. This standard is forward-looking: Umbrix is pre-alpha and has not yet cut its first release. The standard is written now so that when the first release approaches, the process is decided, not improvised.
+How Tyrne is versioned, how changes accumulate into a release, what must be true for a release to happen, and how the release is cut and published. This standard is forward-looking: Tyrne is pre-alpha and has not yet cut its first release. The standard is written now so that when the first release approaches, the process is decided, not improvised.
 
 ## Scope
 
@@ -13,7 +13,7 @@ How Umbrix is versioned, how changes accumulate into a release, what must be tru
 
 ## Versioning
 
-Umbrix uses **semantic versioning** with an Umbrix-specific convention during the pre-1.0 period:
+Tyrne uses **semantic versioning** with an Tyrne-specific convention during the pre-1.0 period:
 
 - `0.x.y` means **pre-alpha / alpha / beta**. No stability guarantees. Any minor bump may break ABI, capability semantics, or behavior.
 - `1.x.y` is the first release that commits to a stable kernel ABI for userspace. That boundary is cut only when the maintainer judges the kernel ABI to be worth committing to; it is not tied to a calendar.
@@ -88,7 +88,7 @@ The release process is a single branch + tag sequence:
 2. **Bump version** in `Cargo.toml`.
 3. **Update `CHANGELOG.md`** — move `[Unreleased]` to a version header, add release date, link headers.
 4. **Commit** the version bump and changelog as one commit: `chore(release): 0.3.0`.
-5. **Tag** the commit: `git tag -s v0.3.0 -m "Umbrix 0.3.0"`. Tags are signed.
+5. **Tag** the commit: `git tag -s v0.3.0 -m "Tyrne 0.3.0"`. Tags are signed.
 6. **Push** the tag: `git push origin v0.3.0`.
 7. **Publish artifacts** (see below).
 8. **Open `[Unreleased]` section** on `main` for the next release with a follow-up commit.
@@ -97,12 +97,12 @@ The release process is a single branch + tag sequence:
 
 For each Tier 1 and Tier 2 target, the release produces:
 
-- `umbrix-<target>-<version>.elf` — kernel image.
-- `umbrix-<target>-<version>.bin` — kernel binary for boards that boot from raw binaries.
-- `umbrix-<target>-<version>.img` — full bootable image where applicable (e.g. SD card image for Raspberry Pi).
-- `umbrix-<target>-<version>.sha256` — checksum manifest.
-- `umbrix-<target>-<version>.sig` — detached signature.
-- `umbrix-<version>-sbom.cdx.json` — CycloneDX SBOM for the release as a whole.
+- `tyrne-<target>-<version>.elf` — kernel image.
+- `tyrne-<target>-<version>.bin` — kernel binary for boards that boot from raw binaries.
+- `tyrne-<target>-<version>.img` — full bootable image where applicable (e.g. SD card image for Raspberry Pi).
+- `tyrne-<target>-<version>.sha256` — checksum manifest.
+- `tyrne-<target>-<version>.sig` — detached signature.
+- `tyrne-<version>-sbom.cdx.json` — CycloneDX SBOM for the release as a whole.
 - `CHANGELOG-<version>.md` — changelog excerpt for this version.
 
 Artifacts are attached to the GitHub release that corresponds to the signed tag.

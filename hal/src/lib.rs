@@ -1,16 +1,16 @@
-//! # umbrix-hal
+//! # tyrne-hal
 //!
-//! Trait surface that decouples the Umbrix kernel core from any specific CPU,
+//! Trait surface that decouples the Tyrne kernel core from any specific CPU,
 //! board, or peripheral. Concrete implementations live in per-board Board
-//! Support Package crates named `umbrix-bsp-*`.
+//! Support Package crates named `tyrne-bsp-*`.
 //!
 //! This crate defines **traits only**. It contains no logic, no implementations,
 //! and no hardware addresses. See [`docs/architecture/hal.md`][hal-doc] for the
 //! full responsibilities of each trait and [ADR-0006][adr-0006] for the
 //! crate-boundary rationale.
 //!
-//! [hal-doc]: https://github.com/cemililik/UmbrixOS/blob/main/docs/architecture/hal.md
-//! [adr-0006]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0006-workspace-layout.md
+//! [hal-doc]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/hal.md
+//! [adr-0006]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0006-workspace-layout.md
 //!
 //! ## Status
 //!
@@ -48,5 +48,5 @@ pub use timer::Timer;
 /// [`docs/architecture/security-model.md`][sec-doc] for the trust-boundary
 /// implications.
 ///
-/// [sec-doc]: https://github.com/cemililik/UmbrixOS/blob/main/docs/architecture/security-model.md
+/// [sec-doc]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/security-model.md
 pub trait Iommu {}

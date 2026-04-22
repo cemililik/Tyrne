@@ -1,4 +1,4 @@
-# Umbrix pins a specific nightly Rust toolchain.
+# Tyrne pins a specific nightly Rust toolchain.
 #
 # Nightly is required because the kernel relies on features that are still
 # unstable at Rust's stable channel (inline asm intrinsics, some lang items,

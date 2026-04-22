@@ -1,20 +1,20 @@
-//! # umbrix-kernel
+//! # tyrne-kernel
 //!
-//! Architecture- and board-agnostic kernel core for Umbrix.
+//! Architecture- and board-agnostic kernel core for Tyrne.
 //!
 //! This crate defines the capability system, scheduler, IPC primitives, memory
-//! management, and interrupt dispatch. It depends on [`umbrix_hal`] for every
+//! management, and interrupt dispatch. It depends on [`tyrne_hal`] for every
 //! operation that touches hardware, and contains no architecture- or
 //! board-specific code — see
 //! [ADR-0006][adr-0006] and
 //! [architectural principle P6][p6].
 //!
-//! Host-side unit tests wire in [`umbrix_test_hal`] as a `[dev-dependency]`.
+//! Host-side unit tests wire in [`tyrne_test_hal`] as a `[dev-dependency]`.
 //! `#![cfg_attr(not(test), no_std)]` disables `std` for production builds
 //! while allowing the standard test harness in host-side `cargo test` runs.
 //!
-//! [adr-0006]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0006-workspace-layout.md
-//! [p6]: https://github.com/cemililik/UmbrixOS/blob/main/docs/standards/architectural-principles.md#p6--hal-separation
+//! [adr-0006]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0006-workspace-layout.md
+//! [p6]: https://github.com/cemililik/TyrneOS/blob/main/docs/standards/architectural-principles.md#p6--hal-separation
 //!
 //! ## Subsystems
 //!
@@ -27,10 +27,10 @@
 //! - [`sched`] — cooperative scheduler (Phase A5 / [T-004]): bounded FIFO
 //!   ready queue, per-task state, and IPC bridge.
 //!
-//! [T-001]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-001-capability-table-foundation.md
-//! [T-002]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-002-kernel-object-storage.md
-//! [T-003]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-003-ipc-primitives.md
-//! [T-004]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
+//! [T-001]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-001-capability-table-foundation.md
+//! [T-002]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-002-kernel-object-storage.md
+//! [T-003]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-003-ipc-primitives.md
+//! [T-004]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
 
 #![cfg_attr(not(test), no_std)]
 // Kernel-specific stricter lints on top of the workspace set.

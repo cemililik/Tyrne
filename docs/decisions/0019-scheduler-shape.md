@@ -6,7 +6,7 @@
 
 ## Context
 
-[T-004](../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) opens Milestone A5: the first real scheduler in Umbrix. The IPC layer (T-003, [ADR-0017](0017-ipc-primitive-set.md)) records waiter state in `IpcQueues` but has no mechanism to suspend a calling task or resume it when the other side arrives. A5 wires that mechanism.
+[T-004](../analysis/tasks/phase-a/T-004-cooperative-scheduler.md) opens Milestone A5: the first real scheduler in Tyrne. The IPC layer (T-003, [ADR-0017](0017-ipc-primitive-set.md)) records waiter state in `IpcQueues` but has no mechanism to suspend a calling task or resume it when the other side arrives. A5 wires that mechanism.
 
 Before any implementation lands, four inter-related questions must be settled:
 

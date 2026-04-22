@@ -46,7 +46,7 @@ pub trait Mmu: Send + Sync {
 
 ### Option C — type-erased `AddressSpace` handle
 
-`AddressSpace` is a concrete struct defined in `umbrix-hal` carrying an opaque pointer and a vtable. All BSPs interpret the same struct. Mapping operations take `&mut AddressSpace`.
+`AddressSpace` is a concrete struct defined in `tyrne-hal` carrying an opaque pointer and a vtable. All BSPs interpret the same struct. Mapping operations take `&mut AddressSpace`.
 
 ### Option D — split the MMU surface across two traits
 
@@ -152,7 +152,7 @@ pub enum MmuError {
 
 `MappingFlags` exposes five flag constants in v1: `WRITE`, `EXECUTE`, `USER`, `DEVICE`, `GLOBAL`. Read permission is implicit (unreadable mappings have no use); richer attributes (cache modes, shareability domains, non-cacheable vs. write-combining vs. device-nGnRnE, software bits) are deferred.
 
-Option B was rejected because bypassing the HAL trait for mapping operations would bake BSP-specific module paths into the kernel — exactly the pattern [architectural principle P6](../standards/architectural-principles.md#p6--hal-separation) forbids. Option C (type-erased handle with a vtable in `umbrix-hal`) would either require heap allocation or a fixed maximum-size struct; both are worse than the associated-type approach for a trait used at lifecycle events. Option D (split traits) is attractive and may be the right shape later, but forces a trait-boundary decision now that is easier to make once we have more calling code; a single trait is the simpler starting point.
+Option B was rejected because bypassing the HAL trait for mapping operations would bake BSP-specific module paths into the kernel — exactly the pattern [architectural principle P6](../standards/architectural-principles.md#p6--hal-separation) forbids. Option C (type-erased handle with a vtable in `tyrne-hal`) would either require heap allocation or a fixed maximum-size struct; both are worse than the associated-type approach for a trait used at lifecycle events. Option D (split traits) is attractive and may be the right shape later, but forces a trait-boundary decision now that is easier to make once we have more calling code; a single trait is the simpler starting point.
 
 ## Consequences
 
@@ -167,7 +167,7 @@ Option B was rejected because bypassing the HAL trait for mapping operations wou
 ### Negative
 
 - **Associated type reduces dyn usability.** `&dyn Mmu` is possible for activate / invalidate, but `map`/`unmap` require knowing the concrete `AddressSpace` type. Mitigation: kernel MMU-touching code is generic over `<M: Mmu>`. MMU operations are not hot-path dyn calls.
-- **`MappingFlags` is a hand-rolled bitfield rather than a `bitflags!` macro.** Cleaner ergonomics of `bitflags` are forgone to avoid taking a dependency in Phase 4b. Re-evaluate when a second bitfield shows up in the HAL — at that point an `umbrix-hal-bits` module using `bitflags` may be justified.
+- **`MappingFlags` is a hand-rolled bitfield rather than a `bitflags!` macro.** Cleaner ergonomics of `bitflags` are forgone to avoid taking a dependency in Phase 4b. Re-evaluate when a second bitfield shows up in the HAL — at that point an `tyrne-hal-bits` module using `bitflags` may be justified.
 - **Single page-size baked in.** `PAGE_SIZE = 4096`. Huge pages (2 MiB, 1 GiB) require a follow-on ADR and extension to `Mmu::map` (or a new `map_block`).
 - **No per-page flag updates.** Changing the write permission on an existing mapping currently means `unmap` + `map`. A `change_flags` method will come; doing it right needs TLB semantics that are cleaner to pin down after we have the basic version running.
 - **No multi-core TLB shootdown.** `invalidate_tlb_*` operates on the current core only. This is fine for single-core v1; multi-core demands a separate primitive and an IPI mechanism (future ADR).

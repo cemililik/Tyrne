@@ -2,7 +2,7 @@
 
 **Exit bar:** `bsp-pi4` boots on a real Pi 4 at feature parity with `bsp-qemu-virt` — all of Phase A / B / C features work on hardware.
 
-**Scope:** A second BSP (`bsp-pi4`) with its own reset, UART, timer, GIC-400, MMU setup; a DTB parser (`umbrix-dt`) so the kernel learns board topology at runtime; SD-card boot. HAL traits that worked for QEMU continue to work; differences are isolated to the BSP.
+**Scope:** A second BSP (`bsp-pi4`) with its own reset, UART, timer, GIC-400, MMU setup; a DTB parser (`tyrne-dt`) so the kernel learns board topology at runtime; SD-card boot. HAL traits that worked for QEMU continue to work; differences are isolated to the BSP.
 
 **Out of scope:** Pi-specific drivers beyond what the kernel needs to boot (those belong in Phase E's driver model); Wi-Fi (blob-dependent, deferred); multi-core on Pi (may drop in naturally if C was done first).
 
@@ -14,7 +14,7 @@ A new BSP crate that compiles for `aarch64-unknown-none` and provides a minimal 
 
 ### Sub-breakdown
 
-1. **ADR-0032 — Pi 4 boot flow.** Load address under Pi firmware (`kernel_address` in `config.txt`); Pi firmware's initial CPU mode; what `config.txt` settings Umbrix expects.
+1. **ADR-0032 — Pi 4 boot flow.** Load address under Pi firmware (`kernel_address` in `config.txt`); Pi firmware's initial CPU mode; what `config.txt` settings Tyrne expects.
 2. **New crate** `bsp-pi4/` with its own `Cargo.toml`, `build.rs`, `linker.ld`, `boot.s`, `main.rs`, `console.rs` — mirroring `bsp-qemu-virt` structure.
 3. **Pi firmware interaction** — `config.txt` documentation and the expected load / entry addresses.
 4. **Placeholder main** that just spins in `wfe`; no console yet (D3 adds that).
@@ -22,7 +22,7 @@ A new BSP crate that compiles for `aarch64-unknown-none` and provides a minimal 
 ### Acceptance criteria
 
 - ADR-0032 Accepted.
-- `cargo build --target aarch64-unknown-none -p umbrix-bsp-pi4` produces an ELF.
+- `cargo build --target aarch64-unknown-none -p tyrne-bsp-pi4` produces an ELF.
 - `config.txt` example committed alongside.
 
 ---
@@ -96,14 +96,14 @@ MMU activation on Pi 4. Memory layout is different (RAM at `0x0000_0000` on Pi v
 
 ---
 
-## Milestone D6 — DTB parser (`umbrix-dt`)
+## Milestone D6 — DTB parser (`tyrne-dt`)
 
 A userspace-agnostic library crate that parses a flattened device tree into a typed structure. Used by the BSP at boot to read what the firmware told it about the machine.
 
 ### Sub-breakdown
 
 1. **ADR-0036 — DTB parsing scope.** Full FDT spec support vs. a minimal read-only subset; zero-copy vs. owned parsing; allocation strategy (probably `no_std + alloc` with an arena).
-2. **New crate** `umbrix-dt/` — separate from `umbrix-hal` so BSPs opt in.
+2. **New crate** `tyrne-dt/` — separate from `tyrne-hal` so BSPs opt in.
 3. **Parser API** — `DeviceTree::from_bytes(ptr) -> Result<DeviceTree, Error>`; iterators over nodes; property lookup.
 4. **Pi 4 integration** — `kernel_entry` parses the DTB passed in `x0` and emits a `BootInfo` struct.
 5. **Host tests** — parse known fixtures (QEMU-generated DTB, Pi 4 DTB samples).
@@ -111,7 +111,7 @@ A userspace-agnostic library crate that parses a flattened device tree into a ty
 ### Acceptance criteria
 
 - ADR-0036 Accepted.
-- `umbrix-dt` parses a real DTB into typed records.
+- `tyrne-dt` parses a real DTB into typed records.
 - `bsp-pi4` uses it at boot; the kernel's `BootInfo` contains at least memory-map and UART-address entries read from the DTB.
 
 ---

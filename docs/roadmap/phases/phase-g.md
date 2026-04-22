@@ -25,7 +25,7 @@ On hardware that supports it (Pi 4 via its secure-boot chain, or a future board 
 
 ## Milestone G1.5 — TEE support in the HAL
 
-Introduce a Trusted Execution Environment trait in `umbrix-hal` and a BSP implementation where the hardware offers ARM TrustZone or an equivalent. This is one of the four "AI-readiness" hooks mandated by [ADR-0015](../../decisions/0015-ai-integration-stance.md); it also stands on its own for non-AI use (secrets protection, boot attestation, high-assurance crypto containment).
+Introduce a Trusted Execution Environment trait in `tyrne-hal` and a BSP implementation where the hardware offers ARM TrustZone or an equivalent. This is one of the four "AI-readiness" hooks mandated by [ADR-0015](../../decisions/0015-ai-integration-stance.md); it also stands on its own for non-AI use (secrets protection, boot attestation, high-assurance crypto containment).
 
 ### Sub-breakdown
 
@@ -36,7 +36,7 @@ Introduce a Trusted Execution Environment trait in `umbrix-hal` and a BSP implem
 
 ### Acceptance criteria
 
-- TEE trait in `umbrix-hal` with at least one BSP impl.
+- TEE trait in `tyrne-hal` with at least one BSP impl.
 - Security review recorded; attestation flow documented.
 - Usable independently by Phase G2 (crypto) and — later — by Phase J6 (confidential inference).
 
@@ -51,7 +51,7 @@ A crypto crate with audited implementations: hash (SHA-2, SHA-3), AEAD (ChaCha20
 ### Sub-breakdown
 
 1. **ADR-0048 — Crypto crate choice.** RustCrypto crates vs. one curated alternative vs. in-tree impls. Auditability, formal guarantees where applicable, no-std support.
-2. **`umbrix-crypto`** — the crate that wraps the chosen primitives with Umbrix-native types (`Hash`, `Key`, `Signature`, `Nonce`).
+2. **`tyrne-crypto`** — the crate that wraps the chosen primitives with Tyrne-native types (`Hash`, `Key`, `Signature`, `Nonce`).
 3. **Security review** per [`analysis/reviews/security-reviews/`](../../analysis/reviews/security-reviews/) — mandatory for every primitive.
 4. **Constant-time audit** — where timing side channels matter, document which paths are constant-time and which are not.
 
@@ -111,7 +111,7 @@ Revisit the threat model from [`security-model.md`](../../architecture/security-
 
 ### Phase G closure
 
-Business review. Umbrix now has the security engineering to back the "high assurance" claim at a level beyond process.
+Business review. Tyrne now has the security engineering to back the "high assurance" claim at a level beyond process.
 
 ## ADR ledger for Phase G
 

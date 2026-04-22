@@ -1,5 +1,5 @@
 /*
- * Linker script for umbrix-bsp-qemu-virt.
+ * Linker script for tyrne-bsp-qemu-virt.
  *
  * See docs/decisions/0012-boot-flow-qemu-virt.md for the memory layout
  * rationale. In short: QEMU virt loads us at 0x40080000 via -kernel;

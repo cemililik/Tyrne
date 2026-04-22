@@ -1,10 +1,10 @@
-# Run Umbrix under QEMU
+# Run Tyrne under QEMU
 
-Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `virt` machine. The kernel writes a greeting to the serial console and halts — this is the first real-world run of Umbrix code.
+Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `virt` machine. The kernel writes a greeting to the serial console and halts — this is the first real-world run of Tyrne code.
 
 ## Goal
 
-- A running `qemu-system-aarch64 -M virt` instance that has booted Umbrix and printed `umbrix: hello from kernel_main` to its serial console.
+- A running `qemu-system-aarch64 -M virt` instance that has booted Tyrne and printed `tyrne: hello from kernel_main` to its serial console.
 - Clean exit from QEMU back to the shell.
 
 ## Prerequisites
@@ -34,8 +34,8 @@ Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `
 1. **Clone the repository** if you have not already.
 
    ```sh
-   git clone https://github.com/cemililik/UmbrixOS.git
-   cd UmbrixOS
+   git clone https://github.com/cemililik/TyrneOS.git
+   cd TyrneOS
    ```
 
 2. **Let rustup install the pinned toolchain.** Any `cargo` command in the repo triggers it; `cargo --version` is the smallest such command.
@@ -52,7 +52,7 @@ Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `
    cargo kernel-build
    ```
 
-   The ELF is written to `target/aarch64-unknown-none/debug/umbrix-bsp-qemu-virt`.
+   The ELF is written to `target/aarch64-unknown-none/debug/tyrne-bsp-qemu-virt`.
 
 4. **Run under QEMU**, using the project's shell helper.
 
@@ -63,7 +63,7 @@ Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `
    Or, equivalently, via the Cargo runner:
 
    ```sh
-   cargo run --target aarch64-unknown-none -p umbrix-bsp-qemu-virt
+   cargo run --target aarch64-unknown-none -p tyrne-bsp-qemu-virt
    ```
 
    Or fully manually:
@@ -76,7 +76,7 @@ Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `
        -smp 1 \
        -nographic \
        -serial mon:stdio \
-       -kernel target/aarch64-unknown-none/debug/umbrix-bsp-qemu-virt
+       -kernel target/aarch64-unknown-none/debug/tyrne-bsp-qemu-virt
    ```
 
 ## Verifying it worked
@@ -84,7 +84,7 @@ Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `
 The terminal should show:
 
 ```text
-umbrix: hello from kernel_main
+tyrne: hello from kernel_main
 ```
 
 The kernel then enters a `spin_loop` idle — there is nothing else to print yet. QEMU does not exit on its own.
@@ -118,7 +118,7 @@ The repo's `rust-toolchain.toml` installs it automatically; if missing, remove `
 **Build succeeds but QEMU exits immediately or hangs silently.** Check the ELF's entry point:
 
 ```sh
-llvm-objdump -f target/aarch64-unknown-none/debug/umbrix-bsp-qemu-virt | head
+llvm-objdump -f target/aarch64-unknown-none/debug/tyrne-bsp-qemu-virt | head
 ```
 
 It should be `0x40080000`.
@@ -130,7 +130,7 @@ This is the whole system, end to end, in Phase 4c v0.0.1:
 - **QEMU** loads the ELF and jumps to `_start`.
 - **`_start`** (in [`bsp-qemu-virt/src/boot.s`](../../bsp-qemu-virt/src/boot.s)) sets up the stack, zeroes BSS, branches into Rust.
 - **`kernel_entry`** (in [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs)) constructs the `Pl011Uart` and hands it to the portable kernel.
-- **`umbrix_kernel::run`** (in [`kernel/src/lib.rs`](../../kernel/src/lib.rs)) writes the greeting and halts.
+- **`tyrne_kernel::run`** (in [`kernel/src/lib.rs`](../../kernel/src/lib.rs)) writes the greeting and halts.
 
 See [`docs/architecture/boot.md`](../architecture/boot.md) for the full design, and [ADR-0012](../decisions/0012-boot-flow-qemu-virt.md) for the rationale.
 

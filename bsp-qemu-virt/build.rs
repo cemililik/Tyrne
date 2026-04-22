@@ -1,4 +1,4 @@
-//! Build script for `umbrix-bsp-qemu-virt`.
+//! Build script for `tyrne-bsp-qemu-virt`.
 //!
 //! Passes the linker script at the crate root to the linker with an absolute
 //! path so resolution does not depend on the linker's working directory.

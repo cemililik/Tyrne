@@ -6,7 +6,7 @@
 
 ## Context
 
-Phase 4 of the project begins implementation. The architecture documents ([overview.md](../architecture/overview.md), [hal.md](../architecture/hal.md), [security-model.md](../architecture/security-model.md)) have settled that Umbrix is a narrow kernel core, a trait-based HAL, and per-board BSPs that implement the HAL. The Cargo workspace must reflect that decomposition concretely: the set of crates, their boundaries, and their roles.
+Phase 4 of the project begins implementation. The architecture documents ([overview.md](../architecture/overview.md), [hal.md](../architecture/hal.md), [security-model.md](../architecture/security-model.md)) have settled that Tyrne is a narrow kernel core, a trait-based HAL, and per-board BSPs that implement the HAL. The Cargo workspace must reflect that decomposition concretely: the set of crates, their boundaries, and their roles.
 
 The workspace choice is consequential and slow to change after the fact:
 
@@ -29,28 +29,28 @@ This ADR records the initial layout before the code lands, so subsequent commits
 ## Considered options
 
 1. **Single-crate kernel.** All kernel, HAL, and BSP code in one crate.
-2. **Four-crate split.** `umbrix-kernel` (portable core) + `umbrix-hal` (traits) + `umbrix-bsp-<board>` (per-board) + `umbrix-test-hal` (host-only fakes).
-3. **Deep subdivision.** Separate crates per subsystem inside the kernel: `umbrix-kernel-core`, `umbrix-kernel-ipc`, `umbrix-kernel-mem`, `umbrix-kernel-sched`, plus the HAL, BSP, and test-hal.
+2. **Four-crate split.** `tyrne-kernel` (portable core) + `tyrne-hal` (traits) + `tyrne-bsp-<board>` (per-board) + `tyrne-test-hal` (host-only fakes).
+3. **Deep subdivision.** Separate crates per subsystem inside the kernel: `tyrne-kernel-core`, `tyrne-kernel-ipc`, `tyrne-kernel-mem`, `tyrne-kernel-sched`, plus the HAL, BSP, and test-hal.
 
 ## Decision outcome
 
 **Chosen: Option 2 — a four-crate split.**
 
-The split matches the three-layer architecture: one crate per layer, plus `umbrix-test-hal` to enable host testing. Single-crate would violate P6 at the compiler level (a BSP change would rebuild and potentially affect kernel semantics). Deep subdivision is premature — we do not yet have the subsystem boundaries pinned down precisely enough to bake them into crate boundaries, and the cost of re-carving later is higher than the cost of starting broader. When a subsystem's surface grows big enough that rebuilds or review friction justify a separate crate, an ADR carves it out.
+The split matches the three-layer architecture: one crate per layer, plus `tyrne-test-hal` to enable host testing. Single-crate would violate P6 at the compiler level (a BSP change would rebuild and potentially affect kernel semantics). Deep subdivision is premature — we do not yet have the subsystem boundaries pinned down precisely enough to bake them into crate boundaries, and the cost of re-carving later is higher than the cost of starting broader. When a subsystem's surface grows big enough that rebuilds or review friction justify a separate crate, an ADR carves it out.
 
 ### Initial crate set
 
 | Crate | Kind | Target | `#![no_std]` | Role |
 |-------|------|--------|--------------|------|
-| `umbrix-kernel` | library | `aarch64-unknown-none` (and host for tests) | yes | Portable kernel core: capability table, scheduler, IPC, memory, interrupt dispatch. Depends only on `umbrix-hal` trait definitions. |
-| `umbrix-hal` | library | any | yes | HAL trait definitions (`Cpu`, `Mmu`, `IrqController`, `Timer`, `Console`, `Iommu`). No implementations. No kernel logic. |
-| `umbrix-bsp-qemu-virt` | binary | `aarch64-unknown-none` | yes, `no_main` | QEMU `virt` aarch64 BSP: reset vector, early-init, `Cpu`/`Mmu`/`IrqController`/`Timer`/`Console`/`Iommu` impls for GICv3 + PL011 + SMMUv3, and the `main` entry that links `umbrix-kernel` into a bootable image. |
-| `umbrix-test-hal` | library | host | no (std allowed) | Deterministic fake implementations of HAL traits for unit tests. Used by `umbrix-kernel`'s `#[cfg(test)]` tests. |
+| `tyrne-kernel` | library | `aarch64-unknown-none` (and host for tests) | yes | Portable kernel core: capability table, scheduler, IPC, memory, interrupt dispatch. Depends only on `tyrne-hal` trait definitions. |
+| `tyrne-hal` | library | any | yes | HAL trait definitions (`Cpu`, `Mmu`, `IrqController`, `Timer`, `Console`, `Iommu`). No implementations. No kernel logic. |
+| `tyrne-bsp-qemu-virt` | binary | `aarch64-unknown-none` | yes, `no_main` | QEMU `virt` aarch64 BSP: reset vector, early-init, `Cpu`/`Mmu`/`IrqController`/`Timer`/`Console`/`Iommu` impls for GICv3 + PL011 + SMMUv3, and the `main` entry that links `tyrne-kernel` into a bootable image. |
+| `tyrne-test-hal` | library | host | no (std allowed) | Deterministic fake implementations of HAL traits for unit tests. Used by `tyrne-kernel`'s `#[cfg(test)]` tests. |
 
 ### Directory layout
 
 ```
-umbrix/
+tyrne/
 ├── Cargo.toml               (workspace)
 ├── rust-toolchain.toml      (pinned nightly)
 ├── rustfmt.toml
@@ -58,33 +58,33 @@ umbrix/
 ├── .cargo/
 │   └── config.toml          (target triples, rustflags)
 ├── kernel/
-│   ├── Cargo.toml           (package name: umbrix-kernel)
+│   ├── Cargo.toml           (package name: tyrne-kernel)
 │   └── src/
 ├── hal/
-│   ├── Cargo.toml           (package name: umbrix-hal)
+│   ├── Cargo.toml           (package name: tyrne-hal)
 │   └── src/
 ├── bsp-qemu-virt/
-│   ├── Cargo.toml           (package name: umbrix-bsp-qemu-virt)
+│   ├── Cargo.toml           (package name: tyrne-bsp-qemu-virt)
 │   ├── linker.ld
 │   └── src/
 └── test-hal/
-    ├── Cargo.toml           (package name: umbrix-test-hal)
+    ├── Cargo.toml           (package name: tyrne-test-hal)
     └── src/
 ```
 
-Directory names are short (`kernel/`, not `umbrix-kernel/`) for ergonomics; crate names carry the `umbrix-` prefix to avoid collisions if any crate is ever published.
+Directory names are short (`kernel/`, not `tyrne-kernel/`) for ergonomics; crate names carry the `tyrne-` prefix to avoid collisions if any crate is ever published.
 
 ### Dependency graph
 
 ```
-                        umbrix-bsp-qemu-virt  ──►  umbrix-kernel  ──►  umbrix-hal
+                        tyrne-bsp-qemu-virt  ──►  tyrne-kernel  ──►  tyrne-hal
                                                          │                 ▲
-                                                         └── tests: ───►  umbrix-test-hal
+                                                         └── tests: ───►  tyrne-test-hal
 ```
 
-- `umbrix-hal` is a leaf: it defines traits and nothing else.
-- `umbrix-kernel` depends on `umbrix-hal` (the traits) and, under `#[cfg(test)]`, on `umbrix-test-hal`.
-- `umbrix-bsp-qemu-virt` depends on `umbrix-hal` (to implement the traits) and on `umbrix-kernel` (to run it).
+- `tyrne-hal` is a leaf: it defines traits and nothing else.
+- `tyrne-kernel` depends on `tyrne-hal` (the traits) and, under `#[cfg(test)]`, on `tyrne-test-hal`.
+- `tyrne-bsp-qemu-virt` depends on `tyrne-hal` (to implement the traits) and on `tyrne-kernel` (to run it).
 - Future BSPs add themselves at the `bsp-*` level; they do not touch the kernel or the HAL crate.
 
 No other cross-edges exist in the initial layout.
@@ -94,7 +94,7 @@ No other cross-edges exist in the initial layout.
 ### Positive
 
 - **Compiler-enforced P6.** The kernel crate's dependency graph contains no board-specific code; a violation would be a build failure.
-- **Host-side unit testing is a first-class mode.** `cargo test -p umbrix-kernel` runs on the developer's laptop, wiring in `umbrix-test-hal` fakes.
+- **Host-side unit testing is a first-class mode.** `cargo test -p tyrne-kernel` runs on the developer's laptop, wiring in `tyrne-test-hal` fakes.
 - **Adding a new BSP is an additive change.** `bsp-pi4`, `bsp-pi5`, future Jetson / RISC-V BSPs plug in alongside `bsp-qemu-virt` without changes to the kernel or HAL crates.
 - **Review boundaries match architectural boundaries.** A change to the HAL trait set shows up as a diff in `hal/`, which is the signal for a security review.
 - **Cargo workspace lints can enforce style uniformly.** `[workspace.lints]` applies across all crates; per-crate overrides are explicit.
@@ -102,12 +102,12 @@ No other cross-edges exist in the initial layout.
 ### Negative
 
 - **More setup.** A single crate would boot faster; four crates require more `Cargo.toml` plumbing and slightly more initial ceremony.
-- **Cross-crate refactoring cost.** Moving a type from `umbrix-hal` to `umbrix-kernel` (or vice-versa) is more work than moving between modules in one crate. Mitigation: we defer decisions that would force such moves until their shape is clearer, per the "minimal now" driver.
+- **Cross-crate refactoring cost.** Moving a type from `tyrne-hal` to `tyrne-kernel` (or vice-versa) is more work than moving between modules in one crate. Mitigation: we defer decisions that would force such moves until their shape is clearer, per the "minimal now" driver.
 - **More crate-local documentation to maintain.** Each crate needs its own module-level documentation. Cost: one page of rustdoc per crate, amortized.
 
 ### Neutral
 
-- The initial naming convention (`umbrix-` prefix) is a choice made now that future crates will follow. It does not constrain behaviour; it standardizes identifiers.
+- The initial naming convention (`tyrne-` prefix) is a choice made now that future crates will follow. It does not constrain behaviour; it standardizes identifiers.
 
 ## Pros and cons of the options
 

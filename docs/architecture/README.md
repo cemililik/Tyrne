@@ -1,6 +1,6 @@
 # Architecture documentation
 
-This folder describes **how Umbrix is designed**. The **why** behind each design choice lives in [../decisions/](../decisions/); the documents here focus on the *how* — the structure, the interactions, and the data flow.
+This folder describes **how Tyrne is designed**. The **why** behind each design choice lives in [../decisions/](../decisions/); the documents here focus on the *how* — the structure, the interactions, and the data flow.
 
 ## Status
 
@@ -30,4 +30,4 @@ Start with `overview.md`, then follow the subsystem that interests you. The secu
 - Architectural diagrams use Mermaid (see [../standards/documentation-style.md](../standards/documentation-style.md)).
 - Every subsystem document begins with a one-paragraph summary suitable for someone skimming the tree.
 - Code snippets in architecture documents are illustrative pseudocode unless explicitly marked as real source.
-- Every architectural claim of the form *"Umbrix does X because Y"* should link to the ADR that made that choice.
+- Every architectural claim of the form *"Tyrne does X because Y"* should link to the ADR that made that choice.

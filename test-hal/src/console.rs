@@ -1,7 +1,7 @@
-//! Deterministic fake [`umbrix_hal::Console`] for host-side tests.
+//! Deterministic fake [`tyrne_hal::Console`] for host-side tests.
 
 use std::sync::Mutex;
-use umbrix_hal::Console;
+use tyrne_hal::Console;
 
 /// A [`Console`] that captures every byte written into an internal buffer.
 ///
@@ -68,7 +68,7 @@ impl Console for FakeConsole {
 mod tests {
     use super::FakeConsole;
     use core::fmt::Write;
-    use umbrix_hal::{Console, FmtWriter};
+    use tyrne_hal::{Console, FmtWriter};
 
     #[test]
     fn captures_successive_byte_writes() {

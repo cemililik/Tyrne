@@ -1,8 +1,8 @@
-//! # umbrix-bsp-qemu-virt
+//! # tyrne-bsp-qemu-virt
 //!
 //! Board Support Package for QEMU's aarch64 `virt` machine — the primary
 //! development target per [ADR-0004][adr-0004] and the BSP that every
-//! Umbrix feature is first exercised against.
+//! Tyrne feature is first exercised against.
 //!
 //! This crate is the bootable binary: it provides the reset vector
 //! (`_start`, assembled from `boot.s` via [`core::arch::global_asm!`]),
@@ -15,9 +15,9 @@
 //! The boot flow is documented in [`docs/architecture/boot.md`][boot-doc]
 //! and the memory-layout decisions in [ADR-0012][adr-0012].
 //!
-//! [adr-0004]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0004-target-platforms.md
-//! [adr-0012]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
-//! [boot-doc]: https://github.com/cemililik/UmbrixOS/blob/main/docs/architecture/boot.md
+//! [adr-0004]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0004-target-platforms.md
+//! [adr-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+//! [boot-doc]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/boot.md
 
 #![no_std]
 #![no_main]
@@ -31,12 +31,12 @@ use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
-use umbrix_hal::{Console, FmtWriter};
-use umbrix_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
-use umbrix_kernel::ipc::{IpcQueues, Message, RecvOutcome};
-use umbrix_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
-use umbrix_kernel::obj::task::{create_task, Task, TaskArena};
-use umbrix_kernel::sched::{ipc_recv_and_yield, ipc_send_and_yield, start, yield_now, Scheduler};
+use tyrne_hal::{Console, FmtWriter};
+use tyrne_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
+use tyrne_kernel::ipc::{IpcQueues, Message, RecvOutcome};
+use tyrne_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
+use tyrne_kernel::obj::task::{create_task, Task, TaskArena};
+use tyrne_kernel::sched::{ipc_recv_and_yield, ipc_send_and_yield, start, yield_now, Scheduler};
 
 mod console;
 mod cpu;
@@ -50,7 +50,7 @@ use cpu::QemuVirtCpu;
 /// peripheral addresses. QEMU `virt` has exposed this address across
 /// all versions the project targets.
 ///
-/// [adr-0012]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+/// [adr-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
 const PL011_UART_BASE: usize = 0x0900_0000;
 
 // ─── StaticCell ───────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ const PL011_UART_BASE: usize = 0x0900_0000;
 /// `static` requires.
 struct StaticCell<T>(UnsafeCell<MaybeUninit<T>>);
 
-// SAFETY: Umbrix v1 is single-core and cooperative; no two tasks ever run
+// SAFETY: Tyrne v1 is single-core and cooperative; no two tasks ever run
 // simultaneously, so there are no data races on `StaticCell` contents.
 // Rejected alternatives: `Mutex` / `RwLock` require a runtime (heap, OS) or
 // a spin implementation that itself relies on `unsafe` and adds overhead
@@ -104,7 +104,7 @@ impl<T> StaticCell<T> {
     /// and must not use the pointer to create a `&mut T` that outlives a
     /// cooperative context switch (ADR-0021). Audit: UNSAFE-2026-0013.
     ///
-    /// [ADR-0021]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
+    /// [ADR-0021]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
     #[inline]
     #[allow(
         clippy::mut_from_ref,
@@ -200,7 +200,7 @@ static EP_CAP_B: StaticCell<CapHandle> = StaticCell::new();
 /// not on `kernel_entry`'s stack) avoids a second BSP static-cell churn
 /// when task destruction / status-query APIs arrive in later Phase B work.
 ///
-/// [ADR-0016]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+/// [ADR-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
 static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 
 // ─── Idle task ────────────────────────────────────────────────────────────────
@@ -227,7 +227,7 @@ static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 /// kernel stays live; typed `SchedError::Deadlock` is reachable only if
 /// the BSP did not register idle at all.
 ///
-/// [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+/// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 fn idle_entry() -> ! {
     // SAFETY: CPU is fully initialised in `kernel_entry` before `start()`;
     // single-core cooperative scheduling prevents concurrent access.
@@ -260,7 +260,7 @@ fn task_b() -> ! {
     // Audit: UNSAFE-2026-0010.
     let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
     let mut w = FmtWriter(console);
-    let _ = writeln!(w, "umbrix: task B \u{2014} waiting for IPC");
+    let _ = writeln!(w, "tyrne: task B \u{2014} waiting for IPC");
 
     // Register as receiver on the endpoint. If no sender is ready, blocks and
     // yields to Task A. Resumes when Task A delivers a message.
@@ -296,7 +296,7 @@ fn task_b() -> ! {
     let mut w = FmtWriter(console);
     let _ = writeln!(
         w,
-        "umbrix: task B \u{2014} received IPC (label=0x{:x}); replying",
+        "tyrne: task B \u{2014} received IPC (label=0x{:x}); replying",
         msg.label
     );
 
@@ -352,7 +352,7 @@ fn task_a() -> ! {
     // SAFETY: CONSOLE initialised in kernel_entry; single-core cooperative.
     // Audit: UNSAFE-2026-0010.
     let console = unsafe { (*CONSOLE.0.get()).assume_init_ref() };
-    console.write_bytes(b"umbrix: task A -- sending IPC\n");
+    console.write_bytes(b"tyrne: task A -- sending IPC\n");
 
     let msg = Message {
         label: 0xAAAA,
@@ -406,10 +406,10 @@ fn task_a() -> ! {
     let mut w = FmtWriter(console);
     let _ = writeln!(
         w,
-        "umbrix: task A \u{2014} received reply (label=0x{:x}); done",
+        "tyrne: task A \u{2014} received reply (label=0x{:x}); done",
         reply.label
     );
-    console.write_bytes(b"umbrix: all tasks complete\n");
+    console.write_bytes(b"tyrne: all tasks complete\n");
 
     loop {
         core::hint::spin_loop();
@@ -456,7 +456,7 @@ pub extern "C" fn kernel_entry() -> ! {
     // SAFETY: CPU was written in the block above. Audit: UNSAFE-2026-0001.
     let cpu = unsafe { (*CPU.0.get()).assume_init_ref() };
 
-    console.write_bytes(b"umbrix: hello from kernel_main\n");
+    console.write_bytes(b"tyrne: hello from kernel_main\n");
 
     // ── Kernel-object setup ───────────────────────────────────────────────────
 
@@ -546,7 +546,7 @@ pub extern "C" fn kernel_entry() -> ! {
         (*SCHED.0.get()).write(sched);
     }
 
-    console.write_bytes(b"umbrix: starting cooperative scheduler\n");
+    console.write_bytes(b"tyrne: starting cooperative scheduler\n");
 
     // Transfer control to Task B (the first ready task). Does not return.
     // SAFETY: per ADR-0021 — `SCHED.as_mut_ptr()` is a pure pointer cast
@@ -569,7 +569,7 @@ fn panic(info: &PanicInfo) -> ! {
     // (ADR-0007). Audit: UNSAFE-2026-0002.
     let console = unsafe { Pl011Uart::new(PL011_UART_BASE) };
 
-    console.write_bytes(b"\n!! umbrix panic !!\n");
+    console.write_bytes(b"\n!! tyrne panic !!\n");
     let mut w = FmtWriter(&console);
     let _ = writeln!(w, "{info}");
 

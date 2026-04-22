@@ -1,10 +1,10 @@
 # Guides
 
-Task-oriented walkthroughs for contributors and users of Umbrix. Guides answer *"how do I do X?"* — they are step-by-step, they assume little, and they link out to architecture and ADRs when background is needed.
+Task-oriented walkthroughs for contributors and users of Tyrne. Guides answer *"how do I do X?"* — they are step-by-step, they assume little, and they link out to architecture and ADRs when background is needed.
 
 ## Status
 
-Umbrix is in the architecture phase. Guides will be added as the corresponding implementation work is done. The list below is a placeholder so that folder structure and naming are clear.
+Tyrne is in the architecture phase. Guides will be added as the corresponding implementation work is done. The list below is a placeholder so that folder structure and naming are clear.
 
 ## Planned guides
 

@@ -1,6 +1,6 @@
 # `unsafe` audit log
 
-This log tracks every `unsafe` block, `unsafe fn` declaration, `unsafe impl`, and `unsafe trait` introduced into Umbrix. See [unsafe-policy.md](../standards/unsafe-policy.md) for the policy this log implements and [security-review.md](../standards/security-review.md) for the review pass that signs each entry off.
+This log tracks every `unsafe` block, `unsafe fn` declaration, `unsafe impl`, and `unsafe trait` introduced into Tyrne. See [unsafe-policy.md](../standards/unsafe-policy.md) for the policy this log implements and [security-review.md](../standards/security-review.md) for the review pass that signs each entry off.
 
 Entries are **append-only**. When an `unsafe` region is removed, its entry gains a `Removed` status with date and commit; the entry itself is not deleted — the historical reasoning stays on record.
 
@@ -102,7 +102,7 @@ Entries are **append-only**. When an `unsafe` region is removed, its entry gains
   - The `ret` instruction will jump to `next.lr`; for a task's first run, `lr` is the entry function address set by `init_context`. The entry function is `fn() -> !` and truly never returns.
 - **Known gaps (intentional, v1):** `TPIDR_EL0` and `TPIDRRO_EL0` (aarch64 TLS registers) are *not* saved or restored — v1 has no TLS users. If Phase B or later introduces TLS at EL1, the save set in `context_switch_asm` and the `Aarch64TaskContext` layout must be extended in the same commit as the TLS introduction; otherwise the first TLS-using task to context-switch will silently corrupt another task's TLS pointer.
 - **Rejected alternatives:** Context switching requires register-level manipulation that cannot be expressed in safe Rust. The assembly is minimal (13 saves + 13 restores + ret).
-- **Reviewed by:** @cemililik; security-reviewed 2026-04-21 (see `docs/analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md` §3).
+- **Reviewed by:** @cemililik; security-reviewed 2026-04-21 (see `docs/analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md` §3).
 - **Status:** Active.
 
 ### UNSAFE-2026-0009 — context initialisation in `QemuVirtCpu::init_context` and callers
@@ -125,7 +125,7 @@ Entries are **append-only**. When an `unsafe` region is removed, its entry gains
 - **Location:** [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) — `unsafe impl<T> Sync for StaticCell<T>`.
 - **Operation:** Declares that `&StaticCell<T>` can be shared across threads, allowing `StaticCell` to appear in `static` position.
 - **Invariants relied on:**
-  - Umbrix v1 is single-core and cooperative: no two tasks ever run simultaneously, so no two threads can reach a `StaticCell` concurrently.
+  - Tyrne v1 is single-core and cooperative: no two tasks ever run simultaneously, so no two threads can reach a `StaticCell` concurrently.
   - Each cell is written exactly once from `kernel_entry` before `start()` is called; subsequent accesses are read-only (via `assume_init_ref`) or guarded by the cooperative schedule.
 - **Rejected alternatives:** `Mutex` / `RwLock` require a runtime or a spin implementation that itself uses `unsafe`; using them would defer rather than eliminate the unsafety. `OnceCell` / `LazyLock` are not available without `std` in A5. `static mut` would expose the interior to safe code via aliasing.
 - **Reviewed by:** @cemililik.

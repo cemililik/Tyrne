@@ -6,7 +6,7 @@
 
 ## Context
 
-Umbrix is a new operating system being built from scratch. The intended target envelope spans:
+Tyrne is a new operating system being built from scratch. The intended target envelope spans:
 
 - Constrained smart-home devices (ARM Cortex-A / Cortex-M / RISC-V MCUs).
 - Single-board computers (Raspberry Pi class, Jetson aarch64).
@@ -14,7 +14,7 @@ Umbrix is a new operating system being built from scratch. The intended target e
 
 The overarching design commitment is **high assurance**: the OS must minimize attack surface, confine driver faults, and support capability-based access control rather than ambient authority. It must also scale in both directions — small enough to fit on resource-constrained hardware, structured enough to grow into a general-purpose system.
 
-Because Umbrix is starting from a blank slate, the choice of kernel architecture is the most consequential decision we will make. Everything about memory management, IPC, driver model, security, portability, and even who can contribute how, descends from it.
+Because Tyrne is starting from a blank slate, the choice of kernel architecture is the most consequential decision we will make. Everything about memory management, IPC, driver model, security, portability, and even who can contribute how, descends from it.
 
 ## Decision drivers
 
@@ -24,7 +24,7 @@ Because Umbrix is starting from a blank slate, the choice of kernel architecture
 - **Portability across very different hardware.** The same kernel must run on a Cortex-A72 SBC and on a Cortex-M-class device with significantly different memory budgets and peripherals.
 - **Rust ergonomics.** The implementation language is Rust (see [ADR-0002](0002-implementation-language-rust.md)). The architecture should make it easy to keep `unsafe` small and localized.
 - **Formal verification path.** Full verification is not a near-term goal, but architectural choices should not foreclose it for core primitives (IPC, capabilities, scheduler).
-- **Maintainer bandwidth.** Umbrix is being bootstrapped by a single maintainer plus AI agents. An architecture that requires a huge initial trusted computing base is more than can be reviewed at this scale.
+- **Maintainer bandwidth.** Tyrne is being bootstrapped by a single maintainer plus AI agents. An architecture that requires a huge initial trusted computing base is more than can be reviewed at this scale.
 
 ## Considered options
 
@@ -40,9 +40,9 @@ Because Umbrix is starting from a blank slate, the choice of kernel architecture
 
 The microkernel decision is driven primarily by the attack-surface, fault-containment, and verifiability drivers. A monolithic kernel can be made to work on all our target hardware and would be simpler to boot initially, but it fundamentally conflicts with the "high assurance" commitment: every driver bug becomes a kernel bug, and the TCB grows with every new device supported. The capability model is the second half of the decision: it gives us a single conceptual primitive ("hold a capability = may act") that threads through IPC, memory, and inter-task authority, making security reasoning uniform rather than ad-hoc.
 
-Hubris, seL4, and Fuchsia/Zircon are the closest reference points. Hubris in particular — a Rust microkernel aimed at embedded hardware — demonstrates that the capability-based microkernel style is workable in Rust without dragging in a large runtime. Umbrix is closer to Hubris than to seL4 in initial ambition (no formal proof, less flexible task spawning), but closer to seL4 than to Hubris in long-term direction (we want dynamic task creation eventually and a verification path for core primitives).
+Hubris, seL4, and Fuchsia/Zircon are the closest reference points. Hubris in particular — a Rust microkernel aimed at embedded hardware — demonstrates that the capability-based microkernel style is workable in Rust without dragging in a large runtime. Tyrne is closer to Hubris than to seL4 in initial ambition (no formal proof, less flexible task spawning), but closer to seL4 than to Hubris in long-term direction (we want dynamic task creation eventually and a verification path for core primitives).
 
-A unikernel was rejected because Umbrix is explicitly a general-purpose OS across multiple applications. An exokernel was rejected because it pushes too much policy into userspace libraries, which multiplies inconsistency. A hybrid kernel was rejected because the performance gains historically attributed to it (late-1990s benchmarks) are far less decisive on modern hardware, and the architectural muddle damages the security story.
+A unikernel was rejected because Tyrne is explicitly a general-purpose OS across multiple applications. An exokernel was rejected because it pushes too much policy into userspace libraries, which multiplies inconsistency. A hybrid kernel was rejected because the performance gains historically attributed to it (late-1990s benchmarks) are far less decisive on modern hardware, and the architectural muddle damages the security story.
 
 ## Consequences
 

@@ -1,6 +1,6 @@
 # Security model
 
-Umbrix's security model **is** its capability system: authority is expressed as unforgeable capability tokens held in kernel-managed tables, and every privileged operation requires a specific capability. This document describes the threat model the system defends against, the trust boundaries the architecture draws, the primitives the kernel exposes to enforce access control, and — equally important — the threats that are explicitly out of scope. It is the central security document for Umbrix and is cross-referenced by the architecture overview, the HAL design, and every subsystem that touches authority.
+Tyrne's security model **is** its capability system: authority is expressed as unforgeable capability tokens held in kernel-managed tables, and every privileged operation requires a specific capability. This document describes the threat model the system defends against, the trust boundaries the architecture draws, the primitives the kernel exposes to enforce access control, and — equally important — the threats that are explicitly out of scope. It is the central security document for Tyrne and is cross-referenced by the architecture overview, the HAL design, and every subsystem that touches authority.
 
 ## Context
 
@@ -16,7 +16,7 @@ The operational expression of these decisions is collected in [architectural-pri
 
 ### Threat model
 
-A threat model is the contract between what the system defends and what the system does not. Umbrix is explicit about both.
+A threat model is the contract between what the system defends and what the system does not. Tyrne is explicit about both.
 
 #### Adversaries we defend against
 
@@ -26,7 +26,7 @@ A threat model is the contract between what the system defends and what the syst
 4. **Developer error during implementation.** A large class of memory-safety bugs is made structurally impossible by Rust's type system; the remaining `unsafe` surface is audited (see [unsafe-policy.md](../standards/unsafe-policy.md)).
 5. **Accidental privilege escalation** via interaction between subsystems. Capability-based authority makes it structurally difficult for code to acquire authority it was never granted.
 6. **Network adversaries at task boundaries.** Once a network service exists, it must assume it is talking to an adversary. The kernel is not on the network path; the network task is a userspace compartment.
-7. **Buggy or compromised bus-mastering peripherals, on platforms with an IOMMU.** A device that can issue bus-master DMA (USB host controller, network card, storage controller, DMA engine) is an independent principal on the bus, distinct from the task that drives it. On a platform with an IOMMU (SMMU on ARM), Umbrix scopes each device's DMA to only the regions its driver's `MemoryRegionCap` covers. Without an IOMMU, capability protection only constrains CPU access — the device can read or write any DRAM the bus reaches. Platforms without an IOMMU are explicitly noted under *out of scope* below; the build is documented as trusting its bus masters.
+7. **Buggy or compromised bus-mastering peripherals, on platforms with an IOMMU.** A device that can issue bus-master DMA (USB host controller, network card, storage controller, DMA engine) is an independent principal on the bus, distinct from the task that drives it. On a platform with an IOMMU (SMMU on ARM), Tyrne scopes each device's DMA to only the regions its driver's `MemoryRegionCap` covers. Without an IOMMU, capability protection only constrains CPU access — the device can read or write any DRAM the bus reaches. Platforms without an IOMMU are explicitly noted under *out of scope* below; the build is documented as trusting its bus masters.
 
 #### Assumed attacker capabilities
 
@@ -50,8 +50,8 @@ An attacker inside the model **cannot**, by the kernel's design:
 
 These are *out of scope* in the current model. Being explicit means that when a deployment wants one of these protections, they know an ADR and additional engineering are required.
 
-- **Physical attackers with bus access.** Attacks using logic analyzers, cold-boot memory reads, DMA from attached devices, or fault injection are out of scope until an Umbrix deployment targets hardware with TEE / secure-element support and the project writes the ADRs that bring such support into the trust boundary.
-- **Microarchitectural side channels below generic mitigations.** Spectre-family transient execution, cache timing at the line level, microarchitectural data sampling, branch-predictor sharing. Generic compile-time mitigations and kernel/userspace isolation help; dedicated side-channel-attack defences do not yet exist in Umbrix. See *Side channels* below.
+- **Physical attackers with bus access.** Attacks using logic analyzers, cold-boot memory reads, DMA from attached devices, or fault injection are out of scope until an Tyrne deployment targets hardware with TEE / secure-element support and the project writes the ADRs that bring such support into the trust boundary.
+- **Microarchitectural side channels below generic mitigations.** Spectre-family transient execution, cache timing at the line level, microarchitectural data sampling, branch-predictor sharing. Generic compile-time mitigations and kernel/userspace isolation help; dedicated side-channel-attack defences do not yet exist in Tyrne. See *Side channels* below.
 - **Compromise of firmware or bootloader below the kernel's measurement.** Before measured boot is implemented (future ADR), the pre-kernel chain is trusted implicitly.
 - **Compromise of the maintainer's signing key.** Trust ultimately roots somewhere; the maintainer's key is that root for releases. Key compromise is handled by rotation per [release.md](../standards/release.md), not by design within the running system.
 - **Social engineering of contributors or operators.** Out of scope — human process, not system property.
@@ -61,7 +61,7 @@ These are *out of scope* in the current model. Being explicit means that when a 
 
 ### Trust boundaries
 
-A **trust boundary** is a line in the system where assumptions about integrity, confidentiality, or availability change. Umbrix recognizes the following trust boundaries; every one of them is gated by a capability check.
+A **trust boundary** is a line in the system where assumptions about integrity, confidentiality, or availability change. Tyrne recognizes the following trust boundaries; every one of them is gated by a capability check.
 
 ```mermaid
 flowchart LR
@@ -100,7 +100,7 @@ The boundaries, enumerated:
 
 ### Capabilities
 
-A capability in Umbrix is an **unforgeable kernel-held token** that authorizes a specific operation on a specific kernel object. It is the only way authority flows in the system.
+A capability in Tyrne is an **unforgeable kernel-held token** that authorizes a specific operation on a specific kernel object. It is the only way authority flows in the system.
 
 #### Why capabilities — the confused deputy problem
 
@@ -116,7 +116,7 @@ A capability system eliminates the confusion by construction:
 - To write to `/var/lib/output/`, the caller must present a capability that names that region. If they pass `/etc/shadow` instead, they either hold the capability to write there (in which case the operation is legitimate) or they do not (in which case the call fails with no side effect).
 - The "compiler" has no extra privilege to be confused about. It has exactly the authority the caller handed it — no more, no less.
 
-Every design choice in Umbrix's security model descends from this: if authority always travels with the object, not with the principal, whole categories of vulnerability become structurally impossible. Path traversal into privileged directories, SUID-binary shenanigans, "service runs as root so anyone who talks to it gets root's power" — these are not bugs Umbrix patches; they are bugs the Umbrix model cannot express in the first place.
+Every design choice in Tyrne's security model descends from this: if authority always travels with the object, not with the principal, whole categories of vulnerability become structurally impossible. Path traversal into privileged directories, SUID-binary shenanigans, "service runs as root so anyone who talks to it gets root's power" — these are not bugs Tyrne patches; they are bugs the Tyrne model cannot express in the first place.
 
 #### What a capability is, at the implementation level
 
@@ -180,7 +180,7 @@ Revocation of `A` invalidates `A1` and `A2` as well. Revocation of `Root` invali
 
 #### Badges
 
-A badge is a small integer discriminator associated with a capability at derivation time (seL4 terminology). Badges let a receiver distinguish which derived capability was used to invoke it — useful when several clients share an endpoint and the service needs to know which caller arrived. The initial Umbrix plan includes 64-bit badges on endpoint capabilities; final shape decided in a future ADR.
+A badge is a small integer discriminator associated with a capability at derivation time (seL4 terminology). Badges let a receiver distinguish which derived capability was used to invoke it — useful when several clients share an endpoint and the service needs to know which caller arrived. The initial Tyrne plan includes 64-bit badges on endpoint capabilities; final shape decided in a future ADR.
 
 ### Authority transfer over IPC
 
@@ -195,7 +195,7 @@ This is how a newly spawned task ends up with the capabilities it needs: its par
 
 ### Memory safety
 
-Umbrix has four complementary mechanisms for memory safety:
+Tyrne has four complementary mechanisms for memory safety:
 
 1. **Rust type system for kernel-local memory.** Ownership, borrow checking, and move-only types enforce the invariants that C-style kernels leave to human discipline.
 2. **Capability gates for cross-task memory.** No task sees another's memory without an explicit `MemoryRegionCap` grant.
@@ -206,7 +206,7 @@ Umbrix has four complementary mechanisms for memory safety:
 
 ### Fault containment
 
-Faults are where security models are tested. Umbrix's approach is summarized in [error-handling.md §8](../standards/error-handling.md), and restated from the security perspective here:
+Faults are where security models are tested. Tyrne's approach is summarized in [error-handling.md §8](../standards/error-handling.md), and restated from the security perspective here:
 
 - **A userspace task fault** (illegal instruction, unmapped-address dereference, divide-by-zero, Rust panic propagated to `abort`) traps to the kernel. The kernel suspends the task, builds a `TaskFault` message describing the fault, and sends it on the task's supervisor endpoint. The supervisor decides policy.
 - **A driver fault** is a task fault; the driver's supervisor handles it. The kernel does not crash because a UART driver panics.
@@ -238,13 +238,13 @@ A deliberately malicious task cannot turn "my allocation failed" into "the kerne
 
 ### Side channels
 
-Side-channel attacks exploit information leakage through mechanisms the functional correctness of the system does not mention — cache timing, branch prediction, speculation, shared microarchitecture. Umbrix's current posture:
+Side-channel attacks exploit information leakage through mechanisms the functional correctness of the system does not mention — cache timing, branch prediction, speculation, shared microarchitecture. Tyrne's current posture:
 
 - **Architectural isolation.** Process isolation (separate address spaces, separate capability tables) is the first-line defense. It does not help against shared-microarchitecture attacks.
 - **Kernel isolation on affected CPUs.** Where the CPU requires it (Meltdown-class vulnerabilities), a kernel page-table isolation design is planned — documented as an open question and resolved per CPU in the BSP.
 - **Compile-time mitigations.** `spectre_v2` mitigations via compiler flags where the Rust toolchain provides them.
-- **Timing-sensitive cryptography.** When Umbrix eventually has cryptographic primitives, they will use constant-time implementations and avoid secret-dependent branches.
-- **Gaps honestly documented.** Full Spectre-class mitigation is a CPU-dependent, evolving area. Umbrix commits to documenting which CPUs are considered mitigated, on what generations of kernel, with what residual risk.
+- **Timing-sensitive cryptography.** When Tyrne eventually has cryptographic primitives, they will use constant-time implementations and avoid secret-dependent branches.
+- **Gaps honestly documented.** Full Spectre-class mitigation is a CPU-dependent, evolving area. Tyrne commits to documenting which CPUs are considered mitigated, on what generations of kernel, with what residual risk.
 
 ### Cryptography
 
@@ -257,7 +257,7 @@ The kernel has **no cryptographic primitives** in its initial form. This is deli
 
 ### Supply chain
 
-The code the kernel runs is only as trustworthy as the sources it came from. Umbrix's supply-chain defences live primarily in [infrastructure.md](../standards/infrastructure.md):
+The code the kernel runs is only as trustworthy as the sources it came from. Tyrne's supply-chain defences live primarily in [infrastructure.md](../standards/infrastructure.md):
 
 - Pinned nightly Rust toolchain in `rust-toolchain.toml`.
 - Every dependency passes a `cargo-vet` certification.
@@ -291,7 +291,7 @@ These are the load-bearing properties of the security model. Every implementatio
   - *Consequence.* `cap_revoke` traverses only within a single table, so a sender's revoke does not reach copies that have been moved over IPC.
   - *Workarounds for a sender that needs to retain revoke authority over an IPC-transferred right.* Either (a) refuse to transfer the derived cap and instead transfer a distinct derived child kept locally, or (b) accept that the receiver now holds an independent root.
   - *Cross-table revocation* (a cross-task capability derivation tree) is an open question tracked below.
-  - Recorded by the [security review of Phase A exit](../analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md).
+  - Recorded by the [security review of Phase A exit](../analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md).
 - **A sender cannot transfer authority it does not hold.** The kernel validates every claimed capability at send time.
 - **The kernel never dereferences raw userspace pointers.** Access goes through validated mappings.
 - **Drivers are userspace tasks.** No driver code executes in privileged mode.
@@ -309,7 +309,7 @@ Every security property above has a cost. The costs are acceptable because the p
 - **IPC cost at every trust boundary.** Every cross-task operation crosses an address-space boundary. Fast-path IPC design must earn the overhead back on the critical path.
 - **Revocation tree bookkeeping.** Parent-child links inside the capability table cost memory and a small amount of kernel work per derivation. Bounded by the per-task capability budget.
 - **No ambient authority means no convenience.** You cannot "just run as admin to get something done"; you must hold the capability. This is good for security, annoying for quick debugging. Debug capabilities (gated by build config) partially mitigate.
-- **Side-channel mitigations are incomplete.** Umbrix is not a constant-time kernel as a whole; full Spectre-family mitigations are CPU-dependent and evolving. We document rather than promise.
+- **Side-channel mitigations are incomplete.** Tyrne is not a constant-time kernel as a whole; full Spectre-family mitigations are CPU-dependent and evolving. We document rather than promise.
 - **Capability transfer cost.** Moving capabilities with messages costs kernel time per transfer. Applications that move many capabilities repeatedly will notice.
 
 ## Open questions

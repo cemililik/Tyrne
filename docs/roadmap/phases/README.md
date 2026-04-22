@@ -13,7 +13,7 @@ The plan is a **sequence**, not a schedule: there are no dates. Later phases are
 | [C](phase-c.md) | Multi-core | Detailed | Preemptive scheduler across two or more cores with working cross-core IPC. |
 | [D](phase-d.md) | Raspberry Pi 4 (first real hardware) | Detailed | `bsp-pi4` boots on a real Pi 4 at feature parity with QEMU virt. |
 | [E](phase-e.md) | Driver model and essential services | Medium | Userspace drivers + log + storage + filesystem + network services composed. |
-| [F](phase-f.md) | Smart-home deployment | Medium | A real Umbrix-firmware device running in the maintainer's smart home. |
+| [F](phase-f.md) | Smart-home deployment | Medium | A real Tyrne-firmware device running in the maintainer's smart home. |
 | [G](phase-g.md) | Security maturation | Medium | Measured boot, cryptography primitives, TLS, first formal-verification pilot. |
 | [H](phase-h.md) | Platform expansion | Light | `bsp-pi5`, `bsp-jetson` (CPU-only), first RISC-V BSP. |
 | [I](phase-i.md) | Mobile | Light | First prototype boot on phone-class hardware. |

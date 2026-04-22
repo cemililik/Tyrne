@@ -35,13 +35,13 @@ grep "Taking exception" /tmp/qemu_int.log
 ## Expected output
 
 ```text
-umbrix: hello from kernel_main
-umbrix: starting cooperative scheduler
-umbrix: task B — waiting for IPC
-umbrix: task A -- sending IPC
-umbrix: task B — received IPC (label=0xaaaa); replying
-umbrix: task A — received reply (label=0xbbbb); done
-umbrix: all tasks complete
+tyrne: hello from kernel_main
+tyrne: starting cooperative scheduler
+tyrne: task B — waiting for IPC
+tyrne: task A -- sending IPC
+tyrne: task B — received IPC (label=0xaaaa); replying
+tyrne: task A — received reply (label=0xbbbb); done
+tyrne: all tasks complete
 ```
 
 After printing "all tasks complete", Task A enters a `core::hint::spin_loop()`. The kernel halts in this state; QEMU continues running but produces no further output. The specific instruction the hint lowers to is up to the compiler and is not load-bearing — a dedicated `wfe`-based idle path is Phase B work (see ADR-0019 open questions). Terminate with **Ctrl-A x** (QEMU monitor quit).
@@ -85,7 +85,7 @@ No capability escapes its owner's table. The tasks pass `&mut EP_ARENA` into the
 
 - **No preemption.** Task B must call `yield_now` after sending the reply; without it, A never runs again.
 - **One endpoint, depth-1 queue.** A second concurrent sender would hit `IpcError::QueueFull`.
-- **Symmetric `SEND | RECV` on one endpoint is a demo convenience, not a recommended topology.** Both tasks are given the same rights on the same endpoint, so correct delivery depends entirely on scheduler order (Task B is added first, reaches `RecvWaiting` before A sends). A real server cannot distinguish senders without badges; [ADR-0018](../decisions/0018-badge-scheme-and-reply-recv-deferral.md) deferred the badge scheme and server-style IPC should wait on it. Flagged by the [security review of Phase A exit](../analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md) §8.
+- **Symmetric `SEND | RECV` on one endpoint is a demo convenience, not a recommended topology.** Both tasks are given the same rights on the same endpoint, so correct delivery depends entirely on scheduler order (Task B is added first, reaches `RecvWaiting` before A sends). A real server cannot distinguish senders without badges; [ADR-0018](../decisions/0018-badge-scheme-and-reply-recv-deferral.md) deferred the badge scheme and server-style IPC should wait on it. Flagged by the [security review of Phase A exit](../analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md) §8.
 - **`&mut` aliasing.** The BSP uses `UnsafeCell` statics for shared kernel state. The aliasing across context switches is documented and justified in [UNSAFE-2026-0012](../audits/unsafe-log.md). It will be resolved by a raw-pointer API refactor in a future ADR.
 - **No timer.** IPC latency is not measured in Phase A; see the [baseline performance review](../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md).
 

@@ -1,20 +1,20 @@
 [package]
-name = "umbrix-bsp-qemu-virt"
+name = "tyrne-bsp-qemu-virt"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Umbrix BSP for QEMU aarch64 virt machine (primary development target)."
+description = "Tyrne BSP for QEMU aarch64 virt machine (primary development target)."
 build = "build.rs"
 
 [[bin]]
-name = "umbrix-bsp-qemu-virt"
+name = "tyrne-bsp-qemu-virt"
 path = "src/main.rs"
 
 [dependencies]
-umbrix-hal = { path = "../hal" }
-umbrix-kernel = { path = "../kernel" }
+tyrne-hal = { path = "../hal" }
+tyrne-kernel = { path = "../kernel" }
 
 [lints]
 workspace = true

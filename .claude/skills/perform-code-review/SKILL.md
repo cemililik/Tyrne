@@ -1,6 +1,6 @@
 ---
 name: perform-code-review
-description: Run a structured code-review pass on a pull request or branch, applying the Umbrix code-review standard.
+description: Run a structured code-review pass on a pull request or branch, applying the Tyrne code-review standard.
 when-to-use: Whenever the maintainer asks for a review of a PR or branch, or when an agent opens its own work for self-review before committing.
 ---
 

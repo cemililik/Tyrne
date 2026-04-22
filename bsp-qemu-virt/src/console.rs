@@ -1,10 +1,10 @@
-//! PL011 UART implementation of [`umbrix_hal::Console`] for QEMU `virt`.
+//! PL011 UART implementation of [`tyrne_hal::Console`] for QEMU `virt`.
 //!
 //! See ADR-0007 (`Console` trait) and ADR-0012 (boot flow) for context.
 
 use core::ptr::{read_volatile, write_volatile};
 
-use umbrix_hal::Console;
+use tyrne_hal::Console;
 
 /// PL011 UART driver, restricted to what [`Console`] needs.
 ///

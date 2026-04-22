@@ -1,6 +1,6 @@
 ---
 name: write-adr
-description: Propose and draft a new Architecture Decision Record (ADR) in MADR format for Umbrix.
+description: Propose and draft a new Architecture Decision Record (ADR) in MADR format for Tyrne.
 when-to-use: When a non-trivial architectural, security, platform, or process decision is being made, or when a change depends on a decision that has not yet been recorded.
 ---
 

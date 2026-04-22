@@ -31,13 +31,13 @@ A6 also closes the phase with two mandatory review artifacts: a baseline perform
 
 - [x] **Deterministic QEMU trace.** Running `tools/run-qemu.sh` produces (in order, allowing additional lines):
   ```text
-  umbrix: hello from kernel_main
-  umbrix: starting cooperative scheduler
-  umbrix: task B — waiting for IPC
-  umbrix: task A -- sending IPC
-  umbrix: task B — received IPC (label=0xaaaa); replying
-  umbrix: task A — received reply (label=0xbbbb); done
-  umbrix: all tasks complete
+  tyrne: hello from kernel_main
+  tyrne: starting cooperative scheduler
+  tyrne: task B — waiting for IPC
+  tyrne: task A -- sending IPC
+  tyrne: task B — received IPC (label=0xaaaa); replying
+  tyrne: task A — received reply (label=0xbbbb); done
+  tyrne: all tasks complete
   ```
 - [x] **Capability discipline exercised.** `kernel_entry` creates one `Endpoint` in a global `EndpointArena`, then builds two separate `CapabilityTable`s (one per task) and inserts a root capability in each with `CapRights::SEND | CapRights::RECV`. Neither task ever dereferences the endpoint object directly; all IPC goes through each task's own cap handle (`EP_CAP_A` / `EP_CAP_B`) resolved via its table. No raw object access.
 - [x] **IPC round-trip through scheduler.** The flow uses `Scheduler::ipc_send_and_yield` and `Scheduler::ipc_recv_and_yield` (no bare `yield_now` for the IPC itself — B's explicit `yield_now` after sending the reply is the scheduler-level companion call for the Enqueued path, documented in-code). The scheduler parks the blocked receiver until the sender arrives.

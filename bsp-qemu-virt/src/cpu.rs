@@ -1,8 +1,8 @@
 //! `Cpu` and `ContextSwitch` implementations for the QEMU `virt` aarch64 target.
 //!
 //! `QemuVirtCpu` implements:
-//! - [`umbrix_hal::Cpu`] — interrupt masking and core identity (object-safe).
-//! - [`umbrix_hal::ContextSwitch`] — cooperative register-state save/restore
+//! - [`tyrne_hal::Cpu`] — interrupt masking and core identity (object-safe).
+//! - [`tyrne_hal::ContextSwitch`] — cooperative register-state save/restore
 //!   (generic; see [ADR-0020]).
 //!
 //! # Safety overview
@@ -12,11 +12,11 @@
 //! follows from the struct's invariants. See the individual `// SAFETY:` comments
 //! and the audit entries `UNSAFE-2026-0006` through `UNSAFE-2026-0009`.
 //!
-//! [ADR-0020]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
+//! [ADR-0020]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
 
 use core::arch::{asm, naked_asm};
 
-use umbrix_hal::{ContextSwitch, CoreId, Cpu, IrqState};
+use tyrne_hal::{ContextSwitch, CoreId, Cpu, IrqState};
 
 // ─── QemuVirtCpu ────────────────────────────────────────────────────────────
 

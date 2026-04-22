@@ -1,16 +1,16 @@
 # Security policy
 
-Umbrix is a security-oriented operating system project. Even while it is in pre-alpha, we want to handle security observations carefully.
+Tyrne is a security-oriented operating system project. Even while it is in pre-alpha, we want to handle security observations carefully.
 
 ## Project status and guarantees
 
-Umbrix is **pre-alpha**. There is no runnable kernel yet. No production use is supported, and no security guarantees are made for the current tree. The formal threat model is a work in progress and will be documented in `docs/architecture/security-model.md` (planned, Phase 2).
+Tyrne is **pre-alpha**. There is no runnable kernel yet. No production use is supported, and no security guarantees are made for the current tree. The formal threat model is a work in progress and will be documented in `docs/architecture/security-model.md` (planned, Phase 2).
 
 ## Reporting a security issue
 
 Until a dedicated disclosure channel is set up, please report security-relevant observations by opening a **private security advisory** on GitHub:
 
-https://github.com/cemililik/UmbrixOS/security/advisories/new
+https://github.com/cemililik/TyrneOS/security/advisories/new
 
 Do not open a public issue for anything that looks like it might be security-sensitive, even in this early phase.
 
@@ -22,7 +22,7 @@ Where possible, include:
 
 ## Scope
 
-Everything in the `UmbrixOS` repository is in scope. Third-party dependencies are reviewed upstream; reporters are encouraged to also notify the upstream project when the root cause lives there.
+Everything in the `TyrneOS` repository is in scope. Third-party dependencies are reviewed upstream; reporters are encouraged to also notify the upstream project when the root cause lives there.
 
 ## Disclosure
 

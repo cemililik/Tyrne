@@ -6,7 +6,7 @@
 
 ## Context
 
-Phase 4b begins with the HAL's `Console` trait. Its job is to provide the earliest-possible diagnostic byte sink: the kernel must be able to produce output **before** the scheduler is up, **before** IPC exists, **before** the userspace log service is running, and **during** panic — when nothing else in the system can be trusted. Every later diagnostic facility (the `umbrix-log` facade, the structured log service) layers *on top* of what `Console` guarantees; `Console` itself is the last line of visibility when things go wrong.
+Phase 4b begins with the HAL's `Console` trait. Its job is to provide the earliest-possible diagnostic byte sink: the kernel must be able to produce output **before** the scheduler is up, **before** IPC exists, **before** the userspace log service is running, and **during** panic — when nothing else in the system can be trusted. Every later diagnostic facility (the `tyrne-log` facade, the structured log service) layers *on top* of what `Console` guarantees; `Console` itself is the last line of visibility when things go wrong.
 
 The trait's method surface will be a contract that every BSP implements and that the kernel depends on for the lifetime of the project. Small choices — fallibility, `&self` vs. `&mut self`, formatting — are not small in aggregate.
 
@@ -19,7 +19,7 @@ See [`docs/architecture/hal.md`](../architecture/hal.md) for the HAL's overall s
 - **Simple to implement per BSP.** A BSP will implement this trait with a handful of MMIO writes to a UART. The more complex the signature, the more BSP authors get wrong.
 - **Ergonomic for formatted output in non-panic paths.** The kernel wants to say `write!(con, "boot CPU {id} online")` without allocating or depending on `std::io`.
 - **Multi-core safe.** On systems with multiple cores online, two cores may race to write during concurrent panics. The console is globally shared; the trait bounds must permit that.
-- **No formatting, no levels, no buffering in the trait itself.** Those belong to the userspace log service and the `umbrix-log` facade (see [logging-and-observability.md](../standards/logging-and-observability.md)). Keeping `Console` byte-level keeps the BSP surface minimal.
+- **No formatting, no levels, no buffering in the trait itself.** Those belong to the userspace log service and the `tyrne-log` facade (see [logging-and-observability.md](../standards/logging-and-observability.md)). Keeping `Console` byte-level keeps the BSP surface minimal.
 
 ## Considered options
 
@@ -66,7 +66,7 @@ The primitive is **infallible** — no `Result` return. A UART that has physical
 - **Formatted output remains possible.** `write!(FmtWriter(&*console), "...")` is one import and one wrapper; no loss of ergonomics compared to a native `fmt::Write` design.
 - **Infallibility removes a recursion class at panic.** A fallible `write_bytes` would return `Err` that the panic handler would want to log, which would call `write_bytes`, which could fail again. Infallibility short-circuits the loop.
 - **`Send + Sync` bound is compiler-checked.** Multi-core safety is not a convention; it is a compile-error if violated.
-- **Test fakes are trivial.** `FakeConsole` wraps a `Mutex<Vec<u8>>` and satisfies the trait in a handful of lines; see [`umbrix-test-hal`].
+- **Test fakes are trivial.** `FakeConsole` wraps a `Mutex<Vec<u8>>` and satisfies the trait in a handful of lines; see [`tyrne-test-hal`].
 
 ### Negative
 

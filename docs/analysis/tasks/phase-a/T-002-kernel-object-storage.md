@@ -13,7 +13,7 @@
 
 ## User story
 
-As the Umbrix kernel, I want typed kernel-object arenas (`Task`, `Endpoint`, `Notification`) reachable from the capability table, so that capabilities point at real in-kernel entities with well-defined lifecycle — replacing the opaque `CapObject(u64)` placeholder from [ADR-0014](../../../decisions/0014-capability-representation.md) with structure that the IPC path (Milestone A4) can dispatch against.
+As the Tyrne kernel, I want typed kernel-object arenas (`Task`, `Endpoint`, `Notification`) reachable from the capability table, so that capabilities point at real in-kernel entities with well-defined lifecycle — replacing the opaque `CapObject(u64)` placeholder from [ADR-0014](../../../decisions/0014-capability-representation.md) with structure that the IPC path (Milestone A4) can dispatch against.
 
 ## Context
 
@@ -26,7 +26,7 @@ This task is **structure and lifecycle only**, not behaviour. The scheduler (A5)
 ## Acceptance criteria
 
 - [x] **ADR-0016 Accepted.** Settles storage strategy (per-type arena vs. shared pool), handle type (generation-tagged or equivalent), ownership (global vs. per-task), and explicit-destruction semantics.
-- [x] **Kernel-object module** `umbrix_kernel::obj` (or equivalent) with three types: `Task`, `Endpoint`, `Notification`. Minimal fields per ADR-0016; no scheduler / IPC logic.
+- [x] **Kernel-object module** `tyrne_kernel::obj` (or equivalent) with three types: `Task`, `Endpoint`, `Notification`. Minimal fields per ADR-0016; no scheduler / IPC logic.
 - [x] **Per-type arenas** with bounded capacity (compile-time constants, revisited when a real use case demands more).
 - [x] **Handle types** (`TaskHandle`, `EndpointHandle`, `NotificationHandle`) or a unified typed handle — whichever ADR-0016 chooses. Use-after-destroy structurally impossible (generation check, typed arena, or equivalent).
 - [x] **`CapObject` wiring.** The placeholder `CapObject` becomes a typed reference to a kernel object (enum over the three kinds, carrying the appropriate handle). [ADR-0014](../../../decisions/0014-capability-representation.md) said the outer API of the capability table does not change; this task verifies that claim holds.
@@ -73,7 +73,7 @@ Sketch; real design in ADR-0016.
 - [x] `cargo kernel-clippy` clean.
 - [x] `cargo host-test` passes with the new tests.
 - [x] No new `unsafe` without an audit entry.
-- [x] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md); at minimum: ADR-0016 as one commit, `umbrix_kernel::obj` module as one commit, `CapObject` wiring as one commit.
+- [x] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md); at minimum: ADR-0016 as one commit, `tyrne_kernel::obj` module as one commit, `CapObject` wiring as one commit.
 - [x] [`current.md`](../../../roadmap/current.md) updated on each status transition.
 - [x] Milestone A3 closed by this task alone — T-002 covered A3 in one task as planned.
 
@@ -98,5 +98,5 @@ Sketch; real design in ADR-0016.
 |------|----------|------|
 | 2026-04-21 | @cemililik | opened; status Draft (A3 blocked until A2 Done) |
 | 2026-04-21 | @cemililik | A2 Done + A2 business review committed; status → Ready. ADR-0016 Accepted the same day; implementation may begin. |
-| 2026-04-21 | @cemililik | implementation landed on `development`; status → In Review. `umbrix_kernel::obj` module (generic `Arena<T, N>`, `Task`/`Endpoint`/`Notification` + typed handles + create/destroy APIs); `CapObject` rewired to a typed enum; `Capability` loses its redundant `kind` field (derived from object). 14 new host tests on top of the 63 T-001 baseline (77/77 total). |
+| 2026-04-21 | @cemililik | implementation landed on `development`; status → In Review. `tyrne_kernel::obj` module (generic `Arena<T, N>`, `Task`/`Endpoint`/`Notification` + typed handles + create/destroy APIs); `CapObject` rewired to a typed enum; `Capability` loses its redundant `kind` field (derived from object). 14 new host tests on top of the 63 T-001 baseline (77/77 total). |
 | 2026-04-21 | @cemililik | PR merged to `main`; status → Done. Review findings applied (fa21f16): T-001 checkboxes, ADR-0016 destroy signature, cap_derive docstring, ObjError::StillReachable clarification, arena debug_assert, notification realloc test, cap_revoke_clears_references_object test. 44/44 host tests green. Milestone A3 closed. |

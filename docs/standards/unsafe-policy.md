@@ -1,6 +1,6 @@
 # `unsafe` policy
 
-`unsafe` is Rust's escape hatch. It is also the place where all memory-safety guarantees are negotiated away. In Umbrix's security-first posture, `unsafe` is a feature we use — because kernels must — but one we account for explicitly.
+`unsafe` is Rust's escape hatch. It is also the place where all memory-safety guarantees are negotiated away. In Tyrne's security-first posture, `unsafe` is a feature we use — because kernels must — but one we account for explicitly.
 
 This standard governs every appearance of the `unsafe` keyword in the repository.
 

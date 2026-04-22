@@ -32,8 +32,8 @@
 
 | Crate | Tests |
 |-------|-------|
-| `umbrix_kernel` (host) | 75 |
-| `umbrix_hal` (host) | 34 |
+| `tyrne_kernel` (host) | 75 |
+| `tyrne_hal` (host) | 34 |
 | **Total** | **109** |
 
 Zero failures. QEMU smoke test confirmed manually.
@@ -47,13 +47,13 @@ Zero failures. QEMU smoke test confirmed manually.
 **Met.** The A6 QEMU trace shows:
 
 ```text
-umbrix: hello from kernel_main
-umbrix: starting cooperative scheduler
-umbrix: task B — waiting for IPC
-umbrix: task A -- sending IPC
-umbrix: task B — received IPC (label=0xaaaa); replying
-umbrix: task A — received reply (label=0xbbbb); done
-umbrix: all tasks complete
+tyrne: hello from kernel_main
+tyrne: starting cooperative scheduler
+tyrne: task B — waiting for IPC
+tyrne: task A -- sending IPC
+tyrne: task B — received IPC (label=0xaaaa); replying
+tyrne: task A — received reply (label=0xbbbb); done
+tyrne: all tasks complete
 ```
 
 All five components of the exit bar are verified:

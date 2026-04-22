@@ -68,7 +68,7 @@ A successor ADR superseding this one should be written when **any one** of the f
 
 1. A6 or Phase B introduces a server that multiplexes a single endpoint across more than one client, and distinguishing clients at the receiver side requires kernel-level badge injection (rather than user-space keying on `CapHandle`).
 2. A5/A6 QEMU measurements show that the extra context switch in the server loop is a meaningful bottleneck (e.g., it dominates the round-trip latency in a benchmark that Phase B cares about).
-3. A formal security argument for Umbrix requires that badge injection happen inside the kernel TCB rather than in user space.
+3. A formal security argument for Tyrne requires that badge injection happen inside the kernel TCB rather than in user space.
 
 ## Consequences
 

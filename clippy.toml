@@ -1,4 +1,4 @@
-# Umbrix clippy thresholds.
+# Tyrne clippy thresholds.
 #
 # Lint **levels** (allow/warn/deny) are configured in workspace Cargo.toml under
 # [workspace.lints.clippy] and extended per-crate via #![deny(...)] attributes

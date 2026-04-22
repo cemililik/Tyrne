@@ -13,7 +13,7 @@
 
 ## User story
 
-As the Umbrix kernel, I want synchronous rendezvous `send` / `recv` operations on `Endpoint` objects and a non-blocking `notify` path on `Notification` objects — both gated by capabilities — so that two kernel-level task stubs can exchange a capability-gated message and both resume, proving the IPC contract that the A6 two-task demo will exercise end-to-end.
+As the Tyrne kernel, I want synchronous rendezvous `send` / `recv` operations on `Endpoint` objects and a non-blocking `notify` path on `Notification` objects — both gated by capabilities — so that two kernel-level task stubs can exchange a capability-gated message and both resume, proving the IPC contract that the A6 two-task demo will exercise end-to-end.
 
 ## Context
 

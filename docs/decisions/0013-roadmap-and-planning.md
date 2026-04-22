@@ -6,7 +6,7 @@
 
 ## Context
 
-Umbrix is a multi-year solo project with AI assistance. The ADR process ([ADR-0001](0001-microkernel-architecture.md) onward) answers *why* decisions are made; the [standards](../standards/) answer *how* work is done; the [skills](../../.claude/skills/) encode procedures for recurring tasks. What is missing is the **sequencing and tracking layer**: which phase of the project we are in, which milestone is active, which task is being worked on, and what reviews happen when a milestone lands or when a change affects security / performance.
+Tyrne is a multi-year solo project with AI assistance. The ADR process ([ADR-0001](0001-microkernel-architecture.md) onward) answers *why* decisions are made; the [standards](../standards/) answer *how* work is done; the [skills](../../.claude/skills/) encode procedures for recurring tasks. What is missing is the **sequencing and tracking layer**: which phase of the project we are in, which milestone is active, which task is being worked on, and what reviews happen when a milestone lands or when a change affects security / performance.
 
 A project with no deadline still needs a roadmap — not to meet dates, but so that work proceeds in a considered order, so that the maintainer can pause for weeks and return without having to page the entire project back in, and so that contributors (human or AI) arriving later know the direction without guessing. Without a plan, time does not produce progress; it produces ad-hoc choices that accumulate.
 
@@ -14,7 +14,7 @@ This ADR establishes the roadmap and analysis system: where the plan lives, wher
 
 ## Decision drivers
 
-- **Sequencing over scheduling.** Umbrix is not estimable. What matters is *what comes before what*, not *how long each piece takes*.
+- **Sequencing over scheduling.** Tyrne is not estimable. What matters is *what comes before what*, not *how long each piece takes*.
 - **Living document.** The plan will change. A plan that rots the moment it is written is worse than no plan; a plan we routinely update is valuable.
 - **Repo-native.** External tools (Trello, Linear, GitHub Projects) are not part of the ground truth.
 - **Per-phase task folders.** Each phase has its own directory under `docs/analysis/tasks/`, so a phase's tasks are read together and ID collisions between phases are obvious.

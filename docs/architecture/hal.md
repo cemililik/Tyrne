@@ -6,7 +6,7 @@ The HAL is the trait surface that separates the kernel core from any specific CP
 
 The HAL exists because of three commitments:
 
-- [ADR-0004: Target hardware platforms and support tiers](../decisions/0004-target-platforms.md) — Umbrix targets multiple aarch64 platforms (QEMU, Pi 4, Pi 5, Jetson CPU, eventually RISC-V). Per-target code must be isolated behind a stable interface.
+- [ADR-0004: Target hardware platforms and support tiers](../decisions/0004-target-platforms.md) — Tyrne targets multiple aarch64 platforms (QEMU, Pi 4, Pi 5, Jetson CPU, eventually RISC-V). Per-target code must be isolated behind a stable interface.
 - [Architectural principle P6](../standards/architectural-principles.md#p6--hal-separation) — kernel code does not directly reference any specific CPU, board, or peripheral. Hardware details live behind HAL traits and types.
 - [Architectural principle P3](../standards/architectural-principles.md#p3--drivers-filesystems-and-network-stacks-live-in-userspace) — drivers run as userspace tasks, not in the kernel. The HAL is therefore *not* a driver framework; it is strictly what the kernel itself needs.
 
@@ -26,7 +26,7 @@ The HAL **is not**:
 
 - A driver layer. Drivers for UART beyond boot, block devices, network interfaces, USB, GPIO, sensors, and every other peripheral live in userspace tasks with capability-granted access.
 - A device-tree parser. Device-tree handling, where needed (e.g. Pi 4), is performed by a separate crate and fed into boot-info; the HAL traits see only typed memory ranges and IRQ numbers.
-- A portable POSIX-style device abstraction. Umbrix does not promise a "common driver API"; drivers talk to services above them in their own protocol.
+- A portable POSIX-style device abstraction. Tyrne does not promise a "common driver API"; drivers talk to services above them in their own protocol.
 - A runtime that the kernel queries to discover hardware. The BSP is selected at build time and the kernel knows what it got.
 
 ### Where the HAL lives in the layering
@@ -158,8 +158,8 @@ A BSP is expected to be roughly 1 000 – 2 500 lines of Rust plus a few dozen l
 
 BSPs are selected at **build time**, not runtime. The mechanism is a workspace-level target configuration plus a single-BSP dependency per kernel binary. Two binaries differing only in BSP are different artifacts.
 
-- `cargo build --target aarch64-unknown-none -p umbrix-kernel-qemu-virt`
-- `cargo build --target aarch64-unknown-none -p umbrix-kernel-pi4`
+- `cargo build --target aarch64-unknown-none -p tyrne-kernel-qemu-virt`
+- `cargo build --target aarch64-unknown-none -p tyrne-kernel-pi4`
 
 Runtime multi-board support (one kernel binary that detects its host and selects a BSP) is explicitly **not** a goal. The policy is justified by ADR-0004 and by the security argument: runtime detection expands the TCB with detection logic and conditional code paths that no deployment exercises all of.
 
@@ -180,7 +180,7 @@ Runtime multi-board support (one kernel binary that detects its host and selects
 | Secondary-core start | PSCI |
 | Virtio | present (virtio-mmio); used by userspace drivers in future phases |
 
-This is the first target Umbrix boots on and the one where every feature's first QEMU smoke test runs.
+This is the first target Tyrne boots on and the one where every feature's first QEMU smoke test runs.
 
 #### `bsp-pi4` — first real-hardware BSP
 
@@ -229,7 +229,7 @@ sequenceDiagram
     K->>HAL: Mmu::activate(kernel_tt)
     K->>HAL: IrqController::init()
     K->>HAL: Timer::init()
-    K->>HAL: Console::write_bytes(b"umbrix: online\n")
+    K->>HAL: Console::write_bytes(b"tyrne: online\n")
     Note over K: scheduler, init task, steady state
 ```
 
@@ -241,7 +241,7 @@ The BSP hands `kernel_main` a `BootInfo` structure describing what the kernel ca
 
 - **Memory map.** Regions of usable RAM, regions reserved (BSP code, firmware, device MMIO windows).
 - **Boot CPU ID and the total core count** (which need not match — the BSP may choose to leave some cores offline).
-- **Device-tree pointer** or a BSP-specific equivalent configuration handle. The kernel treats the DT as opaque; a future `umbrix-dt` crate parses it into typed records.
+- **Device-tree pointer** or a BSP-specific equivalent configuration handle. The kernel treats the DT as opaque; a future `tyrne-dt` crate parses it into typed records.
 - **Initial capability seed.** The first capabilities the init task will hold — typically a handful: its own `TaskCap`, an address-space cap, a handful of memory caps covering the init image, an IRQ cap for the console, and nothing else.
 
 `BootInfo` is typed Rust; the BSP constructs it and passes it by value. No mutation is expected after handoff.
@@ -254,7 +254,7 @@ HAL methods **do not allocate**. The kernel hands the HAL any working memory it 
 
 ### `unsafe` in the HAL
 
-The HAL is where most of Umbrix's `unsafe` lives. By construction:
+The HAL is where most of Tyrne's `unsafe` lives. By construction:
 
 - Every MMIO access goes through an `unsafe` region.
 - Every privileged-state manipulation (system registers, barriers, CPU mode changes) is `unsafe`.
@@ -280,12 +280,12 @@ Testing a HAL is largely testing that two independent BSP implementations behave
 - **HAL methods do not allocate.** They are handed any working memory they need.
 - **Every HAL `unsafe` block is audited.** An entry in the audit log, a `SAFETY:` comment, a security-review sign-off.
 - **BSP code paths are deterministic at boot.** A given BSP on a given board produces the same sequence of HAL calls on every cold boot.
-- **No proprietary binary blob enters a BSP.** Firmware loaded by the pre-kernel boot loader (e.g., Pi `start4.elf`) lives outside the Umbrix build; an Umbrix BSP does not embed closed-source code.
+- **No proprietary binary blob enters a BSP.** Firmware loaded by the pre-kernel boot loader (e.g., Pi `start4.elf`) lives outside the Tyrne build; an Tyrne BSP does not embed closed-source code.
 
 ## Trade-offs
 
 - **Narrow HAL means more code overall.** Pushing drivers to userspace makes the kernel simpler and smaller but the system as a whole larger. We accept this because review complexity is what scales badly with TCB size; total code size is manageable.
-- **Compile-time BSP selection forecloses a "universal kernel."** A single binary that boots on Pi 4, QEMU virt, and Jetson is impossible under this design. It is also unnecessary: Umbrix ships per-board artifacts.
+- **Compile-time BSP selection forecloses a "universal kernel."** A single binary that boots on Pi 4, QEMU virt, and Jetson is impossible under this design. It is also unnecessary: Tyrne ships per-board artifacts.
 - **Multi-architecture support compounds the trait count.** Adding RISC-V later means a second implementation lineage under every architecture-sensitive trait. The blast radius is bounded by the HAL's narrowness.
 - **IOMMU optionality is a real gap on Pi 4.** We pay this in the security model; the HAL does not paper over it. See [security-model.md](security-model.md).
 - **Runtime errata handling is inconvenient.** CPU errata workarounds have to live somewhere. A first cut keeps them in the BSP (per-CPU-variant feature flag); a future ADR may introduce a per-CPU crate layer above the BSP if the bookkeeping outgrows the BSP.

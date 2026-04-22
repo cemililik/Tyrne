@@ -5,7 +5,7 @@
 //! the scheduler is generic over `C: ContextSwitch` and does not use
 //! dynamic dispatch.
 //!
-//! [ADR-0020]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
+//! [ADR-0020]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
 
 /// Context-switch extension for BSPs that support cooperative task switching.
 ///

@@ -117,7 +117,7 @@ when-to-use: When a new subsystem is being designed, an existing subsystem's des
 - **No summary paragraph.** A reader should not have to get ten paragraphs in to discover what the document is about.
 - **Decorative diagrams.** A diagram that does not clarify anything is noise.
 - **No Trade-offs section.** Every design has costs. Hiding them is a review failure.
-- **ADR claims unmoored.** "Umbrix does X" without a link to the ADR that decided X.
+- **ADR claims unmoored.** "Tyrne does X" without a link to the ADR that decided X.
 - **Mismatched scope.** A document titled "IPC" that secretly also covers scheduling — split it.
 - **Untestable invariants.** "The system is secure" is not an invariant. "The kernel checks `SendCap` before transferring a message" is.
 - **Inline PNG / SVG.** Only Mermaid.

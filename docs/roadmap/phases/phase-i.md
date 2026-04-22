@@ -1,6 +1,6 @@
 # Phase I — Mobile
 
-**Exit bar:** First prototype boot on phone-class hardware with a display and minimal input, demonstrating that Umbrix can host a phone-style device shell.
+**Exit bar:** First prototype boot on phone-class hardware with a display and minimal input, demonstrating that Tyrne can host a phone-style device shell.
 
 **Scope:** The long-horizon stretch. Years away. This file is a sketch; detail grows as Phase I approaches.
 
@@ -48,7 +48,7 @@ Mobile requires battery-aware CPU scaling, suspend / resume, screen blanking, ag
 
 ## Milestone I4 — First prototype boot
 
-The device runs Umbrix, shows a screen, responds to touch, reports battery status. It is not a product; it is a demonstration that the kernel can host such a product.
+The device runs Tyrne, shows a screen, responds to touch, reports battery status. It is not a product; it is a demonstration that the kernel can host such a product.
 
 ### Sub-breakdown
 
@@ -59,7 +59,7 @@ The device runs Umbrix, shows a screen, responds to touch, reports battery statu
 
 ### Phase I closure
 
-The mobile milestone is explicitly a stretch goal. Reaching I4 makes Umbrix a credible mobile-capable kernel, not a consumer product.
+The mobile milestone is explicitly a stretch goal. Reaching I4 makes Tyrne a credible mobile-capable kernel, not a consumer product.
 
 ## ADR ledger for Phase I
 
@@ -71,7 +71,7 @@ The mobile milestone is explicitly a stretch goal. Reaching I4 makes Umbrix a cr
 
 ## Open questions carried into Phase I
 
-- Whether "mobile" for Umbrix is a phone, a tablet, or both.
+- Whether "mobile" for Tyrne is a phone, a tablet, or both.
 - Cellular modem support (likely never in this project; use devices without built-in modems or with open modems).
 - Audio stack (not covered in I1–I4; a separate ADR or a future phase).
-- Long-term positioning: is Umbrix a security-first *phone OS*, or does the smart-home deployment remain the primary face?
+- Long-term positioning: is Tyrne a security-first *phone OS*, or does the smart-home deployment remain the primary face?

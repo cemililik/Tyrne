@@ -6,7 +6,7 @@
 
 ## Context
 
-Umbrix needs a concrete first hardware target to make implementation choices — architecture-specific code, HAL surfaces, toolchain pinning — possible. The long-term vision spans constrained smart-home devices, single-board computers, and eventually mobile-class aarch64 SoCs. The short-term question is: *which platform do we bring up first, and what is the roadmap for the rest?*
+Tyrne needs a concrete first hardware target to make implementation choices — architecture-specific code, HAL surfaces, toolchain pinning — possible. The long-term vision spans constrained smart-home devices, single-board computers, and eventually mobile-class aarch64 SoCs. The short-term question is: *which platform do we bring up first, and what is the roadmap for the rest?*
 
 ## Decision drivers
 
@@ -28,7 +28,7 @@ Umbrix needs a concrete first hardware target to make implementation choices —
 
 **Chosen: start on QEMU `virt` aarch64, then port to Raspberry Pi 4 as the first real hardware. Adopt a tiered support model (below) for all future targets.**
 
-aarch64 is where Umbrix lives long-term — all current targets (Raspberry Pi, Jetson, eventual mobile) are aarch64. Starting there avoids paying a learning tax on x86_64 that would have to be re-paid when porting. QEMU's `virt` machine is a fully documented, standard, deterministic aarch64 environment (GICv3, PL011 UART, virtio transports, PSCI for CPU start), ideal for CI-driven kernel development.
+aarch64 is where Tyrne lives long-term — all current targets (Raspberry Pi, Jetson, eventual mobile) are aarch64. Starting there avoids paying a learning tax on x86_64 that would have to be re-paid when porting. QEMU's `virt` machine is a fully documented, standard, deterministic aarch64 environment (GICv3, PL011 UART, virtio transports, PSCI for CPU start), ideal for CI-driven kernel development.
 
 The Raspberry Pi 4 (BCM2711, Cortex-A72, 4 cores, 1 – 8 GB RAM) is chosen as the first real-hardware port because it is cheap, available everywhere, extensively documented, aarch64-native, and has a large community of open-source kernel work to cross-reference. Pi 5 (BCM2712, Cortex-A76) follows.
 
@@ -57,15 +57,15 @@ RISC-V is not rejected — it is on the Tier 3 roadmap — but RISC-V as the *fi
 
 ### Jetson caveat
 
-NVIDIA Jetson devices are aarch64 and their CPU cores boot using the normal ARM boot protocol (CBoot → U-Boot → kernel is typical on Jetson L4T; Umbrix will likely replace the Linux kernel in that chain). Running a custom kernel on the Jetson CPU is feasible and in scope for Tier 3.
+NVIDIA Jetson devices are aarch64 and their CPU cores boot using the normal ARM boot protocol (CBoot → U-Boot → kernel is typical on Jetson L4T; Tyrne will likely replace the Linux kernel in that chain). Running a custom kernel on the Jetson CPU is feasible and in scope for Tier 3.
 
-However, the value of a Jetson — GPU compute via CUDA and Tensor core acceleration — depends on **proprietary NVIDIA userspace libraries and kernel modules**. There is no open-source driver for modern NVIDIA mobile GPUs, and Umbrix's policy (derived from the security-first posture of [ADR-0001](0001-microkernel-architecture.md)) rejects proprietary binary blobs in the kernel.
+However, the value of a Jetson — GPU compute via CUDA and Tensor core acceleration — depends on **proprietary NVIDIA userspace libraries and kernel modules**. There is no open-source driver for modern NVIDIA mobile GPUs, and Tyrne's policy (derived from the security-first posture of [ADR-0001](0001-microkernel-architecture.md)) rejects proprietary binary blobs in the kernel.
 
 Concretely:
 
-- Umbrix on Jetson will provide CPU-level functionality: scheduling, IPC, memory management, and whatever userspace drivers can be written for non-GPU peripherals.
-- Umbrix on Jetson will **not** provide CUDA, cuDNN, TensorRT, Isaac, or any other NVIDIA-proprietary stack.
-- If a project needs on-device NPU acceleration under Umbrix, suitable open alternatives include Rockchip NPUs (documented), Hailo accelerators (documented), and Google Coral Edge TPU. A future ADR will track the first open NPU target.
+- Tyrne on Jetson will provide CPU-level functionality: scheduling, IPC, memory management, and whatever userspace drivers can be written for non-GPU peripherals.
+- Tyrne on Jetson will **not** provide CUDA, cuDNN, TensorRT, Isaac, or any other NVIDIA-proprietary stack.
+- If a project needs on-device NPU acceleration under Tyrne, suitable open alternatives include Rockchip NPUs (documented), Hailo accelerators (documented), and Google Coral Edge TPU. A future ADR will track the first open NPU target.
 
 ## Consequences
 

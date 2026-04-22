@@ -41,7 +41,7 @@ The right choice depends on which consumers need `dyn Cpu` and whether the sched
 **Option A — Separate `ContextSwitch` trait with associated `TaskContext`.**
 
 ```rust
-// In umbrix-hal
+// In tyrne-hal
 
 pub trait ContextSwitch {
     type TaskContext: Default + Send;
@@ -150,7 +150,7 @@ Callers must uphold stack validity and context initialisation invariants.
 ### Trait definition
 
 ```rust
-// umbrix-hal/src/cpu.rs  (addition; existing Cpu trait unchanged)
+// tyrne-hal/src/cpu.rs  (addition; existing Cpu trait unchanged)
 
 /// Context-switch extension for BSPs that support cooperative task switching.
 ///

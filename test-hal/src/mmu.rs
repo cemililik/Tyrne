@@ -1,8 +1,8 @@
-//! Deterministic fake [`umbrix_hal::Mmu`] for host-side tests.
+//! Deterministic fake [`tyrne_hal::Mmu`] for host-side tests.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use umbrix_hal::{FrameProvider, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr};
+use tyrne_hal::{FrameProvider, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr};
 
 /// A simple [`FrameProvider`] backed by a `Vec` of pre-allocated frames.
 ///
@@ -177,7 +177,7 @@ impl Mmu for FakeMmu {
 #[cfg(test)]
 mod tests {
     use super::{FakeMmu, VecFrameProvider};
-    use umbrix_hal::{MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr};
+    use tyrne_hal::{MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr};
 
     fn frame(addr: usize) -> PhysFrame {
         PhysFrame::from_aligned(PhysAddr(addr)).expect("test addr must be page-aligned")

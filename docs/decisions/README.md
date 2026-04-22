@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Every non-trivial architectural, security, or process decision in Umbrix is recorded here as an **ADR** (Architecture Decision Record) using a lightweight **MADR** (Markdown Architectural Decision Records) style.
+Every non-trivial architectural, security, or process decision in Tyrne is recorded here as an **ADR** (Architecture Decision Record) using a lightweight **MADR** (Markdown Architectural Decision Records) style.
 
 ## Why ADRs
 

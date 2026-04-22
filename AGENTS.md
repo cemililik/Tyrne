@@ -1,4 +1,4 @@
-# AI agents guide — Umbrix
+# AI agents guide — Tyrne
 
 All AI agents working on this repository should read this file first.
 

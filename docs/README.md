@@ -1,13 +1,13 @@
-# Umbrix documentation
+# Tyrne documentation
 
-This is the canonical documentation tree for Umbrix. It is organized by the *kind of question* each section answers, not by the component of the system it describes. This way, when a reader has a question, they know which folder to open before they know which subsystem touches the answer.
+This is the canonical documentation tree for Tyrne. It is organized by the *kind of question* each section answers, not by the component of the system it describes. This way, when a reader has a question, they know which folder to open before they know which subsystem touches the answer.
 
 ## Layout
 
 | Folder | Answers the question |
 |--------|----------------------|
-| [architecture/](architecture/) | **How is Umbrix built?** High-level design, subsystem decompositions, component interactions, data and control flow, the security model. |
-| [decisions/](decisions/) | **Why is Umbrix built this way?** Architecture Decision Records (ADRs) in MADR format. One ADR per non-trivial choice. |
+| [architecture/](architecture/) | **How is Tyrne built?** High-level design, subsystem decompositions, component interactions, data and control flow, the security model. |
+| [decisions/](decisions/) | **Why is Tyrne built this way?** Architecture Decision Records (ADRs) in MADR format. One ADR per non-trivial choice. |
 | [guides/](guides/) | **How do I do X?** Task-oriented walkthroughs: setting up the toolchain, running the kernel under QEMU, porting to a new board, writing a new userspace driver. |
 | [standards/](standards/) | **How should things be written?** Documentation style, code style, commit message style, review checklists, security-review checklist. |
 | [glossary.md](glossary.md) | Project-specific terminology. |

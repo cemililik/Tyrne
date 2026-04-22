@@ -6,7 +6,7 @@
 
 ## Context
 
-Umbrix is maintained by a native Turkish speaker and is being developed on a public GitHub repository. The maintainer is more fluent in Turkish for deep technical discussion and often uses AI assistance in Turkish. At the same time, the repository is open to the world, and the project aspires to attract external contributors and to remain readable to future maintainers (human or AI) who do not speak Turkish.
+Tyrne is maintained by a native Turkish speaker and is being developed on a public GitHub repository. The maintainer is more fluent in Turkish for deep technical discussion and often uses AI assistance in Turkish. At the same time, the repository is open to the world, and the project aspires to attract external contributors and to remain readable to future maintainers (human or AI) who do not speak Turkish.
 
 The question is: *in what language is the repository written?*
 
@@ -39,7 +39,7 @@ Bilingual documentation was rejected because it doubles maintenance cost, produc
 
 ### Positive
 
-- Anyone on Earth with English literacy can read and contribute to Umbrix.
+- Anyone on Earth with English literacy can read and contribute to Tyrne.
 - Search discoverability on English-dominated platforms (GitHub, search engines, Stack Overflow) is preserved.
 - AI agents working from the repository have unambiguous context in a well-supported language.
 - The maintainer can still think and discuss in Turkish, which is faster for deep reasoning.

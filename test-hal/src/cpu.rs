@@ -1,7 +1,7 @@
-//! Deterministic fake [`umbrix_hal::Cpu`] for host-side tests.
+//! Deterministic fake [`tyrne_hal::Cpu`] for host-side tests.
 
 use std::sync::Mutex;
-use umbrix_hal::{CoreId, Cpu, IrqState};
+use tyrne_hal::{CoreId, Cpu, IrqState};
 
 /// A [`Cpu`] that tracks interrupt state and method-call counts for test
 /// assertions.
@@ -119,7 +119,7 @@ impl Cpu for FakeCpu {
 #[cfg(test)]
 mod tests {
     use super::FakeCpu;
-    use umbrix_hal::{Cpu, IrqGuard};
+    use tyrne_hal::{Cpu, IrqGuard};
 
     #[test]
     fn default_cpu_reports_core_zero_with_irqs_enabled() {

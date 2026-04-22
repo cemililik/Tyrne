@@ -30,14 +30,14 @@ NVIDIA Jetson Orin Nano / Orin NX / AGX Orin as aarch64 boards. Per [ADR-0004](.
 
 ### Sub-breakdown
 
-1. **ADR-0053 — Jetson boot chain.** CBoot / U-Boot sequence, where Umbrix inserts itself.
+1. **ADR-0053 — Jetson boot chain.** CBoot / U-Boot sequence, where Tyrne inserts itself.
 2. **New BSP** `bsp-jetson/` with the specific Jetson model(s) supported.
 3. **`config` documentation** for users setting up Jetson hardware.
 
 ### Acceptance criteria
 
 - ADR-0053 Accepted.
-- A Jetson board boots Umbrix to the Phase A / B exit bar.
+- A Jetson board boots Tyrne to the Phase A / B exit bar.
 - Release notes are explicit: Jetson's GPU / NPU are inaccessible.
 
 ## Milestone H3 — First RISC-V BSP
@@ -54,7 +54,7 @@ Candidate: an MMU-capable RISC-V board — e.g., a SiFive HiFive Unmatched / Unl
 ### Acceptance criteria
 
 - ADR-0054 Accepted.
-- RISC-V BSP boots Umbrix; the test suite runs within the architecture's capabilities.
+- RISC-V BSP boots Tyrne; the test suite runs within the architecture's capabilities.
 
 ### Phase H closure
 

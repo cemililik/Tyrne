@@ -28,7 +28,7 @@ The two questions are coupled: with an idle task registered the liveness-bug pan
 - The scheduler bridge is a set of `unsafe fn` free functions over `*mut Scheduler<C>` ([ADR-0021](0021-raw-pointer-scheduler-ipc-bridge.md)); any new API follows the same shape.
 - `TaskArena` is a BSP-owned `StaticCell` (T-006 / K3-11); the scheduler cannot allocate a `TaskHandle` without pointer access to that arena.
 - `Cpu::wait_for_interrupt` ([ADR-0008](0008-cpu-trait.md)) is already available — the idle loop has a zero-cost primitive.
-- Umbrix v1 is single-core cooperative; no timer IRQ yet (the first timer wiring is T-009). An idle task today sleeps the CPU until an IRQ that never arrives in pure-IPC systems — which is still strictly better than busy-spinning in kernel context.
+- Tyrne v1 is single-core cooperative; no timer IRQ yet (the first timer wiring is T-009). An idle task today sleeps the CPU until an IRQ that never arrives in pure-IPC systems — which is still strictly better than busy-spinning in kernel context.
 
 ## Decision drivers
 
@@ -168,7 +168,7 @@ Option E (single `Deadlock` variant) is rejected because it conflates the IPC re
 - [ADR-0019 — Scheduler shape](0019-scheduler-shape.md) — defines `SchedError`; this ADR extends it with `Deadlock`.
 - [ADR-0020 — `ContextSwitch` trait and `Cpu` v2](0020-cpu-trait-v2-context-switch.md) — defines `Cpu::wait_for_interrupt`, the idle loop's core primitive.
 - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](0021-raw-pointer-scheduler-ipc-bridge.md) — the raw-pointer convention the idle-registration path inherits.
-- [Security review — Umbrix → Phase A exit](../analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md) — §4 (liveness) flags the deadlock panic.
-- [Code review — Umbrix → Phase A exit](../analysis/reviews/code-reviews/2026-04-21-umbrix-to-phase-a.md) — *Correctness (Scheduler bullets 2, 4)* flags the three panics and the resume-path assertion.
+- [Security review — Tyrne → Phase A exit](../analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md) — §4 (liveness) flags the deadlock panic.
+- [Code review — Tyrne → Phase A exit](../analysis/reviews/code-reviews/2026-04-21-tyrne-to-phase-a.md) — *Correctness (Scheduler bullets 2, 4)* flags the three panics and the resume-path assertion.
 - [Phase B plan](../roadmap/phases/phase-b.md) — §B0 item 2 bundles the three hardenings into this ADR; T-007 is the implementation task.
 - [T-006 mini-retro](../analysis/reviews/business-reviews/2026-04-22-T-006-mini-retro.md) — the "trace who holds &mut across switch/lock" lesson applied here to the idle-registration path (idle's `add_task` call is a single-shot init, no cross-switch borrow).

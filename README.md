@@ -1,4 +1,4 @@
-# Umbrix
+# Tyrne
 
 > A capability-based microkernel for high-assurance devices, written in Rust.
 
@@ -6,9 +6,9 @@
 
 ---
 
-## What is Umbrix
+## What is Tyrne
 
-Umbrix is an operating system microkernel being built from scratch around two hard design commitments:
+Tyrne is an operating system microkernel being built from scratch around two hard design commitments:
 
 1. **Security-first.** A capability-based design in the spirit of seL4, Hubris, and Fuchsia/Zircon. There is no ambient authority: every action a component can take is tied to a capability it was explicitly granted. Drivers, filesystems, and network stacks live in userspace compartments, not in the kernel. Memory safety is enforced by Rust; every `unsafe` block is justified, bounded, and audited.
 2. **Heterogeneous hardware.** The same kernel is intended to scale from constrained smart-home devices to single-board computers, and eventually to mobile-class hardware, through a cleanly separated Hardware Abstraction Layer (HAL). The first real hardware target is the Raspberry Pi 4 (aarch64, Cortex-A72).
@@ -28,7 +28,7 @@ Tiers describe the level of support committed to a target, not the quality of th
 | 3 | RISC-V embedded SoCs (e.g. ESP32-C3/C6, SiFive) | Roadmap — smart-home class |
 | 4 | Mobile-class aarch64 SoCs | Long-term vision |
 
-**Jetson caveat.** Jetson devices are aarch64, so their CPU side is portable. Their GPU and Tensor cores, however, require proprietary NVIDIA userspace blobs with no open-source driver. Umbrix rejects proprietary kernel-adjacent blobs on principle, so Jetson will be supported only as a plain aarch64 board; on-device AI acceleration on Jetson is explicitly out of scope. Projects that need open NPU acceleration should target Rockchip NPUs, Hailo, or Google Coral instead. See [ADR-0004](docs/decisions/0004-target-platforms.md).
+**Jetson caveat.** Jetson devices are aarch64, so their CPU side is portable. Their GPU and Tensor cores, however, require proprietary NVIDIA userspace blobs with no open-source driver. Tyrne rejects proprietary kernel-adjacent blobs on principle, so Jetson will be supported only as a plain aarch64 board; on-device AI acceleration on Jetson is explicitly out of scope. Projects that need open NPU acceleration should target Rockchip NPUs, Hailo, or Google Coral instead. See [ADR-0004](docs/decisions/0004-target-platforms.md).
 
 ## Repository layout
 
@@ -59,7 +59,7 @@ Source code layout — the Rust workspace, HAL crates, userspace services — wi
 
 ## Contributing
 
-Umbrix is in the architecture phase. External code contributions are not yet being accepted, because the foundational documents are still being written and accepting PRs too early would fragment the design. Issues, references, and prior-art suggestions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Tyrne is in the architecture phase. External code contributions are not yet being accepted, because the foundational documents are still being written and accepting PRs too early would fragment the design. Issues, references, and prior-art suggestions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 If you have a security-relevant observation, see [SECURITY.md](SECURITY.md).
 

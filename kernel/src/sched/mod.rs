@@ -26,13 +26,13 @@
 //! that would have otherwise panicked now returns `Err(SchedError::Deadlock)`
 //! with the scheduler state restored to its pre-call shape.
 //!
-//! [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+//! [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 //!
-//! [T-004]: https://github.com/cemililik/UmbrixOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
-//! [ADR-0019]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0019-scheduler-shape.md
-//! [ADR-0020]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
+//! [T-004]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
+//! [ADR-0019]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0019-scheduler-shape.md
+//! [ADR-0020]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
 
-use umbrix_hal::{ContextSwitch, Cpu, IrqGuard};
+use tyrne_hal::{ContextSwitch, Cpu, IrqGuard};
 
 use crate::cap::{CapHandle, CapObject, CapabilityTable};
 use crate::ipc::{ipc_recv, ipc_send, IpcError, IpcQueues, Message, RecvOutcome, SendOutcome};
@@ -176,7 +176,7 @@ pub enum SchedError {
     /// revisited if preemption / SMP ever exercises the path. Callers
     /// that want the endpoint reset must destroy and re-create it.
     ///
-    /// [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+    /// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
     Deadlock,
 }
 
@@ -393,8 +393,8 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 // shared rationale for the "why not safer Rust" half of its justification,
 // alongside the block-local invariants it states inline.
 //
-// [ADR-0021]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
-// [UNSAFE-2026-0012]: https://github.com/cemililik/UmbrixOS/blob/main/docs/audits/unsafe-log.md
+// [ADR-0021]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
+// [UNSAFE-2026-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/audits/unsafe-log.md
 
 /// Start the scheduler by switching to the first ready task.
 ///
@@ -675,7 +675,7 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
 /// *Pointer validity*. The four pointers must not alias each other or any
 /// live `&mut` in the caller's scope.
 ///
-/// [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+/// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     sched: *mut Scheduler<C>,
     cpu: &C,
@@ -828,13 +828,13 @@ mod tests {
     unsafe impl Sync for FakeCpu {}
 
     impl Cpu for FakeCpu {
-        fn current_core_id(&self) -> umbrix_hal::CoreId {
+        fn current_core_id(&self) -> tyrne_hal::CoreId {
             0
         }
-        fn disable_irqs(&self) -> umbrix_hal::IrqState {
-            umbrix_hal::IrqState(0)
+        fn disable_irqs(&self) -> tyrne_hal::IrqState {
+            tyrne_hal::IrqState(0)
         }
-        fn restore_irq_state(&self, _: umbrix_hal::IrqState) {}
+        fn restore_irq_state(&self, _: tyrne_hal::IrqState) {}
         fn wait_for_interrupt(&self) {}
         fn instruction_barrier(&self) {}
     }
@@ -1128,13 +1128,13 @@ mod tests {
     unsafe impl Sync for ResetQueuesCpu {}
 
     impl Cpu for ResetQueuesCpu {
-        fn current_core_id(&self) -> umbrix_hal::CoreId {
+        fn current_core_id(&self) -> tyrne_hal::CoreId {
             0
         }
-        fn disable_irqs(&self) -> umbrix_hal::IrqState {
-            umbrix_hal::IrqState(0)
+        fn disable_irqs(&self) -> tyrne_hal::IrqState {
+            tyrne_hal::IrqState(0)
         }
-        fn restore_irq_state(&self, _: umbrix_hal::IrqState) {}
+        fn restore_irq_state(&self, _: tyrne_hal::IrqState) {}
         fn wait_for_interrupt(&self) {}
         fn instruction_barrier(&self) {}
     }

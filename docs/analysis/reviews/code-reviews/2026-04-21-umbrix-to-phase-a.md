@@ -1,9 +1,9 @@
-# Code review 2026-04-21 — Umbrix project → Phase A exit
+# Code review 2026-04-21 — Tyrne project → Phase A exit
 
 - **Change:** all committed code from project inception through Phase A exit (Phase 1–4c bootstrap + A1–A6 kernel core). Branch: `development` (HEAD: `cba5b16`), compared to empty-repo baseline.
 - **Reviewer:** @cemililik (+ Claude agent acting in all five roles)
 - **Risk class:** Security-sensitive (capabilities, IPC, scheduler, boot, context switch, `unsafe` x12)
-- **Security-review cross-reference:** [docs/analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md](../security-reviews/2026-04-21-umbrix-to-phase-a.md)
+- **Security-review cross-reference:** [docs/analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md](../security-reviews/2026-04-21-tyrne-to-phase-a.md)
 - **Footprint:** 5 370 LOC across `kernel/` (3 030), `hal/` (688), `bsp-qemu-virt/` (872), boot assembly (54); 20 ADRs; 109 host tests + QEMU smoke.
 
 ## Correctness
@@ -127,11 +127,11 @@ No drift. The audit log is the source of truth and matches the code verbatim.
 
 ## Integration
 
-- **Dependencies.** No external crates in any of `kernel`, `hal`, `bsp-qemu-virt`. Workspace only depends on `umbrix-hal`, `umbrix-kernel`, `umbrix-test-hal` internally. The `add-dependency` skill has not been exercised — no external dependency has been added. Good; matches the ADR-0006 stance and the "no proprietary blobs" CLAUDE.md rule.
+- **Dependencies.** No external crates in any of `kernel`, `hal`, `bsp-qemu-virt`. Workspace only depends on `tyrne-hal`, `tyrne-kernel`, `tyrne-test-hal` internally. The `add-dependency` skill has not been exercised — no external dependency has been added. Good; matches the ADR-0006 stance and the "no proprietary blobs" CLAUDE.md rule.
 - **Workspace layout.** `[workspace] members = [kernel, hal, bsp-qemu-virt, test-hal]` and `default-members` correctly excludes `bsp-qemu-virt` (no_std + no_main, requires aarch64 target). `cargo test` at workspace root runs host tests only; `cargo kernel-build` (alias) builds the bare-metal image. Matches [infrastructure.md](../../../standards/infrastructure.md) and `.cargo/config.toml` rustflags (panic=abort scoped to `aarch64-unknown-none`).
-- **Trait surface.** `umbrix-hal` exports `Console`, `Cpu`, `ContextSwitch`, `IrqController`, `Mmu`, `Timer`, `IrqGuard`, `IrqState`, `CoreId`, `FmtWriter`. The kernel depends on `Cpu`, `ContextSwitch`, `IrqGuard` only; HAL exports used by the BSP: `Console` (via Pl011Uart impl), `Cpu` + `ContextSwitch` (via QemuVirtCpu impl). No dead imports.
+- **Trait surface.** `tyrne-hal` exports `Console`, `Cpu`, `ContextSwitch`, `IrqController`, `Mmu`, `Timer`, `IrqGuard`, `IrqState`, `CoreId`, `FmtWriter`. The kernel depends on `Cpu`, `ContextSwitch`, `IrqGuard` only; HAL exports used by the BSP: `Console` (via Pl011Uart impl), `Cpu` + `ContextSwitch` (via QemuVirtCpu impl). No dead imports.
 - **Kernel is zero-`unsafe`.** Verified: the 12 UNSAFE-2026-NNNN entries all live in `bsp-qemu-virt/src/{main.rs, console.rs, cpu.rs}` or in `kernel/src/sched/mod.rs` where the `unsafe` blocks *invoke* the BSP's `ContextSwitch`/`init_context` traits (i.e. the unsafety is the trait contract, not the kernel crate's own code). `kernel/src/cap/`, `kernel/src/obj/`, `kernel/src/ipc/` contain zero `unsafe` occurrences. Matches the A6 business-review claim.
-- **Test-hal linkage.** `umbrix-test-hal` is `[dev-dependencies]` only on `kernel`. Correct — host tests can wire in `FakeCpu`/`FakeConsole`/etc; production builds cannot pick up the fakes.
+- **Test-hal linkage.** `tyrne-test-hal` is `[dev-dependencies]` only on `kernel`. Correct — host tests can wire in `FakeCpu`/`FakeConsole`/etc; production builds cannot pick up the fakes.
 - **CI coverage.** No `.github/workflows` or equivalent CI config is present at HEAD. `run-qemu.sh` is invoked manually per the `two-task-demo` guide. This is flagged as Phase B work in both the business review and in this review's Test Coverage section. Non-blocking for Phase A exit.
 - **ADR consistency.** ADR-0018 (badge scheme) is Deferred — verified in `0018-badge-scheme-and-reply-recv-deferral.md`; no code references a badge primitive today. ADR-0015 (AI-integration stance, kernel-neutral) — no AI-specific dependency or code path, consistent. ADR-0020 (`ContextSwitch` split from `Cpu`) — code structure matches: `hal/src/context_switch.rs` is its own module, `Cpu` remains object-safe (`&dyn Cpu` used in `sched::Scheduler::resolve_ep_cap`'s signature indirectly and doc-comments; concrete `C: ContextSwitch + Cpu` generic used for `Scheduler` struct).
 - **Downstream callers.** No downstream consumer of any of these crates exists outside the workspace; pre-alpha. API-break scope is internal only. The `Send`/`Sync` bounds on `Cpu` are compiler-checked.
@@ -143,7 +143,7 @@ No drift. The audit log is the source of truth and matches the code verbatim.
 
 All five passes returned either "clean" or "minor, non-blocking" findings. No blocker. The change is internally consistent with all 19 Accepted ADRs, every `unsafe` is audited and cross-verified, 109 host tests pass, the Phase A exit bar is demonstrated on real QEMU, and the kernel crate itself is zero-`unsafe` as designed.
 
-**Approval is conditional on the paired security review** ([docs/analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md](../security-reviews/2026-04-21-umbrix-to-phase-a.md)) also returning Approve. Per [master-plan §Pre-flight](master-plan.md#pre-flight-risk-class), a security-sensitive change cannot ship on a code-review Approve alone.
+**Approval is conditional on the paired security review** ([docs/analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md](../security-reviews/2026-04-21-tyrne-to-phase-a.md)) also returning Approve. Per [master-plan §Pre-flight](master-plan.md#pre-flight-risk-class), a security-sensitive change cannot ship on a code-review Approve alone.
 
 **Follow-up tasks (non-blocking, Phase B):**
 

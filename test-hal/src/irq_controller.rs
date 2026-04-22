@@ -1,8 +1,8 @@
-//! Deterministic fake [`umbrix_hal::IrqController`] for host-side tests.
+//! Deterministic fake [`tyrne_hal::IrqController`] for host-side tests.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Mutex;
-use umbrix_hal::{IrqController, IrqNumber};
+use tyrne_hal::{IrqController, IrqNumber};
 
 /// A [`IrqController`] whose enable set, pending queue, and EOI history
 /// are visible to tests.
@@ -111,7 +111,7 @@ impl IrqController for FakeIrqController {
 #[cfg(test)]
 mod tests {
     use super::FakeIrqController;
-    use umbrix_hal::{IrqController, IrqNumber};
+    use tyrne_hal::{IrqController, IrqNumber};
 
     #[test]
     fn enable_marks_line_as_enabled() {

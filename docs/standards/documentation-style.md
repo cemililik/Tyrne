@@ -1,6 +1,6 @@
 # Documentation style
 
-This standard defines how documentation files are written in the Umbrix repository. It applies to every file under `docs/**`, to the top-level `README.md`, `CLAUDE.md`, `AGENTS.md`, `SECURITY.md`, `CONTRIBUTING.md`, `NOTICE`, and to `.md` files introduced elsewhere in the tree.
+This standard defines how documentation files are written in the Tyrne repository. It applies to every file under `docs/**`, to the top-level `README.md`, `CLAUDE.md`, `AGENTS.md`, `SECURITY.md`, `CONTRIBUTING.md`, `NOTICE`, and to `.md` files introduced elsewhere in the tree.
 
 If a rule here would produce an unreadable result in a specific case, prefer clarity over the rule and note the exception in a review comment.
 
@@ -20,7 +20,7 @@ ADRs follow the MADR structure in [`../decisions/template.md`](../decisions/temp
 ## Tone and depth
 
 - Prefer **depth over brevity** when a topic is subtle. Explain the reasoning, not just the outcome. Give the trade-offs that were considered, not only the one that won.
-- Write for a reader who is *technical but new to Umbrix*. Assume general operating-systems literacy (kernel, process, interrupt, page table) but not Umbrix-specific vocabulary (use the glossary).
+- Write for a reader who is *technical but new to Tyrne*. Assume general operating-systems literacy (kernel, process, interrupt, page table) but not Tyrne-specific vocabulary (use the glossary).
 - Prefer concrete examples over abstract descriptions. When explaining a design, show the shape of a function signature or a capability graph.
 - Avoid marketing adjectives ("robust", "seamless", "elegant", "powerful") — they add no information. Describe behavior, not impression.
 - Use the active voice. "The kernel transfers the capability" over "The capability is transferred by the kernel."

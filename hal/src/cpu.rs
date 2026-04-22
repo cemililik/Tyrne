@@ -2,7 +2,7 @@
 //!
 //! See [ADR-0008] for the trait-signature rationale.
 //!
-//! [ADR-0008]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0008-cpu-trait.md
+//! [ADR-0008]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0008-cpu-trait.md
 
 /// Identifier for a CPU core.
 ///
@@ -93,7 +93,7 @@ pub trait Cpu: Send + Sync {
 /// # Example
 ///
 /// ```ignore
-/// use umbrix_hal::IrqGuard;
+/// use tyrne_hal::IrqGuard;
 ///
 /// let _g = IrqGuard::new(cpu);
 /// // critical section: interrupts are masked here

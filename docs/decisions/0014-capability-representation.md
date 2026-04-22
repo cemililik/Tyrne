@@ -6,13 +6,13 @@
 
 ## Context
 
-[T-001](../analysis/tasks/phase-a/T-001-capability-table-foundation.md) opens the capability table subsystem in `umbrix-kernel`. Before any implementation code lands, the concrete shape of a capability needs to be settled: how it is stored, how callers refer to it (handles), how the derivation tree is tracked, how revocation works, what "rights" means, what "scope" means for v1, and what errors operations can produce.
+[T-001](../analysis/tasks/phase-a/T-001-capability-table-foundation.md) opens the capability table subsystem in `tyrne-kernel`. Before any implementation code lands, the concrete shape of a capability needs to be settled: how it is stored, how callers refer to it (handles), how the derivation tree is tracked, how revocation works, what "rights" means, what "scope" means for v1, and what errors operations can produce.
 
 These decisions compound. Every future kernel subsystem ([Milestone A3 — kernel objects](../roadmap/phases/phase-a.md), [A4 — IPC](../roadmap/phases/phase-a.md), later memory and scheduling) will build on this representation, and changing the representation after it has callers is painful. Hence a dedicated ADR before T-001's code.
 
 The guiding context:
 
-- [ADR-0001](0001-microkernel-architecture.md) commits Umbrix to a capability-based microkernel.
+- [ADR-0001](0001-microkernel-architecture.md) commits Tyrne to a capability-based microkernel.
 - [architectural-principles.md P1](../standards/architectural-principles.md#p1--no-ambient-authority) forbids ambient authority.
 - [security-model.md](../architecture/security-model.md) describes the capability system at the architectural level.
 - T-001 is **single-core, no-heap, no-userspace** — concurrency and userspace ABI concerns are explicitly deferred.

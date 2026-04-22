@@ -1,6 +1,6 @@
 # Standards
 
-This folder holds the prescriptive rules that contributors — human and AI — are expected to follow when writing documentation, source code, commits, reviews, security analysis, logs, and release artifacts for Umbrix.
+This folder holds the prescriptive rules that contributors — human and AI — are expected to follow when writing documentation, source code, commits, reviews, security analysis, logs, and release artifacts for Tyrne.
 
 Standards are narrow and enforceable. They are not where we discuss philosophy (that belongs in ADRs) or how to do things step-by-step (that belongs in `../guides/`). Think of them as the short list a reviewer checks a change against.
 

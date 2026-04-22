@@ -1,6 +1,6 @@
 # Localization
 
-How Umbrix handles human languages in the code, in the kernel's runtime output, and in user-facing surfaces. The short version: **the kernel is locale-agnostic, all internal strings are English, and localization is a userspace concern**. This document spells that out and lists the few places where text encoding nevertheless requires an explicit choice.
+How Tyrne handles human languages in the code, in the kernel's runtime output, and in user-facing surfaces. The short version: **the kernel is locale-agnostic, all internal strings are English, and localization is a userspace concern**. This document spells that out and lists the few places where text encoding nevertheless requires an explicit choice.
 
 ## Scope
 
@@ -11,7 +11,7 @@ How Umbrix handles human languages in the code, in the kernel's runtime output, 
 
 ## Core position
 
-Umbrix is a kernel. Kernels do not translate user interfaces; they transport bytes and manage hardware. Attempting to do I18N/L10N in the kernel would:
+Tyrne is a kernel. Kernels do not translate user interfaces; they transport bytes and manage hardware. Attempting to do I18N/L10N in the kernel would:
 
 - Add code paths whose correctness depends on human-language nuance — outside the kernel's competence.
 - Introduce large data tables (locale dictionaries) into privileged memory.
@@ -61,11 +61,11 @@ The kernel does not need Unicode normalization or grapheme clustering. Where ker
 
 - Committed artifacts: English (see [ADR-0005](../decisions/0005-documentation-language-english.md)).
 - Chat with the maintainer: Turkish is natural and expected; it does not appear in committed files.
-- A user-facing Umbrix deployment on the maintainer's devices may render Turkish UI through a userspace localization layer. That is a userspace choice and does not affect the kernel.
+- A user-facing Tyrne deployment on the maintainer's devices may render Turkish UI through a userspace localization layer. That is a userspace choice and does not affect the kernel.
 
 ## Consequences
 
-- Bug reports, logs, and dumps from the kernel are always in English. Operators of Umbrix devices will see English messages. This is consistent with the practice of most kernels (Linux, BSD, Fuchsia, seL4 all produce English-only kernel output) and with the project's international-accessibility posture.
+- Bug reports, logs, and dumps from the kernel are always in English. Operators of Tyrne devices will see English messages. This is consistent with the practice of most kernels (Linux, BSD, Fuchsia, seL4 all produce English-only kernel output) and with the project's international-accessibility posture.
 - Adding a language to userspace does not require any kernel change.
 - Kernel code review does not need to evaluate translation correctness.
 
@@ -77,7 +77,7 @@ The kernel does not need Unicode normalization or grapheme clustering. Where ker
 
 ## Future work
 
-A future ADR may specify the Umbrix approach to userspace localization (catalog format, pluralization library choice, translation workflow). That ADR will:
+A future ADR may specify the Tyrne approach to userspace localization (catalog format, pluralization library choice, translation workflow). That ADR will:
 
 - Live in `docs/decisions/`.
 - Operate strictly above the syscall boundary.

@@ -8,9 +8,9 @@
 
 The project has been asked, more than once, whether AI / LLM integration belongs inside the kernel. Three candidate directions surfaced in a design-review conversation: a maximalist "AI-native OS" with an LLM in a kernel-adjacent Exception Level; a moderate "semantic microkernel" with intent-resolving IPC; and a classical microkernel with no AI claim at all. Each resembles a different kernel genre.
 
-Umbrix today is close to the third — a capability-based microkernel with explicit principles against proprietary blobs ([P7](../standards/architectural-principles.md#p7--no-proprietary-blobs)) and with a smallest-defensible-TCB commitment ([P2](../standards/architectural-principles.md#p2--smallest-defensible-trusted-computing-base)). These principles already make "AI in the kernel" architecturally incompatible, but the incompatibility has never been written down. When the question is asked again in six months (or by an AI agent reading the repo cold), the project should have an explicit answer rather than a derived one.
+Tyrne today is close to the third — a capability-based microkernel with explicit principles against proprietary blobs ([P7](../standards/architectural-principles.md#p7--no-proprietary-blobs)) and with a smallest-defensible-TCB commitment ([P2](../standards/architectural-principles.md#p2--smallest-defensible-trusted-computing-base)). These principles already make "AI in the kernel" architecturally incompatible, but the incompatibility has never been written down. When the question is asked again in six months (or by an AI agent reading the repo cold), the project should have an explicit answer rather than a derived one.
 
-This ADR is that answer. It records **why AI in the kernel is out of scope**, what **userspace AI workloads** Umbrix will be ready to host, and which **hooks the kernel and HAL deliberately leave open** so a future Phase J can build an AI-native userspace layer without changing the kernel's shape.
+This ADR is that answer. It records **why AI in the kernel is out of scope**, what **userspace AI workloads** Tyrne will be ready to host, and which **hooks the kernel and HAL deliberately leave open** so a future Phase J can build an AI-native userspace layer without changing the kernel's shape.
 
 ## Decision drivers
 
@@ -21,7 +21,7 @@ This ADR is that answer. It records **why AI in the kernel is out of scope**, wh
 - **Formal verification path.** [ADR-0001](0001-microkernel-architecture.md) preserves a formal-verification direction for core kernel primitives. LLMs and their runtimes cannot be verified to the same standard; letting them into the kernel forecloses that path.
 - **No proprietary blobs ([P7](../standards/architectural-principles.md#p7--no-proprietary-blobs)).** Trained model weights are not open source in any meaningful sense (the training data and process are typically not available, and the weights themselves are often under non-OSI licenses). Linking weights into a privileged image is a blob by any reasonable definition.
 - **But AI-aware userspace has real value.** Smart-home deployments benefit from on-device inference (anomaly detection on sensor streams), semantic indexing (search over documents by meaning), intent analysis (higher-level policy atop capabilities), and TEE-backed confidential inference. These are all legitimate features — just not of the kernel.
-- **Not foreclosing the future.** Umbrix should not have to be rewritten to host an AI-native userspace layer later. The kernel and HAL leave specific hooks open so that, when the ecosystem matures, a Phase J can add the layer without structural change.
+- **Not foreclosing the future.** Tyrne should not have to be rewritten to host an AI-native userspace layer later. The kernel and HAL leave specific hooks open so that, when the ecosystem matures, a Phase J can add the layer without structural change.
 
 ## Considered options
 
@@ -35,14 +35,14 @@ Keep the kernel Rust-only and small, but introduce "semantic" services — inten
 
 ### Option C — AI-ready kernel, userspace-only AI (chosen)
 
-Kernel remains strictly AI-neutral. AI workloads run exclusively in userspace on top of Umbrix's normal capability-mediated services. The kernel and HAL deliberately provide a small number of **hooks** that enable a rich AI-userspace layer to be built later:
+Kernel remains strictly AI-neutral. AI workloads run exclusively in userspace on top of Tyrne's normal capability-mediated services. The kernel and HAL deliberately provide a small number of **hooks** that enable a rich AI-userspace layer to be built later:
 
 - **TEE support in the HAL** (landing in Phase G alongside measured boot).
-- **NPU driver trait** in `umbrix-hal` when the first NPU target is selected (Phase H or later).
+- **NPU driver trait** in `tyrne-hal` when the first NPU target is selected (Phase H or later).
 - **Userspace → scheduler hint** syscall (a narrow, bounded interface for advisory priority hints; does not allow userspace to dictate scheduling, only to inform it).
 - **Capability intent-extension point** — a userspace policy layer can interpose on capability invocations and apply semantic checks before the kernel's structural check proceeds.
 
-Umbrix's long-horizon roadmap gains a dedicated **Phase J** for the AI-native userspace layer; detail stays light until its turn.
+Tyrne's long-horizon roadmap gains a dedicated **Phase J** for the AI-native userspace layer; detail stays light until its turn.
 
 ### Option D — classical microkernel with no stated AI position
 
@@ -64,7 +64,7 @@ The kernel is AI-neutral. No LLM, no inference, no intent-resolution, no semanti
 
 2. **NPU driver trait.**
    - Purpose: abstracts neural-accelerator hardware so an AI-userspace service can request inference from open NPUs (Rockchip NPU, Hailo, Google Coral, future ARM Ethos-U) without proprietary kernel code.
-   - Scope: a trait in `umbrix-hal` (or a sibling crate if the surface diverges from the current HAL shape).
+   - Scope: a trait in `tyrne-hal` (or a sibling crate if the surface diverges from the current HAL shape).
    - Timing: when the first NPU target is committed to (Phase H or later; not a Phase A–C concern).
    - Non-AI value: none, strictly — but costs nothing to leave open as a future trait.
    - Constraint: no proprietary kernel blob. If a target NPU requires closed firmware at the kernel level, that target is out of scope per [ADR-0004](0004-target-platforms.md) + [P7](../standards/architectural-principles.md#p7--no-proprietary-blobs).
@@ -85,7 +85,7 @@ Each hook is a **placeholder**: it imposes no engineering cost today. Hooks turn
 
 ### Phase J
 
-Umbrix's roadmap gains Phase J — **AI-native userspace layer** — at the long-horizon end. Its shape is intentionally sketchy until it becomes current; likely milestones include a userspace inference runtime, a semantic file indexer, an intent-analysis policy service, a natural-language shell alternative, and an on-device LLM service backed by TEE. See [`docs/roadmap/phases/phase-j.md`](../roadmap/phases/phase-j.md).
+Tyrne's roadmap gains Phase J — **AI-native userspace layer** — at the long-horizon end. Its shape is intentionally sketchy until it becomes current; likely milestones include a userspace inference runtime, a semantic file indexer, an intent-analysis policy service, a natural-language shell alternative, and an on-device LLM service backed by TEE. See [`docs/roadmap/phases/phase-j.md`](../roadmap/phases/phase-j.md).
 
 ### What this ADR explicitly rejects
 
@@ -110,7 +110,7 @@ So that a future reader does not have to ask:
 
 ### Negative
 
-- **AI features arrive later than in an AI-native alternative.** If someone else's OS ships first with LLM-driven features, Umbrix is behind on that dimension. Accepted — we optimize for durability and auditability, not first-mover.
+- **AI features arrive later than in an AI-native alternative.** If someone else's OS ships first with LLM-driven features, Tyrne is behind on that dimension. Accepted — we optimize for durability and auditability, not first-mover.
 - **Some users may want AI-integrated OS experience now.** Those users are out of current scope; the target audience is people who value security, auditability, and device ownership over LLM-powered conveniences.
 - **The four hooks must be maintained.** Each is one open question that becomes an ADR at the right time; letting them drift into the kernel accidentally (e.g., a scheduler hint that grows into a full policy API) would breach the boundary. Mitigation: each hook's future ADR must explicitly re-confirm the kernel-neutral posture.
 
@@ -140,7 +140,7 @@ So that a future reader does not have to ask:
 - Pro: zero cost today; concrete hooks tomorrow.
 - Pro: preserves every current architectural guarantee.
 - Pro: the four hooks' non-AI value covers their maintenance cost.
-- Con: "AI-native" messaging is not Umbrix's story. Accepted.
+- Con: "AI-native" messaging is not Tyrne's story. Accepted.
 
 ### Option D — no stated position
 

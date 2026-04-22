@@ -1,6 +1,6 @@
 ---
 name: propose-standard-change
-description: Change an existing Umbrix standard correctly — write or update the motivating ADR first, then update the standard file.
+description: Change an existing Tyrne standard correctly — write or update the motivating ADR first, then update the standard file.
 when-to-use: Whenever a rule in `docs/standards/` needs to change. Covers additions, removals, and modifications. Does not cover typo fixes, which are ordinary edits.
 ---
 

@@ -1,4 +1,4 @@
-# Umbrix roadmap
+# Tyrne roadmap
 
 The roadmap is **the plan** — what we intend to build and in what order. It answers two questions:
 

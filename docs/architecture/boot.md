@@ -1,6 +1,6 @@
 # Boot flow
 
-Umbrix boots in four stages: QEMU (or the board firmware) hands control to the ELF entry point, a short assembly stub sets up the runtime environment, a Rust entry function (`kernel_entry`) wires the BSP together, and the portable `umbrix_kernel::run` function takes over. This document is the "how" for Phase 4c on `bsp-qemu-virt`; the "why" for each concrete choice lives in [ADR-0012](../decisions/0012-boot-flow-qemu-virt.md). Each future BSP will follow the same stage structure with its own addresses and peripherals.
+Tyrne boots in four stages: QEMU (or the board firmware) hands control to the ELF entry point, a short assembly stub sets up the runtime environment, a Rust entry function (`kernel_entry`) wires the BSP together, and the portable `tyrne_kernel::run` function takes over. This document is the "how" for Phase 4c on `bsp-qemu-virt`; the "why" for each concrete choice lives in [ADR-0012](../decisions/0012-boot-flow-qemu-virt.md). Each future BSP will follow the same stage structure with its own addresses and peripherals.
 
 ## Context
 
@@ -14,8 +14,8 @@ The four boot stages, each with a tightly bounded responsibility:
 
 1. **Firmware / loader.** QEMU's `-kernel` flag loads the ELF image at its linked-in load address (`0x40080000` per [ADR-0012](../decisions/0012-boot-flow-qemu-virt.md)), sets the PC to the ELF's entry point (`_start`), and enters at EL1 or EL2 depending on machine configuration. The device-tree blob address is placed in `x0`; v1 ignores it.
 2. **Assembly stub (`_start`).** ~20 instructions. Loads `__stack_top` into `SP`, zeroes the BSS range (`__bss_start` .. `__bss_end`) using 8-byte stores, and branches to `kernel_entry`. If `kernel_entry` ever returns (it shouldn't), the stub falls into a `wfe; b .` halt loop.
-3. **`kernel_entry` (Rust, in the BSP).** The first Rust code to run. Constructs the BSP's concrete HAL instances (for Phase 4c: the `Pl011Uart` console), then calls the portable [`umbrix_kernel::run`](../../kernel/src/lib.rs) with the console handle. Marked `#[no_mangle] extern "C"` so the assembly stub can find it.
-4. **`umbrix_kernel::run` (portable kernel).** Architecture- and board-agnostic. In Phase 4c v0.0.1 it writes a greeting to the console and halts with a `spin_loop` idle. Subsequent phases will bring up the scheduler, IPC, and capability system here before reaching steady state.
+3. **`kernel_entry` (Rust, in the BSP).** The first Rust code to run. Constructs the BSP's concrete HAL instances (for Phase 4c: the `Pl011Uart` console), then calls the portable [`tyrne_kernel::run`](../../kernel/src/lib.rs) with the console handle. Marked `#[no_mangle] extern "C"` so the assembly stub can find it.
+4. **`tyrne_kernel::run` (portable kernel).** Architecture- and board-agnostic. In Phase 4c v0.0.1 it writes a greeting to the console and halts with a `spin_loop` idle. Subsequent phases will bring up the scheduler, IPC, and capability system here before reaching steady state.
 
 ### Boot-time sequence
 
@@ -24,7 +24,7 @@ sequenceDiagram
     participant QEMU as QEMU virt
     participant Asm as _start (asm stub)
     participant KE as kernel_entry (BSP, Rust)
-    participant K as umbrix_kernel::run
+    participant K as tyrne_kernel::run
     participant U as PL011 UART
 
     QEMU->>Asm: PC = _start, DTB in x0 (ignored)
@@ -33,7 +33,7 @@ sequenceDiagram
     Asm->>KE: bl kernel_entry
     KE->>KE: construct Pl011Uart at 0x0900_0000
     KE->>K: call run(&console)
-    K->>U: write_bytes(b"umbrix: hello from kernel_main\n")
+    K->>U: write_bytes(b"tyrne: hello from kernel_main\n")
     K->>K: spin_loop() idle
     Note over K: steady state (v0.0.1)
 ```
@@ -100,10 +100,10 @@ _start:
 
 ### Panic path
 
-When `umbrix_kernel::run` or any later kernel code panics, control reaches the BSP's `#[panic_handler]` function. In Phase 4c, that handler:
+When `tyrne_kernel::run` or any later kernel code panics, control reaches the BSP's `#[panic_handler]` function. In Phase 4c, that handler:
 
 1. Reconstructs the `Pl011Uart` (the original instance may not be reachable from the panic context).
-2. Writes a short marker (`"\n!! umbrix panic !!\n"`).
+2. Writes a short marker (`"\n!! tyrne panic !!\n"`).
 3. Writes the panic message using `FmtWriter` adapted onto the `Console`.
 4. Halts in a `spin_loop` that never returns.
 

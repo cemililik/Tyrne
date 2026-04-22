@@ -1,6 +1,6 @@
 # Reviews
 
-Umbrix runs four kinds of reviews, each addressing a distinct concern. Each review type has its own folder with a master plan describing the multi-agent procedure and a log of dated review artifacts.
+Tyrne runs four kinds of reviews, each addressing a distinct concern. Each review type has its own folder with a master plan describing the multi-agent procedure and a log of dated review artifacts.
 
 Reviews are **event-triggered**, not calendar-triggered. See each type's README for its specific triggers.
 

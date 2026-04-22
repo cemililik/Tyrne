@@ -1,6 +1,6 @@
 ---
 name: add-dependency
-description: Add a new Rust crate to the Umbrix workspace following the dependency policy in `infrastructure.md`.
+description: Add a new Rust crate to the Tyrne workspace following the dependency policy in `infrastructure.md`.
 when-to-use: Whenever a PR needs to introduce a new dependency in `Cargo.toml`, or upgrade an existing dependency across a semver-major boundary.
 ---
 

@@ -1,4 +1,4 @@
-# Umbrix Cargo workspace.
+# Tyrne Cargo workspace.
 #
 # Crate layout decided in docs/decisions/0006-workspace-layout.md.
 # Build / test commands and lint policy described in docs/standards/infrastructure.md.
@@ -14,7 +14,7 @@ members = [
 # Default set for workspace-wide commands (`cargo check`, `cargo test`, etc.):
 # everything host-buildable. The BSP is #![no_std, no_main] and requires the
 # explicit bare-metal target; build it via `cargo kernel-build` (or
-# `cargo build --target aarch64-unknown-none -p umbrix-bsp-qemu-virt`).
+# `cargo build --target aarch64-unknown-none -p tyrne-bsp-qemu-virt`).
 default-members = [
     "kernel",
     "hal",
@@ -26,7 +26,7 @@ version = "0.0.1"
 edition = "2021"
 authors = ["Cemil İlik"]
 license = "Apache-2.0"
-repository = "https://github.com/cemililik/UmbrixOS"
+repository = "https://github.com/cemililik/TyrneOS"
 
 # Lints applied to every workspace crate that opts in via `[lints] workspace = true`.
 # See docs/standards/code-style.md and docs/standards/unsafe-policy.md for the

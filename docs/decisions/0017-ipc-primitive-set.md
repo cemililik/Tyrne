@@ -69,11 +69,11 @@ Three related sub-questions share this ADR:
 
 None of these exist in Phase A. Without a running scheduler and real context switches, there is nothing to measure, and therefore no evidence the complexity is worth carrying. The fastpath is not rejected — it is deferred: ADR-0018 (or a successor) will introduce it when A5/A6 produce benchmarks that motivate it. Phase A's `send` + `recv` + `notify` is the foundation on which the fastpath is layered.
 
-Option C (asynchronous send) is a fundamentally different model. Asynchronous delivery decouples sender and receiver but requires a message buffer large enough to hold all in-flight messages — a heap or shared-memory region Umbrix does not have in Phase A. It also complicates the capability-transfer atomicity invariant: when does authority transfer if the receiver hasn't consumed the message yet? Rendezvous avoids this by transferring authority only at the moment both parties are present.
+Option C (asynchronous send) is a fundamentally different model. Asynchronous delivery decouples sender and receiver but requires a message buffer large enough to hold all in-flight messages — a heap or shared-memory region Tyrne does not have in Phase A. It also complicates the capability-transfer atomicity invariant: when does authority transfer if the receiver hasn't consumed the message yet? Rendezvous avoids this by transferring authority only at the moment both parties are present.
 
 ### Message format rationale
 
-Option D (4-word struct) matches the register-file model of real syscall ABIs: on aarch64, a syscall passes arguments in x0–x7; four words fit in x0–x3 plus a label in x4 (or similar). The struct is stack-allocated and copied by value — no pointer chasing, no allocation. Option E (variable-length) requires infrastructure Umbrix does not have in Phase A. Option F (single u64) is too narrow: a `label` word and at least one data word are needed for the A6 two-task demo to carry meaningful content.
+Option D (4-word struct) matches the register-file model of real syscall ABIs: on aarch64, a syscall passes arguments in x0–x7; four words fit in x0–x3 plus a label in x4 (or similar). The struct is stack-allocated and copied by value — no pointer chasing, no allocation. Option E (variable-length) requires infrastructure Tyrne does not have in Phase A. Option F (single u64) is too narrow: a `label` word and at least one data word are needed for the A6 two-task demo to carry meaningful content.
 
 The 4-word message type:
 

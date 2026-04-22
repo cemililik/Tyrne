@@ -12,8 +12,8 @@
 //! table ([ADR-0014][adr-0014]); [`Arena`] is the audited pattern
 //! generalised and instantiated three times.
 //!
-//! [adr-0014]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0014-capability-representation.md
-//! [adr-0016]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+//! [adr-0014]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0014-capability-representation.md
+//! [adr-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
 //!
 //! ## Status (v1, T-002)
 //!

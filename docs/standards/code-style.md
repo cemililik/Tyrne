@@ -1,6 +1,6 @@
 # Code style
 
-This standard defines how Rust source code is written in the Umbrix repository. It applies to every `.rs` file in the kernel, the HAL, userspace services, tests, and build tooling.
+This standard defines how Rust source code is written in the Tyrne repository. It applies to every `.rs` file in the kernel, the HAL, userspace services, tests, and build tooling.
 
 For documentation (`.md`) style, see [documentation-style.md](documentation-style.md). For `unsafe` blocks specifically, see [unsafe-policy.md](unsafe-policy.md) — the rules there take precedence over anything in this document when they overlap.
 
@@ -33,7 +33,7 @@ The goals of this standard are:
 
 | Kind | Convention | Example |
 |------|-----------|---------|
-| Crate | `snake_case` | `umbrix_kernel` |
+| Crate | `snake_case` | `tyrne_kernel` |
 | Module | `snake_case` | `ipc::endpoint` |
 | Type (struct, enum, trait, union) | `PascalCase` | `Capability`, `ThreadId` |
 | Trait | `PascalCase`, usually an adjective or a role | `Schedulable`, `MmioRegion` |
@@ -99,7 +99,7 @@ pub fn send(&self, msg: Message) -> Result<(), IpcError> { /* ... */ }
 
 ## Capability type conventions
 
-Capabilities are first-class types in Umbrix's design:
+Capabilities are first-class types in Tyrne's design:
 
 - Capabilities are **move-only** (implement neither `Copy` nor `Clone` unless an explicit duplication operation is intended).
 - Duplicating a capability requires calling an explicit `duplicate()` method that itself consumes a `DuplicateCap` authority.

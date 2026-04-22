@@ -1,10 +1,10 @@
 # Phase J — AI-native userspace layer
 
-**Exit bar:** An optional AI-native userspace layer runs on top of Umbrix, providing semantic indexing, intent-aware policy, and on-device inference — all above the kernel's trust boundary, with the kernel unchanged.
+**Exit bar:** An optional AI-native userspace layer runs on top of Tyrne, providing semantic indexing, intent-aware policy, and on-device inference — all above the kernel's trust boundary, with the kernel unchanged.
 
-**Scope:** The dedicated home for AI-integrated features, mandated by [ADR-0015](../../decisions/0015-ai-integration-stance.md). Umbrix ships AI-ready (TEE support, NPU HAL trait, scheduler-hint syscall, capability intent-extension point) and this phase is where the userspace layer that uses those hooks is built. Everything here lives above the kernel and is opt-in for a deployment.
+**Scope:** The dedicated home for AI-integrated features, mandated by [ADR-0015](../../decisions/0015-ai-integration-stance.md). Tyrne ships AI-ready (TEE support, NPU HAL trait, scheduler-hint syscall, capability intent-extension point) and this phase is where the userspace layer that uses those hooks is built. Everything here lives above the kernel and is opt-in for a deployment.
 
-**Out of scope:** AI inside the kernel (forbidden by ADR-0015). AI as a dependency of any Phase A–I feature — Umbrix must be fully usable without Phase J ever running.
+**Out of scope:** AI inside the kernel (forbidden by ADR-0015). AI as a dependency of any Phase A–I feature — Tyrne must be fully usable without Phase J ever running.
 
 **Timing:** Long-horizon. This phase is sketch-level until its turn approaches. Detail grows as Phase I completes, as the AI landscape matures, and as specific deployments demand the features described here.
 
@@ -43,7 +43,7 @@ A userspace policy task that receives notifications of capability invocations (v
 
 ## Milestone J4 — Natural-language shell
 
-An alternative shell running alongside the primary shell (not replacing it). Parses natural-language commands into Umbrix service calls.
+An alternative shell running alongside the primary shell (not replacing it). Parses natural-language commands into Tyrne service calls.
 
 ### Likely sub-breakdown
 
@@ -103,7 +103,7 @@ All ADRs are expected to be authored when their milestone activates. None are wr
 
 ## Open questions
 
-- **First milestone of Phase J.** Is it J2 (semantic indexer, concrete and valuable for smart-home search), J1 (inference runtime as foundation), or J3 (policy service as a force multiplier for the capability system)? The right answer depends on what Umbrix is actually being used for at the time.
+- **First milestone of Phase J.** Is it J2 (semantic indexer, concrete and valuable for smart-home search), J1 (inference runtime as foundation), or J3 (policy service as a force multiplier for the capability system)? The right answer depends on what Tyrne is actually being used for at the time.
 - **Opt-in packaging.** Phase J features are optional. How they are packaged so that a deployment can include them or omit them without touching the kernel is itself a small design question.
 - **Supersession.** ADR-0015 may be superseded if the ecosystem shifts. Phase J's existence is conditional on ADR-0015 remaining authoritative.
 - **Governance.** Who decides when Phase J begins? The answer today: the maintainer, when Phase I or a specific deployment makes it the highest-value next step.

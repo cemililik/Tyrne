@@ -13,13 +13,13 @@
 
 ## User story
 
-As the Umbrix kernel's cooperative scheduler, I want an IPC-bridge API whose calling convention never requires the caller to hold a live `&mut` reference to any shared kernel state across a `cpu.context_switch` — so that the Rust aliasing model is not violated when a suspended task resumes and another task accesses the same statics, closing **UNSAFE-2026-0012** before Phase B adds preemption, SMP, or any additional shared-state path where the cooperative cover no longer masks the hazard.
+As the Tyrne kernel's cooperative scheduler, I want an IPC-bridge API whose calling convention never requires the caller to hold a live `&mut` reference to any shared kernel state across a `cpu.context_switch` — so that the Rust aliasing model is not violated when a suspended task resumes and another task accesses the same statics, closing **UNSAFE-2026-0012** before Phase B adds preemption, SMP, or any additional shared-state path where the cooperative cover no longer masks the hazard.
 
 ## Context
 
-[UNSAFE-2026-0012](../../../audits/unsafe-log.md) records that the BSP's `task_a` / `task_b` functions hold `&mut` references to `SCHED`, `EP_ARENA`, `IPC_QUEUES`, and `TABLE_{A,B}` live across `cpu.context_switch`. When the other task resumes, it derives its own `&mut` references to the same `UnsafeCell` interiors. Under Rust's strict aliasing model two live `&mut` references to the same storage are immediately UB — the compiler is entitled to optimise as if each of them were uniquely aliased, regardless of whether the accesses actually occur simultaneously. Umbrix v1's single-core cooperative invariant (no two tasks execute at once) covers the operational case, but not the language-level contract.
+[UNSAFE-2026-0012](../../../audits/unsafe-log.md) records that the BSP's `task_a` / `task_b` functions hold `&mut` references to `SCHED`, `EP_ARENA`, `IPC_QUEUES`, and `TABLE_{A,B}` live across `cpu.context_switch`. When the other task resumes, it derives its own `&mut` references to the same `UnsafeCell` interiors. Under Rust's strict aliasing model two live `&mut` references to the same storage are immediately UB — the compiler is entitled to optimise as if each of them were uniquely aliased, regardless of whether the accesses actually occur simultaneously. Tyrne v1's single-core cooperative invariant (no two tasks execute at once) covers the operational case, but not the language-level contract.
 
-The 2026-04-21 [security review of Phase A exit](../../reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md) made this the **#1 Phase-B blocker**. Every milestone after B0 (EL drop in B1, MMU-on in B2, address spaces in B3, syscall boundary in B5, userspace in B6) introduces more shared state and more paths where the cooperative cover no longer holds. Preemption and SMP — even if they remain out of scope through Phase B — will eventually expose the same aliasing hazard in a form where the compiler's assumption of no-aliasing becomes directly observable. Fixing the API now costs one B0 task; deferring costs the same task plus a cascading set of band-aids across subsequent milestones.
+The 2026-04-21 [security review of Phase A exit](../../reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md) made this the **#1 Phase-B blocker**. Every milestone after B0 (EL drop in B1, MMU-on in B2, address spaces in B3, syscall boundary in B5, userspace in B6) introduces more shared state and more paths where the cooperative cover no longer holds. Preemption and SMP — even if they remain out of scope through Phase B — will eventually expose the same aliasing hazard in a form where the compiler's assumption of no-aliasing becomes directly observable. Fixing the API now costs one B0 task; deferring costs the same task plus a cascading set of band-aids across subsequent milestones.
 
 T-006 is therefore the first Phase B task on the critical path. T-007 (idle task + typed deadlock) and the rest of B0 can land behind it but the API shape decided here determines what the scheduler calling convention looks like for every subsequent IPC caller.
 
@@ -91,8 +91,8 @@ Delegated to **ADR-0021** for the final shape. At a sketch level:
 ## References
 
 - [UNSAFE-2026-0012 audit entry](../../../audits/unsafe-log.md) — the concrete aliasing hazard this task closes.
-- [Security review of Phase A exit](../../reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md) — §1 and §3 enumerate the blocker.
-- [Code review of Phase A exit](../../reviews/code-reviews/2026-04-21-umbrix-to-phase-a.md) — §Correctness (Scheduler bullet 2) and §Integration (`Kernel is zero-\`unsafe\``) flag the same surface.
+- [Security review of Phase A exit](../../reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md) — §1 and §3 enumerate the blocker.
+- [Code review of Phase A exit](../../reviews/code-reviews/2026-04-21-tyrne-to-phase-a.md) — §Correctness (Scheduler bullet 2) and §Integration (`Kernel is zero-\`unsafe\``) flag the same surface.
 - [Phase B plan](../../../roadmap/phases/phase-b.md) — §B0 sub-items 1 and 7 (this task's scope); §How to start Phase B (ordering).
 - [ADR-0013: Roadmap and planning process](../../../decisions/0013-roadmap-and-planning.md).
 - [ADR-0016: Kernel object storage](../../../decisions/0016-kernel-object-storage.md) — TaskArena migration conforms to this ADR's global-ownership framing.

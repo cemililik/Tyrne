@@ -1,6 +1,6 @@
 ---
 name: justify-unsafe
-description: Introduce or audit an `unsafe` region in Umbrix — writing the `SAFETY:` comment, adding the audit-log entry, and queuing security review.
+description: Introduce or audit an `unsafe` region in Tyrne — writing the `SAFETY:` comment, adding the audit-log entry, and queuing security review.
 when-to-use: Whenever a change introduces, modifies, or broadens an `unsafe` block, `unsafe fn`, `unsafe impl`, or `unsafe trait`.
 ---
 
@@ -67,7 +67,7 @@ If this is the first `unsafe` audit entry in the project, create `docs/audits/un
 ```markdown
 # `unsafe` audit log
 
-This log tracks every `unsafe` block, `unsafe fn`, `unsafe impl`, and `unsafe trait` introduced into Umbrix. See [unsafe-policy.md](../standards/unsafe-policy.md) for the policy this log implements.
+This log tracks every `unsafe` block, `unsafe fn`, `unsafe impl`, and `unsafe trait` introduced into Tyrne. See [unsafe-policy.md](../standards/unsafe-policy.md) for the policy this log implements.
 
 Entries are append-only. When an `unsafe` region is removed, its entry gains a `Removed` status with date and commit; the entry is not deleted.
 

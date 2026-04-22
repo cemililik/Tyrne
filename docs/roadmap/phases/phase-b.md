@@ -7,8 +7,8 @@
 **Out of scope:** Multi-core, real hardware, userspace drivers, network, filesystem, cryptography.
 
 **Source reviews informing this plan:**
-- [Code review — Umbrix → Phase A exit](../../analysis/reviews/code-reviews/2026-04-21-umbrix-to-phase-a.md)
-- [Security review — Umbrix → Phase A exit](../../analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md)
+- [Code review — Tyrne → Phase A exit](../../analysis/reviews/code-reviews/2026-04-21-tyrne-to-phase-a.md)
+- [Security review — Tyrne → Phase A exit](../../analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md)
 - [A3–A6 business review / Phase A retrospective](../../analysis/reviews/business-reviews/2026-04-21-A6-completion.md)
 
 Items flagged with 🚩 are decisions that must be settled during the named milestone before code lands. They are listed in the *Open questions* section as well, so nothing drops.
@@ -200,7 +200,7 @@ A real userspace task, loaded by B4, running in EL0 in its own address space, ma
 
 1. **Userspace "hello" program** — a minimal `no_std, no_main` binary living in `userland/hello/` (new crate) that calls the syscall ABI directly.
 2. **Wire-up** — kernel loads this binary on boot via B4, creates a task in its AS (via B3), schedules it (via A5 + B0), runs it (via B1/B2/B5).
-3. **Syscall library** — a small `umbrix-user` crate exposing safe wrappers for the B5 syscalls.
+3. **Syscall library** — a small `tyrne-user` crate exposing safe wrappers for the B5 syscalls.
 4. **QEMU smoke** — trace shows kernel greeting + userspace greeting in correct order + task_exit + kernel shutdown message.
 5. **Guide** — `docs/guides/first-userspace.md` explains what this demonstrates.
 6. **Performance review** — first hypothesis-driven cycle using the timer introduced in B0. Measure IPC round-trip, context-switch, boot time; compare against A6 baseline.

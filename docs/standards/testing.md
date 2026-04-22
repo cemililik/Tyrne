@@ -1,14 +1,14 @@
 # Testing
 
-How Umbrix code is tested. The kernel / `no_std` context imposes constraints that ordinary Rust testing handles gracefully with some adaptation; this standard spells out those adaptations and fixes the vocabulary so that reviewers and CI can agree on what a test is and what it proves.
+How Tyrne code is tested. The kernel / `no_std` context imposes constraints that ordinary Rust testing handles gracefully with some adaptation; this standard spells out those adaptations and fixes the vocabulary so that reviewers and CI can agree on what a test is and what it proves.
 
 ## Scope
 
-Applies to all crates in the Umbrix workspace: kernel, HAL, BSPs, userspace services, and build/tooling. Tests are themselves code and subject to [code-style.md](code-style.md).
+Applies to all crates in the Tyrne workspace: kernel, HAL, BSPs, userspace services, and build/tooling. Tests are themselves code and subject to [code-style.md](code-style.md).
 
 ## Test layers
 
-Umbrix uses four layers. A given change almost always adds or updates tests in more than one layer.
+Tyrne uses four layers. A given change almost always adds or updates tests in more than one layer.
 
 ### 1. Unit tests
 
@@ -62,7 +62,7 @@ These exemptions are narrow. When in doubt, write the test.
 
 ## Test naming
 
-Pick one convention and hold it. Umbrix uses:
+Pick one convention and hold it. Tyrne uses:
 
 ```
 test_<subject>_<condition>_<expected_outcome>

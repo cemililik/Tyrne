@@ -1,10 +1,10 @@
-# Claude agent guide — Umbrix
+# Claude agent guide — Tyrne
 
 This file is the entry point for Claude-based AI agents (Claude Code, Claude API agents, subagents) working in this repository. Read it fully before taking any action in the repo. Other AI agents should read [AGENTS.md](AGENTS.md), which points back here.
 
 ## What this project is
 
-Umbrix is a **capability-based microkernel** written in Rust, in the lineage of seL4 and Hubris. The project is **pre-alpha** — most code is not yet written, and the current phase is architecture design captured in Architecture Decision Records (ADRs). Primary development target is QEMU `virt` on aarch64; first real hardware target is the Raspberry Pi 4.
+Tyrne is a **capability-based microkernel** written in Rust, in the lineage of seL4 and Hubris. The project is **pre-alpha** — most code is not yet written, and the current phase is architecture design captured in Architecture Decision Records (ADRs). Primary development target is QEMU `virt` on aarch64; first real hardware target is the Raspberry Pi 4.
 
 See [README.md](README.md) for the public overview.
 
@@ -12,13 +12,13 @@ See [README.md](README.md) for the public overview.
 
 These rules apply to every AI agent acting inside this repository, regardless of model, runner, or tool.
 
-1. **Security-first mindset.** Umbrix is built to be a high-assurance OS. When in doubt, choose the more conservative option. Never weaken a capability check, never introduce ambient authority, never suppress a failing security test.
+1. **Security-first mindset.** Tyrne is built to be a high-assurance OS. When in doubt, choose the more conservative option. Never weaken a capability check, never introduce ambient authority, never suppress a failing security test.
 2. **Memory safety through Rust.** All kernel and userspace code is Rust. Every `unsafe` block must have a comment explaining (a) why it is needed, (b) what invariants it upholds, (c) why safer alternatives were rejected. Audit tracking for `unsafe` is defined in [docs/standards/](docs/standards/).
 3. **English in the repository.** Source code, comments, doc-comments, documentation, commit messages, PR descriptions, issue text, and this file are English. Conversation with the maintainer in chat may be Turkish, but nothing committed to the repo should be.
 4. **Mermaid for diagrams.** All architectural diagrams are inline Mermaid code fences. Do not add PNG, SVG, ASCII-art, or other binary diagram formats.
 5. **Record decisions as ADRs.** Any non-trivial architectural, security, or process decision is recorded as an ADR in [docs/decisions/](docs/decisions/) using the MADR template. ADRs are append-only; to override an old decision, write a new ADR that supersedes it.
 6. **Respect the pace.** The maintainer explicitly wants methodical, phased progress. For non-trivial work, propose a phase plan first, execute one phase, and pause for review before continuing. Do not dump entire subsystems in a single pass.
-7. **No proprietary blobs.** Umbrix does not incorporate proprietary binary firmware or drivers into the kernel. This is a design constraint and affects platform decisions (see ADR-0004).
+7. **No proprietary blobs.** Tyrne does not incorporate proprietary binary firmware or drivers into the kernel. This is a design constraint and affects platform decisions (see ADR-0004).
 
 ## Where to find things
 

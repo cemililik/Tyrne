@@ -2,7 +2,7 @@
 //!
 //! See [ADR-0010] for the v1 scope and the list of deferred capabilities.
 //!
-//! [ADR-0010]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0010-timer-trait.md
+//! [ADR-0010]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0010-timer-trait.md
 
 /// Monotonic time source and one-shot deadline support.
 ///

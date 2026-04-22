@@ -1,6 +1,6 @@
 ---
 name: add-bsp
-description: Add a new Board Support Package (BSP) crate to the Umbrix workspace — from crate skeleton through boot checklist to first QEMU or hardware boot.
+description: Add a new Board Support Package (BSP) crate to the Tyrne workspace — from crate skeleton through boot checklist to first QEMU or hardware boot.
 when-to-use: When adding support for a new hardware target (e.g. Raspberry Pi 4, a custom board) or when porting the kernel to a new QEMU machine type.
 ---
 
@@ -48,16 +48,16 @@ bsp-<target>/
 `Cargo.toml` must set:
 ```toml
 [package]
-name    = "umbrix-bsp-<target>"
+name    = "tyrne-bsp-<target>"
 edition = "2021"
 
 [[bin]]
-name              = "umbrix-bsp-<target>"
+name              = "tyrne-bsp-<target>"
 path              = "src/main.rs"
 
 [dependencies]
-umbrix-hal    = { path = "../hal" }
-umbrix-kernel = { path = "../kernel" }
+tyrne-hal    = { path = "../hal" }
+tyrne-kernel = { path = "../kernel" }
 ```
 
 Add the crate to `[workspace]` in the root `Cargo.toml`.
@@ -122,13 +122,13 @@ Copy the structure from [`bsp-qemu-virt/src/cpu.rs`](../../../bsp-qemu-virt/src/
 
 ### 6. Implement `console.rs`
 
-Implement `umbrix_hal::Console` for the target UART. Follow the existing `Pl011Uart` implementation. Each UART model is different; check the datasheet for the FIFO-full flag and data-register offsets.
+Implement `tyrne_hal::Console` for the target UART. Follow the existing `Pl011Uart` implementation. Each UART model is different; check the datasheet for the FIFO-full flag and data-register offsets.
 
 ### 7. Wire `main.rs`
 
 `kernel_entry` must:
-1. Initialise the console and print the greeting (`umbrix: hello from kernel_main`).
-2. Call `umbrix_kernel::sched` to register tasks and start the scheduler.
+1. Initialise the console and print the greeting (`tyrne: hello from kernel_main`).
+2. Call `tyrne_kernel::sched` to register tasks and start the scheduler.
 3. Never return (`-> !`).
 
 Provide a `#[panic_handler]` that writes to the console and loops.
@@ -155,12 +155,12 @@ For real hardware, document the flashing command (e.g. `openocd`, `rpiboot`, `ca
 Boot the kernel and confirm:
 
 ```
-umbrix: hello from kernel_main
-umbrix: starting cooperative scheduler
-umbrix: task A — iteration 0
-umbrix: task B — iteration 0
+tyrne: hello from kernel_main
+tyrne: starting cooperative scheduler
+tyrne: task A — iteration 0
+tyrne: task B — iteration 0
 ...
-umbrix: task A done; spinning
+tyrne: task A done; spinning
 ```
 
 If the kernel hangs silently, run with `--int-log` (QEMU) or attach a JTAG debugger (real hardware) and check for the following before anything else:
@@ -188,7 +188,7 @@ Trailer: `Refs: ADR-NNNN` (the boot-flow ADR from step 1).
 
 - [ ] Boot-flow ADR Accepted before any code lands.
 - [ ] All six items in the BSP boot checklist verified.
-- [ ] `cargo build --target <triple> -p umbrix-bsp-<target>` succeeds with zero warnings.
+- [ ] `cargo build --target <triple> -p tyrne-bsp-<target>` succeeds with zero warnings.
 - [ ] QEMU or hardware boots to the cooperative scheduler smoke-test output.
 - [ ] Every `unsafe` block has a `// SAFETY:` comment with (a) why needed, (b) invariants, (c) why alternatives rejected; audit log updated.
 - [ ] `context_switch_asm` is `#[unsafe(naked)]` and saves d8–d15 in addition to x19–x28, fp, lr, sp.

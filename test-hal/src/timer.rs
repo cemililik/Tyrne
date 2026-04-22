@@ -1,7 +1,7 @@
-//! Deterministic fake [`umbrix_hal::Timer`] for host-side tests.
+//! Deterministic fake [`tyrne_hal::Timer`] for host-side tests.
 
 use std::sync::Mutex;
-use umbrix_hal::Timer;
+use tyrne_hal::Timer;
 
 /// A [`Timer`] whose clock is set manually and whose armed deadline is
 /// visible to tests.
@@ -110,7 +110,7 @@ impl Timer for FakeTimer {
 #[cfg(test)]
 mod tests {
     use super::FakeTimer;
-    use umbrix_hal::Timer;
+    use tyrne_hal::Timer;
 
     #[test]
     fn new_starts_at_zero_with_given_resolution() {

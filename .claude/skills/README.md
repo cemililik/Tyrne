@@ -1,6 +1,6 @@
 # Skills
 
-Task-specific guides for AI agents working on Umbrix. Each skill describes **one recurring task** — how to perform it correctly against this project's standards and decision log. Skills are procedural, not expository: they tell an agent *what to do, in what order, and how to know they are done*.
+Task-specific guides for AI agents working on Tyrne. Each skill describes **one recurring task** — how to perform it correctly against this project's standards and decision log. Skills are procedural, not expository: they tell an agent *what to do, in what order, and how to know they are done*.
 
 Skills live under `.claude/skills/<name>/SKILL.md`. This layout follows the Anthropic skill convention so that Claude Code can auto-discover them; other AI agents are directed here by [AGENTS.md](../../AGENTS.md) and [CLAUDE.md](../../CLAUDE.md).
 
@@ -52,7 +52,7 @@ when-to-use: <situations that should trigger this skill>
 <Standards and ADRs the skill relies on.>
 ```
 
-A skill directory may contain additional files (templates, scripts, examples) that `SKILL.md` references. Skills that fit in a single file — which is the current case for every Umbrix skill — only need `SKILL.md`.
+A skill directory may contain additional files (templates, scripts, examples) that `SKILL.md` references. Skills that fit in a single file — which is the current case for every Tyrne skill — only need `SKILL.md`.
 
 Skills are short. If a skill needs more than ~200 lines, either (a) the underlying task is actually two tasks and should be split, or (b) the task has non-skill-sized complexity and belongs in a guide under [docs/guides/](../../docs/guides/) instead.
 

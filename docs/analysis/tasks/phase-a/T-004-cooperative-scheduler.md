@@ -13,7 +13,7 @@
 
 ## User story
 
-As the Umbrix kernel, I want a cooperative, yield-based scheduler that can switch register context between two kernel-level task stubs and can unblock a task that was waiting on IPC — so that the A6 two-task IPC demo can run both tasks on a single CPU core with observable console output from inside QEMU.
+As the Tyrne kernel, I want a cooperative, yield-based scheduler that can switch register context between two kernel-level task stubs and can unblock a task that was waiting on IPC — so that the A6 two-task IPC demo can run both tasks on a single CPU core with observable console output from inside QEMU.
 
 ## Context
 
@@ -22,7 +22,7 @@ T-003 gave us `ipc_send` / `ipc_recv` / `ipc_notify` with correct waiter-state m
 The scheduler itself is deliberately simple: cooperative yield (no preemption, no timer tick in A5). Two design decisions drive the shape:
 
 - **ADR-0019** settles the scheduler's data structure (queue type, yield semantics, blocked-task representation).
-- **ADR-0020** introduces a separate [`umbrix-hal::ContextSwitch`](../../../hal/src/context_switch.rs) trait with `unsafe context_switch` / `init_context` and a `TaskContext` associated type, so the context-switch assembly lives in the BSP rather than the kernel crate.
+- **ADR-0020** introduces a separate [`tyrne-hal::ContextSwitch`](../../../hal/src/context_switch.rs) trait with `unsafe context_switch` / `init_context` and a `TaskContext` associated type, so the context-switch assembly lives in the BSP rather than the kernel crate.
 
 The actual assembly for saving and restoring aarch64 register state (callee-saved registers, SP, LR/PC) lives in `bsp-qemu-virt` behind a safe Rust wrapper with a documented `# Safety` contract. The kernel crate calls the HAL trait and stays `unsafe`-free.
 
@@ -32,7 +32,7 @@ The actual assembly for saving and restoring aarch64 register state (callee-save
 
 - [x] **ADR-0019 Accepted** — 2026-04-21. Settles: single bounded FIFO queue, yield-to-next-ready, `TaskState { Idle, Ready, Blocked }`, scheduler as IPC orchestration layer.
 - [x] **ADR-0020 Accepted** — 2026-04-21. Settles: separate `ContextSwitch` trait, `unsafe context_switch` / `init_context`, aarch64 frame (x19–x28 + fp + lr + sp + d8–d15 = 168 bytes).
-- [x] **`ContextSwitch` trait** lands in `umbrix-hal`; the BSP `QemuVirtCpu` implements it alongside `Cpu`.
+- [x] **`ContextSwitch` trait** lands in `tyrne-hal`; the BSP `QemuVirtCpu` implements it alongside `Cpu`.
 - [x] **Context-switch assembly** in `bsp-qemu-virt`, behind a safe Rust wrapper; `unsafe` block audited per [`unsafe-policy.md`](../../../standards/unsafe-policy.md).
 - [x] **Scheduler queue** in `kernel::sched`: bounded, heap-free. Shape decided by ADR-0019.
 - [x] **`yield_now` kernel operation**: moves the current task to the back of the ready queue and switches to the head.

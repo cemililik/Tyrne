@@ -1,6 +1,6 @@
 # Commit style
 
-How commits are structured in the Umbrix repository. The goal is a git history that is useful years later — searchable, bisectable, and self-explanatory — without imposing ceremony that obstructs small changes.
+How commits are structured in the Tyrne repository. The goal is a git history that is useful years later — searchable, bisectable, and self-explanatory — without imposing ceremony that obstructs small changes.
 
 ## Scope
 
@@ -8,7 +8,7 @@ Every commit to every branch. Local work-in-progress commits are the author's bu
 
 ## Format
 
-Each commit follows the Conventional Commits pattern with Umbrix-specific trailers:
+Each commit follows the Conventional Commits pattern with Tyrne-specific trailers:
 
 ```
 <type>(<scope>): <subject>

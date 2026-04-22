@@ -13,7 +13,7 @@
 
 ## User story
 
-As the Umbrix kernel scheduler, I want a registered idle task and typed error variants for the two current kernel-liveness panics — so that a userspace-caused IPC graph with no runnable task cannot panic the kernel, and the resume-path `debug_assert!` in `ipc_recv_and_yield` becomes a release-mode typed return instead of a silent fall-through that the caller decodes as a panic one frame up.
+As the Tyrne kernel scheduler, I want a registered idle task and typed error variants for the two current kernel-liveness panics — so that a userspace-caused IPC graph with no runnable task cannot panic the kernel, and the resume-path `debug_assert!` in `ipc_recv_and_yield` becomes a release-mode typed return instead of a silent fall-through that the caller decodes as a panic one frame up.
 
 ## Context
 
@@ -99,8 +99,8 @@ Settled in ADR-0022 §Decision outcome. At sketch level, in commit order:
 - [ADR-0019 — Scheduler shape](../../../decisions/0019-scheduler-shape.md) — defines `SchedError`.
 - [ADR-0017 — IPC primitive set](../../../decisions/0017-ipc-primitive-set.md) — defines `IpcError`.
 - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../../../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — the bridge shape idle's `add_task` + idle_entry's `yield_now` calls inherit.
-- [Security review — Umbrix → Phase A exit](../../reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md) — §4 flags the deadlock panic.
-- [Code review — Umbrix → Phase A exit](../../reviews/code-reviews/2026-04-21-umbrix-to-phase-a.md) — *Correctness (Scheduler bullets 2, 4)* flags all three panics.
+- [Security review — Tyrne → Phase A exit](../../reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md) — §4 flags the deadlock panic.
+- [Code review — Tyrne → Phase A exit](../../reviews/code-reviews/2026-04-21-tyrne-to-phase-a.md) — *Correctness (Scheduler bullets 2, 4)* flags all three panics.
 - [T-006 mini-retro](../../reviews/business-reviews/2026-04-22-T-006-mini-retro.md) — "post-In-Review second-read" adjustment: schedule a preventative-assert pass at `In Review` before promoting to `Done`.
 - [Phase B plan](../../../roadmap/phases/phase-b.md) — §B0 item 2 bundles this work.
 

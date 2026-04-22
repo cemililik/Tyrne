@@ -15,7 +15,7 @@ Kernel boots under QEMU `virt` aarch64 and writes a greeting to the PL011 consol
 **Acceptance criteria (met):**
 - `cargo kernel-build` produces a working aarch64 ELF.
 - `tools/run-qemu.sh` boots the kernel under QEMU virt.
-- Serial output reads `umbrix: hello from kernel_main`.
+- Serial output reads `tyrne: hello from kernel_main`.
 
 **ADRs:** ADR-0012 (boot flow).
 
@@ -28,7 +28,7 @@ Per-task capability table data structure, capability kind enum, and the in-kerne
 ### Sub-breakdown
 
 1. **ADR-0014 — Capability representation.** Data layout (struct / enum), handle type exposed to callers, rights bitfield, derivation-tree storage (intrusive vs. index-based), per-task bound on table size, error type.
-2. **Module skeleton.** New `umbrix_kernel::cap` module with type definitions and doc comments, no logic yet.
+2. **Module skeleton.** New `tyrne_kernel::cap` module with type definitions and doc comments, no logic yet.
 3. **`cap_drop` operation** (simplest; touches only the caller's table).
 4. **`cap_copy` operation** (narrowing of rights).
 5. **`cap_derive` operation** (narrowing of scope; records parent-child link).
@@ -133,7 +133,7 @@ The first real scheduler: cooperative yield-based, with a context-switch primiti
 ### Sub-breakdown
 
 1. **ADR-0019 — Scheduler shape.** Queue structure (FIFO per priority / single queue / ring). Yield semantics ("yield to anyone" vs. "yield to a specific task"). Blocked-task handling.
-2. **ADR-0020 — `Cpu` trait v2 (context-switch extension).** Adds `save_context` / `restore_context` primitives to [`umbrix-hal::Cpu`](../../../hal/src/cpu.rs). Probably adds a `TaskContext` associated type.
+2. **ADR-0020 — `Cpu` trait v2 (context-switch extension).** Adds `save_context` / `restore_context` primitives to [`tyrne-hal::Cpu`](../../../hal/src/cpu.rs). Probably adds a `TaskContext` associated type.
 3. **Context-switch assembly** in `bsp-qemu-virt`: saves callee-saved regs + SP + PC, restores the target task's state.
 4. **Safe Rust wrapper** for the assembly, living in the BSP with tight `unsafe` audit.
 5. **Scheduler queue** — bounded, per-priority; for v1 a single FIFO is enough.
@@ -144,7 +144,7 @@ The first real scheduler: cooperative yield-based, with a context-switch primiti
 ### Acceptance criteria
 
 - ADR-0019 and ADR-0020 Accepted.
-- Cpu trait v2 lands in `umbrix-hal`; BSP provides the asm.
+- Cpu trait v2 lands in `tyrne-hal`; BSP provides the asm.
 - Two kernel-level tasks yield back and forth; this is observable via console output from inside QEMU.
 - `unsafe` around the context switch is audited; the safe wrapper's invariants are stated in its `# Safety` doc.
 
@@ -165,7 +165,7 @@ Integration: the kernel runs a deterministic two-task scenario where Task A send
 ### Sub-breakdown
 
 1. **Demo tasks** (A and B) as kernel-level stubs (no userspace yet).
-2. **QEMU smoke runner** — captures serial, asserts the expected trace (`umbrix: A sends; B receives; B replies; A receives reply; done`).
+2. **QEMU smoke runner** — captures serial, asserts the expected trace (`tyrne: A sends; B receives; B replies; A receives reply; done`).
 3. **Guide** — `docs/guides/two-task-demo.md` explaining what the demo proves and how to run it.
 4. **Baseline performance review** — first entry in [`analysis/reviews/performance-optimization-reviews/`](../../analysis/reviews/performance-optimization-reviews/). Captures measurements of the v0.0.1 kernel so later reviews have a reference point. Expected metrics: kernel image size (stripped release ELF), idle memory footprint (kernel + demo tasks), IPC round-trip latency (send → receive → reply → sender resumes), context-switch overhead, boot time from reset to kernel-ready. No optimization goals here — the review records the numbers and notes whether they look plausible for a v0.0.1 kernel on QEMU `virt`.
 5. **Business review** — milestone A2–A6 retrospective in [`analysis/reviews/business-reviews/`](../../analysis/reviews/business-reviews/).

@@ -15,7 +15,7 @@ A template crate and guide for writing a userspace driver task. A driver holds a
 ### Sub-breakdown
 
 1. **ADR-0037 — Driver task structure.** Single-threaded vs. multi-threaded; how does a driver receive IRQ notifications (endpoint + notify); error / restart semantics.
-2. **Template crate** `umbrix-driver-template/` — a skeleton a new driver copies from.
+2. **Template crate** `tyrne-driver-template/` — a skeleton a new driver copies from.
 3. **Guide** `docs/guides/write-a-driver.md`.
 
 ### Acceptance criteria
@@ -30,7 +30,7 @@ A userspace service that receives log records from kernel and other userspace ta
 ### Sub-breakdown
 
 1. **ADR-0038 — Log wire format.** Binary (postcard / custom TLV); versioned; structured key-value per [logging-and-observability.md](../../standards/logging-and-observability.md).
-2. **`umbrix-log` facade** in the kernel — the `log!` / `info!` / `warn!` macros encoded in the facade.
+2. **`tyrne-log` facade** in the kernel — the `log!` / `info!` / `warn!` macros encoded in the facade.
 3. **Log service task** — listens on its endpoint, reads records, renders to the console.
 
 ### Acceptance criteria
@@ -60,8 +60,8 @@ QEMU: virtio-blk. Pi 4: SD card via the SDHCI-like controller on BCM2711. The dr
 ### Sub-breakdown
 
 1. **ADR-0040 — Block-device service interface.** Synchronous / asynchronous read-write; sector size; capability model.
-2. **`umbrix-driver-virtio-blk`** — the first real non-trivial driver.
-3. **`umbrix-driver-sdhci-bcm2711`** — the Pi 4 counterpart (may be stubbed until later).
+2. **`tyrne-driver-virtio-blk`** — the first real non-trivial driver.
+3. **`tyrne-driver-sdhci-bcm2711`** — the Pi 4 counterpart (may be stubbed until later).
 
 ### Acceptance criteria
 
@@ -90,7 +90,7 @@ A read-mostly filesystem service on top of E4. Initial choice may be read-only (
 ### Sub-breakdown
 
 1. **ADR-0042 — Network stack choice.** smoltcp is the probable answer; this ADR commits to it or to an alternative, covering `no_std + alloc` compatibility, license, and maintenance.
-2. **`umbrix-driver-virtio-net`** driver.
+2. **`tyrne-driver-virtio-net`** driver.
 3. **Network service task** wrapping the stack with a capability-gated interface.
 
 ### Acceptance criteria

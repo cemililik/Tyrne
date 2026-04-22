@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the Umbrix kernel under QEMU virt aarch64.
+# Run the Tyrne kernel under QEMU virt aarch64.
 #
 # Usage:
 #   tools/run-qemu.sh                                         — debug build
@@ -35,12 +35,12 @@ for arg in "$@"; do
 done
 
 if [[ -z "$KERNEL" ]]; then
-    KERNEL="target/aarch64-unknown-none/${BUILD_PROFILE}/umbrix-bsp-qemu-virt"
+    KERNEL="target/aarch64-unknown-none/${BUILD_PROFILE}/tyrne-bsp-qemu-virt"
 fi
 
 if [[ ! -f "$KERNEL" ]]; then
     echo "error: kernel image not found at $KERNEL" >&2
-    echo "hint: run 'cargo kernel-build' first (or 'cargo build --release --target aarch64-unknown-none -p umbrix-bsp-qemu-virt' for release)" >&2
+    echo "hint: run 'cargo kernel-build' first (or 'cargo build --release --target aarch64-unknown-none -p tyrne-bsp-qemu-virt' for release)" >&2
     exit 1
 fi
 

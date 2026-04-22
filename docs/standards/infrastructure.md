@@ -1,6 +1,6 @@
 # Infrastructure
 
-How Umbrix is built, how its dependencies are managed, what its CI gates are, and what promises the build system makes about the output. This standard is aspirational in places — not all of it is wired up yet — but it establishes the bar so that each piece of infrastructure is built to the standard rather than evolved ad-hoc.
+How Tyrne is built, how its dependencies are managed, what its CI gates are, and what promises the build system makes about the output. This standard is aspirational in places — not all of it is wired up yet — but it establishes the bar so that each piece of infrastructure is built to the standard rather than evolved ad-hoc.
 
 ## Scope
 

@@ -1,6 +1,6 @@
 # Logging and observability
 
-How Umbrix code produces diagnostic output, what it promises about that output, and how operators and developers extract it. The constraints of kernel / `no_std` environments make naive logging unsafe; this standard describes an approach that works for both kernel and userspace while remaining auditable and secret-safe.
+How Tyrne code produces diagnostic output, what it promises about that output, and how operators and developers extract it. The constraints of kernel / `no_std` environments make naive logging unsafe; this standard describes an approach that works for both kernel and userspace while remaining auditable and secret-safe.
 
 ## Scope and goals
 
@@ -32,7 +32,7 @@ Every log record is structured, not a formatted string:
 struct LogRecord {
     timestamp: MonotonicNanos,
     level: Level,
-    target: &'static str,      // e.g. "umbrix::ipc::endpoint"
+    target: &'static str,      // e.g. "tyrne::ipc::endpoint"
     message: &'static str,     // short, literal
     fields: &'static [(&'static str, Value)], // typed key-value pairs
     span: Option<SpanId>,      // causal / timing context
@@ -49,10 +49,10 @@ The rationale is standard observability: searchable, machine-processable logs be
 
 ## Logging APIs
 
-The project provides a logging facade (planned crate `umbrix-log`) with macros mirroring the `log` crate's shape but producing structured records:
+The project provides a logging facade (planned crate `tyrne-log`) with macros mirroring the `log` crate's shape but producing structured records:
 
 ```rust
-use umbrix_log::{trace, debug, info, warn, error};
+use tyrne_log::{trace, debug, info, warn, error};
 
 info!(target = "ipc::endpoint", "IPC send rejected", endpoint = id, reason = "no receiver");
 ```
@@ -94,7 +94,7 @@ This is not just hygiene: a capability-based OS loses its meaning if capabilitie
 - Spans carry a parent pointer, allowing causal chains across IPC boundaries.
 - Spans have unique 64-bit ids generated from a per-CPU counter + CPU id.
 
-In practice this maps onto the `tracing` crate's model; Umbrix will either adopt `tracing` directly (if a `no_std` subset works) or implement a compatible shape internally. The choice is deferred to an ADR at implementation time.
+In practice this maps onto the `tracing` crate's model; Tyrne will either adopt `tracing` directly (if a `no_std` subset works) or implement a compatible shape internally. The choice is deferred to an ADR at implementation time.
 
 ## Metrics
 

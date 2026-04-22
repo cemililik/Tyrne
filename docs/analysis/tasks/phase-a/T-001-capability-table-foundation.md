@@ -13,11 +13,11 @@
 
 ## User story
 
-As the Umbrix kernel, I want a per-task capability table with first-class copy / derive / revoke / drop operations, so that authority is explicit and enforceable rather than implicit — eliminating the "confused deputy" class of bug by construction and providing the substrate that every future subsystem (tasks, IPC, memory, interrupts) will use to express who may do what.
+As the Tyrne kernel, I want a per-task capability table with first-class copy / derive / revoke / drop operations, so that authority is explicit and enforceable rather than implicit — eliminating the "confused deputy" class of bug by construction and providing the substrate that every future subsystem (tasks, IPC, memory, interrupts) will use to express who may do what.
 
 ## Context
 
-[ADR-0001](../../../decisions/0001-microkernel-architecture.md) commits Umbrix to a capability-based microkernel. [Architectural principle P1](../../../standards/architectural-principles.md#p1--no-ambient-authority) makes this non-negotiable. [`security-model.md`](../../../architecture/security-model.md) describes the capability system in architectural terms: unforgeable kernel-held tokens, handle-based access from userspace, derivation trees, cascading revocation.
+[ADR-0001](../../../decisions/0001-microkernel-architecture.md) commits Tyrne to a capability-based microkernel. [Architectural principle P1](../../../standards/architectural-principles.md#p1--no-ambient-authority) makes this non-negotiable. [`security-model.md`](../../../architecture/security-model.md) describes the capability system in architectural terms: unforgeable kernel-held tokens, handle-based access from userspace, derivation trees, cascading revocation.
 
 What does not yet exist is a concrete implementation. The kernel boots and says hello; it has no objects to protect and no callers to protect them from. T-001 is the first subsystem in the kernel beyond "hello world" and the foundation on which every later kernel subsystem will rest.
 
@@ -26,7 +26,7 @@ This task deliberately stops short of introducing the kernel objects capabilitie
 ## Acceptance criteria
 
 - [x] **ADR-0014 Accepted.** Defines: in-kernel capability representation (struct layout, rights bits, object-reference encoding), handle type exposed to callers, derivation-tree storage (intrusive vs. index-based), per-task bound on table size, and the error type for operations.
-- [x] **`CapabilityTable` type** in a new `umbrix_kernel::cap` module. Bounded capacity (compile-time or per-instance), no heap allocation.
+- [x] **`CapabilityTable` type** in a new `tyrne_kernel::cap` module. Bounded capacity (compile-time or per-instance), no heap allocation.
 - [x] **`Capability` type** (enum or struct with a kind field) covering the v1 placeholder variants. Concrete object references are placeholders until Milestone A3 replaces them — the point is the *table's* correctness, not the objects'.
 - [x] **Rights** (`CapRights` or similar) represented as a bitfield with the operations exposed so far: duplicate, derive, revoke, transfer-on-IPC (placeholder — no IPC yet).
 - [x] **Handle-based access.** Callers receive a `CapHandle` (opaque index); raw capability bits are never exposed.
@@ -62,7 +62,7 @@ Two top-level shape decisions will be pinned in ADR-0014:
 Implementation order within the task:
 
 1. Write ADR-0014.
-2. Introduce the module skeleton: `umbrix_kernel::cap` with just the type definitions and docs.
+2. Introduce the module skeleton: `tyrne_kernel::cap` with just the type definitions and docs.
 3. Implement `cap_drop` first (simplest; touches only the table).
 4. Implement `cap_copy` (narrowing of rights).
 5. Implement `cap_derive` (narrowing of scope, parent/child linkage).

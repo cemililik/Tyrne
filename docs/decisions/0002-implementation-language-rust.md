@@ -6,9 +6,9 @@
 
 ## Context
 
-Umbrix is a new, security-first microkernel (see [ADR-0001](0001-microkernel-architecture.md)). Kernel code is the highest-stakes code in the system: it runs in privileged mode, it touches hardware directly, and any memory-safety bug is potentially a full compromise. The implementation language is therefore not just an aesthetic choice but a security and maintainability decision.
+Tyrne is a new, security-first microkernel (see [ADR-0001](0001-microkernel-architecture.md)). Kernel code is the highest-stakes code in the system: it runs in privileged mode, it touches hardware directly, and any memory-safety bug is potentially a full compromise. The implementation language is therefore not just an aesthetic choice but a security and maintainability decision.
 
-The question is: in what language is Umbrix written?
+The question is: in what language is Tyrne written?
 
 ## Decision drivers
 
@@ -33,11 +33,11 @@ The question is: in what language is Umbrix written?
 
 **Chosen: Rust.**
 
-Rust is the only option that simultaneously satisfies the memory-safety, `no_std`, ecosystem, and cross-compilation drivers in a way that is shippable by a small team today. The ownership model maps directly onto capability semantics (move-only tokens for unforgeable authority). `unsafe` is a local escape hatch rather than the default, which matches Umbrix's philosophy of confining risk.
+Rust is the only option that simultaneously satisfies the memory-safety, `no_std`, ecosystem, and cross-compilation drivers in a way that is shippable by a small team today. The ownership model maps directly onto capability semantics (move-only tokens for unforgeable authority). `unsafe` is a local escape hatch rather than the default, which matches Tyrne's philosophy of confining risk.
 
 Rust's ecosystem for bare-metal targets — `aarch64-cpu`, `cortex-a`, `cortex-m`, `riscv`, `embedded-hal`, `volatile-register`, QEMU integration — is mature and active. Multiple production microkernels in Rust exist (Hubris, Theseus, Redox), which de-risks the language choice.
 
-C was rejected because its memory-safety history in kernels is the problem we are trying to escape. C++ was rejected because its added features (exceptions, RTTI, complex templates) bring new surface without addressing the core memory-safety problem. Zig is promising but its ecosystem for our target profile is still thinner, its compiler is not yet at 1.0, and its safety story (explicit but not compiler-enforced) is weaker than Rust's. Ada/SPARK is the strongest choice for formal verification specifically, but its toolchain, ecosystem, and AI-agent familiarity are all significantly thinner than Rust's; it is a better second-pass option if Umbrix commits to verification later.
+C was rejected because its memory-safety history in kernels is the problem we are trying to escape. C++ was rejected because its added features (exceptions, RTTI, complex templates) bring new surface without addressing the core memory-safety problem. Zig is promising but its ecosystem for our target profile is still thinner, its compiler is not yet at 1.0, and its safety story (explicit but not compiler-enforced) is weaker than Rust's. Ada/SPARK is the strongest choice for formal verification specifically, but its toolchain, ecosystem, and AI-agent familiarity are all significantly thinner than Rust's; it is a better second-pass option if Tyrne commits to verification later.
 
 ## Consequences
 
@@ -57,11 +57,11 @@ C was rejected because its memory-safety history in kernels is the problem we ar
 - **Learning curve for contributors unfamiliar with ownership.** Mitigation: ADRs, glossary, guides, and code style documents explain the idioms. The maintainer is committed to Rust and will backstop this.
 - **Unsafe is still present and still dangerous.** Mitigation: see the unsafe-policy standard (planned) — every `unsafe` block has a justification, an invariant statement, and an audit entry.
 - **Compile times.** Larger than C. Not catastrophic but noticeable.
-- **Some older hardware targets lack good Rust support.** Umbrix's target list already avoids these.
+- **Some older hardware targets lack good Rust support.** Tyrne's target list already avoids these.
 
 ### Neutral
 
-- The language choice is visible in hiring/contribution patterns: Rust attracts a particular cohort. Neutral in that this cohort overlaps substantially with the security-minded contributor profile Umbrix wants.
+- The language choice is visible in hiring/contribution patterns: Rust attracts a particular cohort. Neutral in that this cohort overlaps substantially with the security-minded contributor profile Tyrne wants.
 
 ## Pros and cons of the options
 

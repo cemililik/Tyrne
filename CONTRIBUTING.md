@@ -1,6 +1,6 @@
-# Contributing to Umbrix
+# Contributing to Tyrne
 
-Thank you for your interest. Umbrix is currently in the **architecture phase** — the foundational design documents are being written and the codebase is not yet open for code contributions.
+Thank you for your interest. Tyrne is currently in the **architecture phase** — the foundational design documents are being written and the codebase is not yet open for code contributions.
 
 ## What is useful right now
 
@@ -30,4 +30,4 @@ This document will be expanded with:
 
 ## Licensing of contributions
 
-All contributions to Umbrix are licensed under the [Apache License, Version 2.0](LICENSE). By submitting a contribution, you agree that it may be redistributed under those terms, and you confirm that you have the right to submit it.
+All contributions to Tyrne are licensed under the [Apache License, Version 2.0](LICENSE). By submitting a contribution, you agree that it may be redistributed under those terms, and you confirm that you have the right to submit it.

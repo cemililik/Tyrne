@@ -1,6 +1,6 @@
 # Architectural principles
 
-The non-negotiable design invariants that every Umbrix change must uphold. These are distilled from the Architecture Decision Records and represent the project's long-term commitments. If a proposed change would violate a principle here, the remedy is to write a new ADR overriding the relevant prior decision — not to make an exception in code.
+The non-negotiable design invariants that every Tyrne change must uphold. These are distilled from the Architecture Decision Records and represent the project's long-term commitments. If a proposed change would violate a principle here, the remedy is to write a new ADR overriding the relevant prior decision — not to make an exception in code.
 
 This document is prescriptive. The ADRs it cites are the *reasoning*; this document is the *rule*. When in conflict, the ADR wins (with the caveat that an intended contradiction in this file is a bug to be fixed).
 
@@ -12,7 +12,7 @@ Every kernel, HAL, driver, and service change is subject to these principles. Do
 
 ### P1 — No ambient authority
 
-**Statement.** There is no "who" that automatically has power in Umbrix. Every privileged operation requires a capability held by the caller.
+**Statement.** There is no "who" that automatically has power in Tyrne. Every privileged operation requires a capability held by the caller.
 
 **Why.** Ambient authority is the root cause of confused deputy problems, privilege escalation via forgotten code paths, and "root can do anything" failures. Capability systems make authority explicit and auditable. See [ADR-0001](../decisions/0001-microkernel-architecture.md).
 
@@ -60,7 +60,7 @@ Every kernel, HAL, driver, and service change is subject to these principles. Do
 
 ### P7 — No proprietary binary blobs in the kernel
 
-**Statement.** Umbrix does not link, embed, or depend on proprietary binary firmware or drivers in the kernel. Open-source firmware that the board requires (e.g. Raspberry Pi boot firmware) may be documented and used *outside* the kernel, but no closed-source code is part of the Umbrix build.
+**Statement.** Tyrne does not link, embed, or depend on proprietary binary firmware or drivers in the kernel. Open-source firmware that the board requires (e.g. Raspberry Pi boot firmware) may be documented and used *outside* the kernel, but no closed-source code is part of the Tyrne build.
 
 **Why.** Security-first posture means we can audit what we ship. Proprietary blobs are unauditable and have historically been the vector for significant security and supply-chain failures. See [ADR-0004](../decisions/0004-target-platforms.md) for Jetson-specific consequences.
 

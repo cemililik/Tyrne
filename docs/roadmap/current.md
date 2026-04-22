@@ -16,8 +16,8 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 - **Last reviews:**
   - [T-006 mini-retro (2026-04-22)](../analysis/reviews/business-reviews/2026-04-22-T-006-mini-retro.md)
   - [A6 completion / Phase A retrospective (2026-04-21)](../analysis/reviews/business-reviews/2026-04-21-A6-completion.md)
-  - [Code review — Umbrix → Phase A exit (2026-04-21)](../analysis/reviews/code-reviews/2026-04-21-umbrix-to-phase-a.md)
-  - [Security review — Umbrix → Phase A exit (2026-04-21)](../analysis/reviews/security-reviews/2026-04-21-umbrix-to-phase-a.md)
+  - [Code review — Tyrne → Phase A exit (2026-04-21)](../analysis/reviews/code-reviews/2026-04-21-tyrne-to-phase-a.md)
+  - [Security review — Tyrne → Phase A exit (2026-04-21)](../analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md)
   - [A6 baseline performance review (2026-04-21)](../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md)
 - **Active decisions (2026-04-22):**
   - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — `Accepted`. Implemented by T-006.

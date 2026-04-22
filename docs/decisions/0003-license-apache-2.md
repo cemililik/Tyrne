@@ -6,19 +6,19 @@
 
 ## Context
 
-Umbrix is public on GitHub and may attract external contributors. The project also intends to be deployed on the maintainer's own devices — smart-home hardware, SBCs, and eventually mobile devices. The license choice determines:
+Tyrne is public on GitHub and may attract external contributors. The project also intends to be deployed on the maintainer's own devices — smart-home hardware, SBCs, and eventually mobile devices. The license choice determines:
 
 - Who can redistribute the code and under what terms.
 - Whether the project is protected against patent litigation by contributors.
-- Whether contributors can embed Umbrix in proprietary products (theirs or the maintainer's).
+- Whether contributors can embed Tyrne in proprietary products (theirs or the maintainer's).
 - How the license interacts with the Rust ecosystem (most of which is dual MIT OR Apache-2.0).
 
 ## Decision drivers
 
 - **Patent protection.** Any contributor could hold patents on the code they contribute. The license should include an explicit patent grant to users.
 - **Contributor friendliness.** The license should be well-known, legally battle-tested, and not require legal review for typical corporate contributors.
-- **Ecosystem alignment.** The bulk of the Rust ecosystem is Apache-2.0 (or dual MIT/Apache-2.0). Compatibility at the license boundary matters when Umbrix takes dependencies.
-- **Commercial flexibility.** The maintainer wants to be able to deploy Umbrix on their own products without licensing constraints on the downstream application.
+- **Ecosystem alignment.** The bulk of the Rust ecosystem is Apache-2.0 (or dual MIT/Apache-2.0). Compatibility at the license boundary matters when Tyrne takes dependencies.
+- **Commercial flexibility.** The maintainer wants to be able to deploy Tyrne on their own products without licensing constraints on the downstream application.
 - **Simplicity.** A single-license project is simpler to reason about than a dual-license project for both contributors and consumers, unless there is a specific need for dual licensing.
 
 ## Considered options
@@ -36,9 +36,9 @@ Umbrix is public on GitHub and may attract external contributors. The project al
 
 Apache-2.0 gives us the explicit patent grant that MIT and BSD lack, which matters for a security-oriented project that may accumulate contributions from industry participants with patent portfolios. It is the dominant license in the modern cloud and systems ecosystem, which minimizes contributor friction.
 
-We considered the dual MIT-or-Apache-2.0 Rust convention. The convention exists largely because some downstream projects (particularly older Linux components) have historic reasons to prefer MIT. Umbrix is a new project with no such entanglement, and single-licensing simplifies the contributor agreement and the NOTICE accounting.
+We considered the dual MIT-or-Apache-2.0 Rust convention. The convention exists largely because some downstream projects (particularly older Linux components) have historic reasons to prefer MIT. Tyrne is a new project with no such entanglement, and single-licensing simplifies the contributor agreement and the NOTICE accounting.
 
-GPL-v3 was rejected because it is incompatible with the maintainer's goal of being able to ship Umbrix inside proprietary products they may build later. MPL-2.0 was considered as a middle ground but rejected: its file-level copyleft creates awkward boundary questions for a kernel that may be extended with proprietary userspace services. BSD-3 offers no meaningful advantage over Apache-2.0 for this project.
+GPL-v3 was rejected because it is incompatible with the maintainer's goal of being able to ship Tyrne inside proprietary products they may build later. MPL-2.0 was considered as a middle ground but rejected: its file-level copyleft creates awkward boundary questions for a kernel that may be extended with proprietary userspace services. BSD-3 offers no meaningful advantage over Apache-2.0 for this project.
 
 ## Consequences
 
@@ -47,11 +47,11 @@ GPL-v3 was rejected because it is incompatible with the maintainer's goal of bei
 - Explicit patent grant from every contributor, with a clear termination clause if a contributor later files patent infringement litigation related to the work.
 - Well-understood by corporate legal teams; contributors from large organizations can submit without bespoke CLA negotiation.
 - Aligns with the Rust ecosystem: most dependencies can be consumed without license-compatibility concerns.
-- The maintainer retains the right to incorporate Umbrix into proprietary products without relicensing.
+- The maintainer retains the right to incorporate Tyrne into proprietary products without relicensing.
 
 ### Negative
 
-- **Not copyleft.** Someone can fork Umbrix and ship a closed-source derivative without contributing changes back. We accept this trade-off because the goal is broad adoption on the maintainer's own devices, not forced openness of downstream.
+- **Not copyleft.** Someone can fork Tyrne and ship a closed-source derivative without contributing changes back. We accept this trade-off because the goal is broad adoption on the maintainer's own devices, not forced openness of downstream.
 - **`NOTICE` file maintenance.** Apache-2.0 requires that attribution notices be preserved. We maintain a `NOTICE` at the repository root and expect contributors to respect its content.
 - **Slightly longer license file than MIT.** Negligible.
 

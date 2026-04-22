@@ -2,15 +2,15 @@
 //!
 //! See [ADR-0007] for the design rationale behind the trait shape.
 //!
-//! [ADR-0007]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0007-console-trait.md
+//! [ADR-0007]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0007-console-trait.md
 
 use core::fmt;
 
 /// Byte-sink console for early-boot and panic-time diagnostic output.
 ///
-/// `Console` is the lowest-level diagnostic channel in Umbrix. It works before
+/// `Console` is the lowest-level diagnostic channel in Tyrne. It works before
 /// the MMU is active, before IPC exists, and during panic. Every higher-level
-/// logging facility — the `umbrix-log` facade, the userspace log service —
+/// logging facility — the `tyrne-log` facade, the userspace log service —
 /// layers on top of what this trait guarantees.
 ///
 /// # Contract
@@ -50,7 +50,7 @@ pub trait Console: Send + Sync {
 ///
 /// ```ignore
 /// use core::fmt::Write;
-/// use umbrix_hal::FmtWriter;
+/// use tyrne_hal::FmtWriter;
 ///
 /// // `console` is some `&dyn Console`:
 /// let mut w = FmtWriter(console);

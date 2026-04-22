@@ -6,13 +6,13 @@
 
 ## Context
 
-[T-002](../analysis/tasks/phase-a/T-002-kernel-object-storage.md) opens the kernel-object subsystem in `umbrix-kernel`. Before any implementation code lands, the concrete shape of a kernel object needs to be settled: **how it is stored, who owns it, how its lifecycle is managed, and how capabilities refer to it**. [ADR-0014](0014-capability-representation.md) deferred these questions by representing the object-reference field as an opaque `CapObject(u64)` placeholder; [Milestone A3 in phase-a.md](../roadmap/phases/phase-a.md) is the place where the placeholder gets replaced.
+[T-002](../analysis/tasks/phase-a/T-002-kernel-object-storage.md) opens the kernel-object subsystem in `tyrne-kernel`. Before any implementation code lands, the concrete shape of a kernel object needs to be settled: **how it is stored, who owns it, how its lifecycle is managed, and how capabilities refer to it**. [ADR-0014](0014-capability-representation.md) deferred these questions by representing the object-reference field as an opaque `CapObject(u64)` placeholder; [Milestone A3 in phase-a.md](../roadmap/phases/phase-a.md) is the place where the placeholder gets replaced.
 
 The decision compounds. Every Phase A subsystem that follows — IPC (A4), scheduler (A5), two-task demo (A6) — will reference kernel objects through the representation chosen here. Changing the representation once callers exist is painful: the capability system, the IPC path, and the scheduler all depend on the handle shape.
 
 The guiding context:
 
-- [ADR-0001](0001-microkernel-architecture.md) commits Umbrix to a capability-based microkernel — **every kernel resource is an object, every action against it goes through a capability**. There is no "kernel-global implicit state" kernel objects can live in; they must be explicit, typed, and countable.
+- [ADR-0001](0001-microkernel-architecture.md) commits Tyrne to a capability-based microkernel — **every kernel resource is an object, every action against it goes through a capability**. There is no "kernel-global implicit state" kernel objects can live in; they must be explicit, typed, and countable.
 - [ADR-0014](0014-capability-representation.md) established the shape of the capability table: per-task fixed-size arena with generation-tagged handles, `unsafe`-free. Its pattern is already audited and covered by 29 host tests.
 - [`architectural-principles.md`](../standards/architectural-principles.md) mandates **bounded kernel state** — no unbounded growth, no heap surprises.
 - **Single-core v1.** No cross-core concurrency yet; per-core state and atomics are deferred to Phase C.
@@ -150,7 +150,7 @@ Per-type arenas are kernel-global singletons (conceptually; the actual kernel st
 
 - **Over Option A (shared enum arena):** avoids "size of largest variant" tax. More importantly, keeps typed handles at compile-time level; Option A erases the kind into an enum tag that the compiler does not check at handle use.
 - **Over Option C (intrusive linked list):** the kernel has no heap yet and will not have one for months. Arena-based bounded storage matches current capability in both senses.
-- **Over Option D (slab + capability wrappers):** slab storage is strictly more powerful but strictly more complex. seL4's untyped-memory model gives retyping freedom at the cost of an entire security story around untyped-to-typed transitions. Umbrix does not need retyping in v1 and would pay complexity for an unused feature.
+- **Over Option D (slab + capability wrappers):** slab storage is strictly more powerful but strictly more complex. seL4's untyped-memory model gives retyping freedom at the cost of an entire security story around untyped-to-typed transitions. Tyrne does not need retyping in v1 and would pay complexity for an unused feature.
 - **Over Option E (shared arena + external type tag):** trades the type-safety Option B gets from typed handles for a runtime discriminator. If the discriminator is ever wrong, the caller reinterprets bytes as the wrong type. Option B's compile-time separation is strictly safer at equivalent space cost.
 
 ## Consequences
@@ -209,7 +209,7 @@ Per-type arenas are kernel-global singletons (conceptually; the actual kernel st
 ### Option D — Slab-ish retyping store
 
 - Pro: maximum flexibility; enables future "untyped memory → typed kernel object" operations without rework.
-- Con: massive complexity for v1; introduces an entire sub-story around retyping invariants that Umbrix does not need yet.
+- Con: massive complexity for v1; introduces an entire sub-story around retyping invariants that Tyrne does not need yet.
 - Con: the security model for retyping is non-trivial (seL4's is formally verified; we would not match that in v1).
 
 ### Option E — Shared arena + external type tag

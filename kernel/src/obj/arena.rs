@@ -11,7 +11,7 @@
 //! audited arena shape, now generic, instantiated three times in the
 //! per-kind kernel-object modules.
 //!
-//! [adr-0016]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+//! [adr-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
 
 /// Index into an [`Arena`]'s backing array.
 type Index = u16;

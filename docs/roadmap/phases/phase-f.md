@@ -1,6 +1,6 @@
 # Phase F — Smart-home deployment
 
-**Exit bar:** A real physical device in the maintainer's smart-home setup runs Umbrix as its firmware, communicating with a hub (Matter controller or MQTT broker) and reacting to real events.
+**Exit bar:** A real physical device in the maintainer's smart-home setup runs Tyrne as its firmware, communicating with a hub (Matter controller or MQTT broker) and reacting to real events.
 
 **Scope:** The project's reason to exist. The plumbing from Phase E gets specialized drivers; one or more smart-home protocols are selected; the first deployable device is built.
 
@@ -15,8 +15,8 @@ GPIO control on BCM2711. Fundamental because most smart-home peripherals (sensor
 ### Sub-breakdown
 
 1. **ADR-0043 — GPIO service interface.** Pin granularity, capability per pin vs. per bank; direction / pull-up / drive-strength configuration.
-2. **`umbrix-driver-gpio-bcm2711`** driver task.
-3. **Client library** `umbrix-gpio` with typed pin handles.
+2. **`tyrne-driver-gpio-bcm2711`** driver task.
+3. **Client library** `tyrne-gpio` with typed pin handles.
 
 ### Acceptance criteria
 
@@ -31,7 +31,7 @@ Most smart-home sensors use one of these. Covers the BCM2711 peripherals.
 
 1. **ADR-0044 — I2C service interface.**
 2. **ADR-0045 — SPI service interface.** (Separate ADR because of different capability semantics — SPI has chip-select per device, I2C has addresses.)
-3. **Drivers** `umbrix-driver-i2c-bcm2711`, `umbrix-driver-spi-bcm2711`.
+3. **Drivers** `tyrne-driver-i2c-bcm2711`, `tyrne-driver-spi-bcm2711`.
 4. **Test clients** that read a known sensor (e.g., BME280 on I2C, an MCP SPI flash) to verify end-to-end.
 
 ### Acceptance criteria
@@ -53,11 +53,11 @@ The smart-home communication protocol. Matter is the modern open standard; MQTT 
 ### Acceptance criteria
 
 - ADR-0046 Accepted.
-- End-to-end: Umbrix device sends a heartbeat / state update to a real hub.
+- End-to-end: Tyrne device sends a heartbeat / state update to a real hub.
 
 ## Milestone F4 — First smart-home device
 
-A chosen device — e.g., a temperature sensor node, a smart plug, an environmental monitor — running Umbrix as its full firmware.
+A chosen device — e.g., a temperature sensor node, a smart plug, an environmental monitor — running Tyrne as its full firmware.
 
 ### Sub-breakdown
 
@@ -75,7 +75,7 @@ A chosen device — e.g., a temperature sensor node, a smart plug, an environmen
 
 ### Phase F closure
 
-Milestone F4 is a genuine milestone: Umbrix becomes real when this ships. Subsequent phases tighten the security story (Phase G) and expand the platform base (Phase H).
+Milestone F4 is a genuine milestone: Tyrne becomes real when this ships. Subsequent phases tighten the security story (Phase G) and expand the platform base (Phase H).
 
 ## ADR ledger for Phase F
 
@@ -88,6 +88,6 @@ Milestone F4 is a genuine milestone: Umbrix becomes real when this ships. Subseq
 
 ## Open questions carried into Phase F
 
-- **Wi-Fi on Pi 4.** The Broadcom Wi-Fi chip requires proprietary firmware; Umbrix's policy rejects blobs. Options: use Ethernet instead on Pi 4 (simplest), use USB Wi-Fi dongles with open-source firmware, or accept a documented exception for firmware that lives outside the kernel (in-scope for an ADR).
+- **Wi-Fi on Pi 4.** The Broadcom Wi-Fi chip requires proprietary firmware; Tyrne's policy rejects blobs. Options: use Ethernet instead on Pi 4 (simplest), use USB Wi-Fi dongles with open-source firmware, or accept a documented exception for firmware that lives outside the kernel (in-scope for an ADR).
 - **Battery operation.** Power-management is substantial; may belong in Phase I alongside mobile.
 - **Encryption at rest** on device storage — crosses into Phase G.

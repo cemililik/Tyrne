@@ -51,7 +51,7 @@ Concretely:
 - **Exception Level:** whichever QEMU delivers. v1 kernel code does not read or write EL-sensitive system registers, so it runs correctly at either EL1 or EL2. A future ADR (likely paired with multi-core or MMU setup) will drop to EL1 explicitly.
 - **Stack:** a 64 KiB region reserved at the end of the image. `__stack_top` is a linker-defined symbol at the high end of that region; `_start` sets `SP` to it.
 - **BSS:** zeroed in `_start` before control passes to Rust. The range is bracketed by `__bss_start` / `__bss_end`, both linker-defined.
-- **DTB pointer:** QEMU places it in `x0` at entry. v1 ignores it. A future ADR will introduce DTB parsing (probably in `umbrix-dt`) and the kernel will receive a typed `BootInfo` from the BSP.
+- **DTB pointer:** QEMU places it in `x0` at entry. v1 ignores it. A future ADR will introduce DTB parsing (probably in `tyrne-dt`) and the kernel will receive a typed `BootInfo` from the BSP.
 - **Secondary cores:** QEMU is invoked with `-smp 1`; no PSCI `CPU_ON` calls in v1. Multi-core is a future ADR.
 - **Diagnostic console:** PL011 UART at `0x0900_0000`, hardcoded in the BSP. Matches the QEMU `virt` memory map.
 
@@ -144,7 +144,7 @@ This is the minimum to get from QEMU's entry to Rust; everything else runs in Ru
 Each will be resolved by a future ADR or a paired update.
 
 - **EL drop.** When the first EL1-specific register is accessed (likely MMU setup), the ADR that introduces that work also defines the EL-drop routine.
-- **DTB parsing.** Introduced when the first runtime-config need arises (typically Pi 4 bring-up). `umbrix-dt` is the tentative crate name.
+- **DTB parsing.** Introduced when the first runtime-config need arises (typically Pi 4 bring-up). `tyrne-dt` is the tentative crate name.
 - **Multi-core start.** Secondary-core bring-up via PSCI `CPU_ON`; pairs with the multi-core extension to `Cpu`.
 - **Boot-time MMU activation.** Currently the kernel runs with whatever translation state QEMU provides (typically MMU-off). Turning it on is a future ADR; the linker script may need adjustments for the mapped-vs-identity split.
 - **Stack size policy.** 64 KiB is a placeholder; a real kernel will want per-task stacks with guard pages, which requires MMU + scheduler integration.
