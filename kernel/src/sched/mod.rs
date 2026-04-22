@@ -1055,7 +1055,9 @@ mod tests {
         // SAFETY: 16-byte aligned, 512-byte stack; FakeCpu::init_context is
         // a no-op — stack is never actually used.
         unsafe {
-            sched.add_task(&cpu, task, spin_entry(), stack.top()).unwrap();
+            sched
+                .add_task(&cpu, task, spin_entry(), stack.top())
+                .unwrap();
         }
         // Simulate `start` having dispatched `task`: it was dequeued and is
         // now the running task.
@@ -1081,7 +1083,11 @@ mod tests {
         let task = task_handle(0);
 
         let ep_cap = setup_single_task_with_recv_cap(
-            &mut sched, &mut ep_arena, &mut table, task, &mut stack,
+            &mut sched,
+            &mut ep_arena,
+            &mut table,
+            task,
+            &mut stack,
         );
 
         // Snapshot pre-call state.
@@ -1227,21 +1233,11 @@ mod tests {
         // exclusively by this thread; each was derived exactly once
         // above, so no tag-invalidating re-borrow happens here.
         let result = unsafe {
-            ipc_recv_and_yield(
-                sched_ptr,
-                &cpu,
-                ep_arena_ptr,
-                queues_ptr,
-                table_ptr,
-                ep_cap,
-            )
+            ipc_recv_and_yield(sched_ptr, &cpu, ep_arena_ptr, queues_ptr, table_ptr, ep_cap)
         };
 
         assert!(
-            matches!(
-                result,
-                Err(SchedError::Ipc(IpcError::PendingAfterResume))
-            ),
+            matches!(result, Err(SchedError::Ipc(IpcError::PendingAfterResume))),
             "expected Err(Ipc(PendingAfterResume)), got {result:?}"
         );
     }
