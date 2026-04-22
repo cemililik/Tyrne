@@ -49,7 +49,7 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 
 ### Tasks under B0
 
-- [T-006 — Raw-pointer scheduler API refactor + TaskArena global migration](../../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — In Progress (opened 2026-04-22)
+- [T-006 — Raw-pointer scheduler API refactor + TaskArena global migration](../../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — In Review (opened 2026-04-22)
 - [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — In Review (opened 2026-04-22)
 - T-008 — Architecture docs for kernel-objects / IPC / scheduler *(not yet opened)*
 - T-009 — Timer initialisation and CNTPCT_EL0-based measurement *(not yet opened)*

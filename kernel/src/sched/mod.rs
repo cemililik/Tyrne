@@ -157,9 +157,24 @@ pub enum SchedError {
     /// SMP / "BSP forgot to register idle" so the kernel never panics on
     /// a userspace-reachable condition.
     ///
-    /// When this is returned from [`ipc_recv_and_yield`], the caller's
-    /// scheduler state is restored to what it was before the call — the
-    /// current task is not left marked `Blocked`.
+    /// # Rollback scope
+    ///
+    /// When returned from [`ipc_recv_and_yield`], the **scheduler** state
+    /// is restored to its pre-call shape: `s.current` is reset to the
+    /// calling task, `s.task_states[current_idx]` is reset from
+    /// `Blocked` back to `Ready`, and the ready queue is left untouched.
+    /// The **endpoint** state, however, is **not** rolled back — the
+    /// Phase 1 `ipc_recv` call has already transitioned the endpoint
+    /// from `Idle` to `RecvWaiting` (recording a waiting receiver) before
+    /// Phase 2's ready-queue check runs, and the Deadlock path does not
+    /// reverse that transition. A subsequent `ipc_recv_and_yield` on the
+    /// same endpoint from the same caller therefore observes `QueueFull`
+    /// (a receiver is already registered), not `Pending`. In the v1
+    /// cooperative workload this is acceptable because the variant is
+    /// structurally unreachable; recovery semantics (endpoint rollback
+    /// or an explicit `ipc_cancel_recv`) are out of scope and will be
+    /// revisited if preemption / SMP ever exercises the path. Callers
+    /// that want the endpoint reset must destroy and re-create it.
     ///
     /// [ADR-0022]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
     Deadlock,
@@ -344,7 +359,42 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 //   context-switch call; the guard is constructed before the switch and
 //   dropped on return.
 //
+// # Rejected safer alternatives
+//
+// The `unsafe fn` + `*mut` signatures across every bridge entry point are
+// load-bearing — not chosen for convenience. Each safer alternative was
+// considered and rejected in [ADR-0021]; the short form is:
+//
+// - **`&mut self` + `&mut` parameters (the previous shape).** Reintroduces
+//   the exact aliasing hazard [UNSAFE-2026-0012] describes: the `&mut
+//   Scheduler` produced at the caller site (`SCHED.assume_init_mut()`)
+//   lives for the full method call, which spans `cpu.context_switch`; when
+//   the other task resumes and re-derives its own `&mut Scheduler` from
+//   the same `UnsafeCell`, two live `&mut` references to the same
+//   referent exist. This is UB under Rust's strict aliasing model
+//   regardless of whether the accesses actually overlap at runtime.
+// - **`Mutex<Scheduler>` / `RwLock` around the shared state.** Requires a
+//   spin implementation that itself uses `unsafe` (so the unsafety
+//   relocates rather than disappears); the lock must be held across
+//   `cpu.context_switch`, which in preemptive / SMP futures blocks the
+//   resuming task's reacquisition of the same lock and deadlocks. Per
+//   ADR-0021 *Consequences*, raw pointers wrap cleanly in per-CPU locks
+//   when Phase C lands; `&mut` receivers do not.
+// - **Scheduler owns the arenas (ADR-0021 Option B).** Collapses the
+//   `kernel::cap` / `kernel::obj` / `kernel::ipc` / `kernel::sched`
+//   layering into a scheduler-owned god-object and still needs the
+//   raw-pointer receiver fix on `self` to close the aliasing — strict
+//   superset of this shape for no incremental benefit at v1 scale.
+// - **Continuation-passing style (ADR-0021 Option C).** Closure captures
+//   reintroduce the same `&mut` aliasing via capture environments;
+//   `Box<dyn FnOnce>` requires an allocator we do not have.
+//
+// Every per-block `// SAFETY:` comment in this section relies on this
+// shared rationale for the "why not safer Rust" half of its justification,
+// alongside the block-local invariants it states inline.
+//
 // [ADR-0021]: https://github.com/cemililik/UmbrixOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
+// [UNSAFE-2026-0012]: https://github.com/cemililik/UmbrixOS/blob/main/docs/audits/unsafe-log.md
 
 /// Start the scheduler by switching to the first ready task.
 ///
@@ -376,8 +426,11 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 pub unsafe fn start<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>, cpu: &C) -> ! {
     let next_idx = {
         // SAFETY: caller contract — `sched` valid and exclusive for this
-        // inner block; `&mut` does not cross the switch below. Audit:
-        // UNSAFE-2026-0014.
+        // inner block; `&mut` does not cross the switch below. Rejected
+        // alternatives: see §Rejected safer alternatives in the Shared
+        // safety contract above (`&mut self` reintroduces UNSAFE-2026-0012;
+        // a mutex relocates the unsafety; ADR-0021 Option B is a strict
+        // superset of this shape). Audit: UNSAFE-2026-0014.
         let s = unsafe { &mut *sched };
 
         #[allow(
@@ -399,7 +452,11 @@ pub unsafe fn start<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>, cpu: &C) -
     // masked by `IrqGuard`; the throwaway current context lives on the
     // abandoned bootstrap stack frame and is never restored. No `&mut
     // Scheduler<C>` is live — the context pointer is derived from the raw
-    // `sched` pointer. Audit: UNSAFE-2026-0008.
+    // `sched` pointer. Rejected alternatives: the context-switch primitive
+    // is register-save assembly; no safe-Rust abstraction can express it
+    // (see UNSAFE-2026-0008's audit entry for the full enumeration), and
+    // `&mut` to `contexts[next_idx]` is avoided by using raw-pointer
+    // arithmetic per the Shared safety contract above. Audit: UNSAFE-2026-0008.
     unsafe {
         let ctx_ptr = (*sched).contexts.as_ptr();
         cpu.context_switch(&mut throwaway, &*ctx_ptr.add(next_idx));
@@ -447,7 +504,10 @@ pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
         // SAFETY: caller contract — `sched` is valid, exclusively-owned for
         // the duration of this inner block, and this `&mut` does not cross
         // the `cpu.context_switch` call below because the block ends first.
-        // Audit: UNSAFE-2026-0014.
+        // Rejected alternatives: see §Rejected safer alternatives in the
+        // Shared safety contract above — `&mut self` on the bridge
+        // reintroduces UNSAFE-2026-0012; a lock relocates the unsafety
+        // and deadlocks under preemption. Audit: UNSAFE-2026-0014.
         let s = unsafe { &mut *sched };
 
         let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
@@ -493,7 +553,11 @@ pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
     // SAFETY: `current_idx != next_idx` by construction (the running task is
     // never in the ready queue, so `next_handle != current_handle` → distinct
     // indices). Both indices are within [0, TASK_ARENA_CAPACITY). Interrupts
-    // are disabled by `IrqGuard`. Audit: UNSAFE-2026-0008.
+    // are disabled by `IrqGuard`. Rejected alternatives: context-switch is
+    // register-save assembly with no safe-Rust equivalent (see
+    // UNSAFE-2026-0008); the split borrow uses raw-pointer arithmetic
+    // because `&mut Scheduler` spanning the switch would violate the
+    // Shared safety contract's non-aliasing rule. Audit: UNSAFE-2026-0008.
     unsafe {
         let ctx_ptr = (*sched).contexts.as_mut_ptr();
         let cur_ctx = &mut *ctx_ptr.add(current_idx);
@@ -536,7 +600,11 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
     // SAFETY: caller contract — all four pointers are valid, distinct, and
     // exclusively-owned for the duration of this inner block. Each `&mut`
     // materialised in the tuple below lives only inside this block and is
-    // dropped before the `yield_now` call site. Audit: UNSAFE-2026-0014.
+    // dropped before the `yield_now` call site. Rejected alternatives: see
+    // §Rejected safer alternatives in the Shared safety contract above —
+    // `&mut` parameter receivers would pin the borrow across the switch
+    // (reproducing UNSAFE-2026-0012); ADR-0021 §Decision outcome enumerates
+    // the full alternative set. Audit: UNSAFE-2026-0014.
     let (outcome, needs_yield) = unsafe {
         let s: &mut Scheduler<C> = &mut *sched;
         let arena_ref: &mut EndpointArena = &mut *ep_arena;
@@ -563,7 +631,11 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
     if needs_yield {
         // SAFETY: `sched` still satisfies the caller contract; we have just
         // released our `&mut` so the re-entrant `yield_now` can acquire its
-        // own momentary `&mut` without overlapping ours. Audit: UNSAFE-2026-0014.
+        // own momentary `&mut` without overlapping ours. Rejected
+        // alternatives: passing the already-materialised `&mut Scheduler`
+        // would violate the non-aliasing rule in the Shared safety contract
+        // (the callee's switch spans this frame); see §Rejected safer
+        // alternatives above. Audit: UNSAFE-2026-0014.
         unsafe {
             yield_now(sched, cpu)?;
         }
@@ -581,16 +653,21 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
 /// - [`SchedError::NoCurrentTask`] — no running task when blocking is required.
 /// - [`SchedError::Deadlock`] — the ready queue is empty after blocking
 ///   the current task (every task is waiting on IPC and no idle task is
-///   registered). The scheduler state is restored before the return so
-///   this variant leaves the caller's world unchanged. Per [ADR-0022],
-///   registering an idle task at boot makes this variant unreachable in
-///   the v1 cooperative workload.
+///   registered). The **scheduler** state is restored before the return
+///   (see [`SchedError::Deadlock`]'s *Rollback scope*); the **endpoint**
+///   state was moved from `Idle` to `RecvWaiting` during Phase 1 and
+///   stays there — a subsequent `ipc_recv_and_yield` on the same
+///   endpoint from the same caller therefore observes `QueueFull`. Per
+///   [ADR-0022], registering an idle task at boot makes this variant
+///   unreachable in the v1 cooperative workload.
 /// - [`SchedError::Ipc`] — wraps [`IpcError`] failures from the underlying
 ///   [`ipc_recv`] calls. In particular,
 ///   [`IpcError::PendingAfterResume`] is returned when the resume-path
 ///   `ipc_recv` still returns `Pending` after a cooperative context switch
-///   — a scheduler invariant violation that in debug builds also fires a
-///   `debug_assert!`.
+///   — a scheduler invariant violation. Per ADR-0022 *Revision notes*
+///   second rider, the typed `Err` is the sole signal; no companion
+///   `debug_assert!` fires (it was dropped as redundant with the typed
+///   return and blocking the test that exercises this path).
 ///
 /// # Safety
 ///
@@ -610,7 +687,12 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     // Phase 1 — try non-blocking recv, momentary &muts.
     // SAFETY: caller contract — all pointers valid, distinct, and
     // exclusively-owned for this inner block. Each `&mut` materialised here
-    // is dropped before the switch below. Audit: UNSAFE-2026-0014.
+    // is dropped before the switch below. Rejected alternatives: see
+    // §Rejected safer alternatives in the Shared safety contract above —
+    // a `&mut`-parameter signature pins the borrow across the Phase 2
+    // switch; Option B (scheduler owns the arenas) collapses the
+    // kernel/cap / kernel/obj / kernel/ipc layering for no incremental
+    // benefit. Audit: UNSAFE-2026-0014.
     let (ep_handle, outcome) = unsafe {
         let arena_ref: &mut EndpointArena = &mut *ep_arena;
         let queues_ref: &mut IpcQueues = &mut *queues;
@@ -630,12 +712,19 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     //
     // If the ready queue is empty after blocking the current task, every
     // task in the system is blocked on IPC and no idle task is registered
-    // (ADR-0022). The pre-block scheduler state is restored before
+    // (ADR-0022). The pre-block **scheduler** state is restored before
     // returning `Err(SchedError::Deadlock)` so the caller observes the
-    // same state it had before the bridge was called.
+    // same scheduler state it had before the bridge was called. Note that
+    // the **endpoint** state was already transitioned from Idle to
+    // RecvWaiting by the Phase 1 ipc_recv call above; that transition is
+    // NOT rolled back here (see SchedError::Deadlock's doc-comment for
+    // the rollback-scope rationale). In the v1 workload Deadlock is
+    // structurally unreachable, so the endpoint-rollback gap is benign.
     let (current_idx, next_idx) = {
         // SAFETY: caller contract — `sched` valid and exclusive for this
-        // block; `&mut` does not cross the switch below. Audit: UNSAFE-2026-0014.
+        // block; `&mut` does not cross the switch below. Rejected
+        // alternatives as above (Shared safety contract §Rejected safer
+        // alternatives). Audit: UNSAFE-2026-0014.
         let s = unsafe { &mut *sched };
         let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
         let current_idx = current_handle.slot().index() as usize;
@@ -668,8 +757,11 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     {
         let _guard = IrqGuard::new(cpu);
         // SAFETY: `current_idx != next_idx` (running task was removed from
-        // the ready queue before dequeue); both indices in range. Audit:
-        // UNSAFE-2026-0008.
+        // the ready queue before dequeue); both indices in range. Rejected
+        // alternatives: context-switch is register-save assembly, no safe
+        // Rust equivalent (UNSAFE-2026-0008); the split borrow uses
+        // raw-pointer arithmetic to avoid two `&mut` into `contexts` per
+        // the Shared safety contract. Audit: UNSAFE-2026-0008.
         unsafe {
             let ctx_ptr = (*sched).contexts.as_mut_ptr();
             let cur_ctx = &mut *ctx_ptr.add(current_idx);
@@ -680,8 +772,11 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
 
     // Phase 3 — resumed; collect the delivered message.
     // SAFETY: caller contract — arenas/queues/table still valid; the
-    // `&mut`s reacquired here did not exist during the switch. Audit:
-    // UNSAFE-2026-0014.
+    // `&mut`s reacquired here did not exist during the switch. Rejected
+    // alternatives: reusing the Phase 1 `&mut`s would carry them across
+    // the switch (UNSAFE-2026-0012 hazard); the re-acquisition discipline
+    // here is the per-phase pattern that Shared safety contract §Rejected
+    // safer alternatives argues for. Audit: UNSAFE-2026-0014.
     let result = unsafe {
         let arena_ref = &mut *ep_arena;
         let queues_ref = &mut *queues;
