@@ -5,8 +5,8 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 ---
 
 - **Active phase:** B — opened 2026-04-21. First milestone B0 in progress.
-- **Active milestone:** B0 — Phase A exit hygiene. T-006 and T-007 are in review; T-008..T-011 remain to open.
-- **Active task:** None — T-007 moved to `In Review` 2026-04-22; next task (T-008 / T-009 / T-011) to be opened.
+- **Active milestone:** B0 — Phase A exit hygiene. T-006 and T-007 are in review; T-009 is in progress; T-011 is Draft; T-008 remains to open.
+- **Active task:** [T-009 — Timer init + `CNTPCT_EL0` measurement](../analysis/tasks/phase-b/T-009-timer-init-cntpct.md) — `In Progress` since 2026-04-23.
 - **In review:**
   - [T-006 — Raw-pointer scheduler API refactor](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — `In Review` since 2026-04-22.
   - [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — `In Review` since 2026-04-22; implements ADR-0022.
@@ -22,7 +22,7 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 - **Active decisions (2026-04-22):**
   - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — `Accepted`. Implemented by T-006.
   - [ADR-0022 — Idle task and typed scheduler deadlock error](../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — `Accepted`. Implemented by T-007.
-- **Next task to open:** T-008 (architecture docs), T-009 (timer init), or T-011 (missing tests) — any of these can run in parallel with T-007.
+- **Next task to open:** T-008 (architecture docs) — last B0 task without a file. T-011 promotes from `Draft` to `In Progress` once T-006 and T-007 are `Done`.
 - **Next review trigger:** B0 closure — a full business review once T-006..T-011 are all Done. (T-006 mini-retro filed 2026-04-22.)
 
 ## Notes
