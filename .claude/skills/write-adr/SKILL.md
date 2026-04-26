@@ -36,6 +36,7 @@ Before starting, the agent must have:
    - **Decision drivers.** Bulleted list of the forces pushing toward or away from each option. These must be specific to this decision; do not reuse generic drivers.
    - **Considered options.** At least two; three is often better. Each option gets a one-sentence description here.
    - **Decision outcome.** State the chosen option and connect the decision drivers to the choice. One or two paragraphs.
+   - **Decision outcome → Dependency chain.** A subsection listing every task / piece of infrastructure / prior decision that must already exist for the chosen option to be **fully** in effect. Each line either points at an existing T-NNN file or is opened as part of the same commit that lands the ADR (per ADR-0013 §Forward-reference contract — "future, not-yet-opened task" wording is forbidden). If a step has no T-NNN slot, **stop** and open the slot first; the ADR cannot Accept until the chain is grounded.
    - **Consequences.** Three subsections: *Positive*, *Negative*, *Neutral*. Negative consequences must include a mitigation or an explicit "we accept this cost because…".
    - **Pros and cons of the options.** For each option, a short list of pros and cons. The rejected options need real cons, not strawmen.
    - **References.** External links, prior art, papers, existing systems. At least one reference for anything non-obvious.
@@ -54,14 +55,18 @@ Before starting, the agent must have:
    - Body: one or two sentences explaining the decision.
    - Trailer: `Refs: ADR-NNNN`.
 
+10. **Cool-down before Accept.** The ADR lands at status `Proposed`. Per ADR-0013 §"ADR cool-down: no same-day Accept", a minimum of one calendar day separates `Proposed` from `Accepted`. Do not flip the status in the same session as drafting. The cool-down is the cheapest mechanism for catching the implementation-feedback gaps that a same-day Accept misses (the A → B0 arc rediscovered this lesson four times). Accept happens in a separate, second commit after re-reading.
+
 ## Acceptance criteria
 
 - [ ] File exists at `docs/decisions/NNNN-<slug>.md`.
 - [ ] All MADR sections filled with real content (no `<angle-bracket>` placeholders from the template).
 - [ ] At least two considered options with real pros and cons.
+- [ ] **Decision outcome includes a *Dependency chain* subsection** with every step grounded in either an existing T-NNN file or one opened as part of the same commit. No "future, not-yet-opened task" wording.
 - [ ] Consequences include both positive and negative items.
 - [ ] ADR index at [`docs/decisions/README.md`](../../../docs/decisions/README.md) has the new row.
 - [ ] No contradiction with a prior Accepted ADR; if there was one, the [supersede-adr](../supersede-adr/SKILL.md) skill was used instead.
+- [ ] **Status lands at `Proposed`, not `Accepted`.** Same-session Accept is a policy violation per ADR-0013; Accept is a separate commit at least one calendar day later.
 
 ## Anti-patterns
 
@@ -70,6 +75,8 @@ Before starting, the agent must have:
 - **Template placeholders in the committed file.** `<Option A>` in the pros-and-cons section is a failed review.
 - **Skipping "Consequences — Negative".** Every non-trivial decision has costs. Pretending otherwise is unhelpful.
 - **Writing the ADR after the code.** ADRs are proposed before work begins, accepted when the design is settled. Retroactive ADRs are acceptable only as a recovery move and should be marked explicitly.
+- **Same-day `Proposed → Accepted`.** A draft accepted in the session it was written has no cool-down. The A → B0 arc produced four ADRs with same-day Accept, and all four needed riders within a week. The cool-down is cheap insurance.
+- **Forward-reference handwaving.** "Future task X will do Y" — without X being a real T-NNN file — drifts into purgatory. Open the slot in the same commit, even as `Draft`.
 
 ## References
 
