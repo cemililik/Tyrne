@@ -6,10 +6,15 @@
 //! - [`tyrne_hal::ContextSwitch`] — cooperative register-state save/restore
 //!   (generic; see [ADR-0020]).
 //! - [`tyrne_hal::Timer`] — monotonic time via the ARM Generic Timer's
-//!   `CNTPCT_EL0` / `CNTFRQ_EL0` system registers (see [ADR-0010]). The
-//!   deadline-arming half (`arm_deadline` / `cancel_deadline`) is
-//!   intentionally `unimplemented!()` until GIC + interrupt-vector-table
-//!   wiring lands — see T-009 task notes.
+//!   **virtual** counter (`CNTVCT_EL0`) and frequency register
+//!   (`CNTFRQ_EL0`); see [ADR-0010]. The deadline-arming half
+//!   (`arm_deadline` / `cancel_deadline`) is intentionally
+//!   `unimplemented!()` until GIC + interrupt-vector-table wiring lands —
+//!   see T-009 task notes. Reading the virtual counter (rather than the
+//!   physical `CNTPCT_EL0`) keeps the read side aligned with the
+//!   deferred deadline-arming side, which programs `CNTV_CVAL_EL0` /
+//!   `CNTV_CTL_EL0` per ADR-0010's references and ADR-0022's first-
+//!   rider sub-rider.
 //!
 //! # Safety overview
 //!
@@ -25,6 +30,7 @@
 
 use core::arch::{asm, naked_asm};
 
+use tyrne_hal::timer::{resolution_ns_for_freq, ticks_to_ns};
 use tyrne_hal::{ContextSwitch, CoreId, Cpu, IrqState, Timer};
 
 // ─── QemuVirtCpu ────────────────────────────────────────────────────────────
@@ -73,11 +79,19 @@ impl QemuVirtCpu {
     pub unsafe fn new() -> Self {
         let frequency_hz: u64;
         // SAFETY: `MRS x, CNTFRQ_EL0` is a non-privileged read of a read-only
-        // system register, available at EL1 unconditionally. It does not
-        // modify any state and has no side effects beyond stalling for the
-        // pipeline-defined number of cycles. Rejected alternatives: there is
-        // no safe-Rust way to read a system register; the HAL trait is the
-        // safe abstraction wrapping this access. Audit: UNSAFE-2026-0015.
+        // system register. Tyrne enters `kernel_entry` at EL1 per
+        // [ADR-0012] (QEMU virt drops the kernel to EL1 before execution;
+        // boot.s performs no EL transition). At EL1 in the non-VHE
+        // configuration the kernel runs in (HCR_EL2.{E2H, TGE} = {0, 0}),
+        // CNTFRQ_EL0 is unconditionally readable — the
+        // CNTHCTL_EL2.EL1PCTEN gating that exists in VHE mode does not
+        // apply here. The instruction does not modify any state;
+        // `options(nostack, nomem)` is correct (no stack pointer touch,
+        // no memory access). Rejected alternatives: there is no safe-Rust
+        // way to read a system register; the HAL `Timer` trait is the safe
+        // abstraction wrapping this access. Audit: UNSAFE-2026-0015.
+        //
+        // [ADR-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
         unsafe {
             asm!("mrs {}, cntfrq_el0", out(reg) frequency_hz, options(nostack, nomem));
         }
@@ -85,11 +99,7 @@ impl QemuVirtCpu {
             frequency_hz > 0,
             "CNTFRQ_EL0 reads as zero — firmware/emulator did not initialise the generic timer",
         );
-        // Integer division: sub-resolution precision is silently lost per
-        // ADR-0010's contract ("Deadlines round to the nearest multiple of
-        // this value; finer precision at the call site is silently lost").
-        // Cached to avoid the divide on every now_ns call.
-        let resolution_ns = 1_000_000_000_u64 / frequency_hz;
+        let resolution_ns = resolution_ns_for_freq(frequency_hz);
         Self {
             frequency_hz,
             resolution_ns,
@@ -109,22 +119,26 @@ impl QemuVirtCpu {
 // construction (`frequency_hz` and `resolution_ns`); afterwards it is
 // effectively immutable. It has no interior mutability and holds no
 // pointers. Sending it between threads is safe — the only shared hardware
-// resources (DAIF, the generic timer) are accessed via per-core system
-// registers that are inherently thread-local in a single-core system.
+// resources (DAIF, the generic timer's CNTVCT/CNTFRQ) are accessed via
+// per-core system registers that are inherently thread-local in a
+// single-core system.
 // Rejected alternatives: wrapping in a `Mutex` or `AtomicUsize` would add
 // overhead with no benefit — the cached fields never change after `new()`,
-// and DAIF / CNTPCT are per-core registers, not shared memory; there is
+// and DAIF / CNTVCT are per-core registers, not shared memory; there is
 // nothing to protect with a software lock.
+// The audit-log entry's body still describes the original zero-size shape
+// of `QemuVirtCpu`; the post-T-009 struct shape is recorded under the
+// 2026-04-23 Amendment block of UNSAFE-2026-0006 per unsafe-policy §3.
 // Audit: UNSAFE-2026-0006.
 unsafe impl Send for QemuVirtCpu {}
 
 // SAFETY: Same reasoning as the `Send` impl — no interior mutability after
-// construction; DAIF reads/writes and CNTPCT/CNTFRQ reads are atomic
+// construction; DAIF reads/writes and CNTVCT/CNTFRQ reads are atomic
 // per-core register operations. A `RefCell` or similar interior-mutability
 // wrapper would not help because the resource is a hardware register, not
 // a Rust data structure; the safe abstractions are already the `Cpu` and
 // `Timer` trait methods.
-// Audit: UNSAFE-2026-0006.
+// Audit: UNSAFE-2026-0006 (post-T-009 scope under the 2026-04-23 Amendment).
 unsafe impl Sync for QemuVirtCpu {}
 
 impl Cpu for QemuVirtCpu {
@@ -342,28 +356,37 @@ impl ContextSwitch for QemuVirtCpu {
 impl Timer for QemuVirtCpu {
     fn now_ns(&self) -> u64 {
         let count: u64;
-        // SAFETY: `MRS x, CNTPCT_EL0` is a non-privileged read of the system
-        // counter, available unconditionally at EL1 (the `EL0PCTEN` gating
-        // bit applies only to EL0 access). The instruction does not modify
-        // any state; `options(nostack, nomem)` is correct. Rejected
-        // alternatives: there is no safe-Rust way to read a system register;
-        // the `Timer` trait is the safe abstraction wrapping this MRS.
-        // Audit: UNSAFE-2026-0015.
+        // SAFETY: `MRS x, CNTVCT_EL0` is a non-privileged read of the
+        // virtual count register of the ARM Generic Timer. Tyrne reads the
+        // **virtual** counter (CNTVCT) rather than the physical one
+        // (CNTPCT) so the read side and the deferred deadline-arming side
+        // (`CNTV_CVAL_EL0` / `CNTV_CTL_EL0`, see ADR-0010 references and
+        // ADR-0022's first-rider sub-rider) live in the same register
+        // family. On QEMU virt with `CNTVOFF_EL2 = 0` the two counters
+        // coincide; using CNTVCT preserves correctness when a future boot
+        // path leaves a non-zero offset.
+        //
+        // EL access: at EL1 in the non-VHE configuration Tyrne runs in
+        // (per ADR-0012 the kernel enters at EL1 and boot.s performs no EL
+        // transition), CNTVCT_EL0 is unconditionally readable — the
+        // CNTHCTL_EL2.EL1VCTEN gating that exists in VHE mode does not
+        // apply here. The instruction does not modify any state;
+        // `options(nostack, nomem)` is correct.
+        //
+        // Rejected alternatives: there is no safe-Rust way to read a
+        // system register; the `Timer` trait is the safe abstraction
+        // wrapping this MRS. The `cortex-a` / `aarch64-cpu` crates would
+        // wrap a single MRS in a dependency, disproportionate per the
+        // dependency policy. Audit: UNSAFE-2026-0015.
         unsafe {
-            asm!("mrs {}, cntpct_el0", out(reg) count, options(nostack, nomem));
+            asm!("mrs {}, cntvct_el0", out(reg) count, options(nostack, nomem));
         }
-        // Overflow analysis: at the lowest realistic generic-timer frequency
-        // (1 MHz → resolution_ns = 1000), the multiplication `count *
-        // resolution_ns` overflows `u64` only when `count > u64::MAX /
-        // resolution_ns ≈ 1.8e16` ticks ≈ 18e9 seconds ≈ 584 years. At QEMU
-        // virt's 62.5 MHz (resolution_ns = 16) the margin is even larger:
-        // `2^60 / 16 = 2^60 ÷ 16` ticks ≈ 1.15e18 ticks ≈ 18.4 millennia.
-        // Within any practical kernel uptime, the multiply is overflow-free.
-        // Per ADR-0010 the trait promises monotonicity and the `count *
-        // resolution_ns` form preserves it as long as `count` is monotonic
-        // (which the hardware counter guarantees) and `resolution_ns` is a
-        // positive constant (which `new()` asserts).
-        count.wrapping_mul(self.resolution_ns)
+        // Conversion delegated to `ticks_to_ns` (host-testable). u128
+        // intermediate arithmetic: overflow-free for any tick count up to
+        // u64::MAX at any sane frequency. Saturating cast back to u64
+        // preserves ADR-0010's monotonicity at the rare ~584-year extreme
+        // (where ns would exceed u64::MAX) instead of wrapping to zero.
+        ticks_to_ns(count, self.frequency_hz)
     }
 
     fn arm_deadline(&self, _deadline_ns: u64) {
