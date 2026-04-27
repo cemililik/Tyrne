@@ -91,3 +91,20 @@ Pin: `cargo-llvm-cov 0.6.16` (matches CI per [docs/guides/ci.md](../../guides/ci
 ## Verdict
 
 T-011's coverage acceptance criteria are met without exception. The headline scheduler-coverage cliff identified in the baseline triage is closed; the long tail (BSP, MMU stub, post-switch defensive code) is correctly scoped to later phases.
+
+---
+
+## Follow-up note (added 2026-04-27, post-PR-#9 review-round 2)
+
+A second-pass review of T-011's tip flagged that the `cap/table.rs` numbers in the table above are now slightly stale relative to the actual post-fix tip. The drift is positive (coverage went up) and is the direct effect of the second review-round's `drop_first_child_…` test fix (commit `9a8e312`): the test was renamed-and-retargeted to drop `last` (the actual list head) instead of `first` (the list tail), which moved the exercised branch from mid-list to head-of-list in `unlink_from_siblings` and added a region not previously hit.
+
+Drift, measured against the post-fix tip:
+
+| File | This report | Post-fix observed | Δ |
+|---|---|---|---|
+| `kernel/src/cap/table.rs` regions | 97.46 % | 97.60 % | +0.14 pp |
+| Workspace regions | 96.33 % | 96.37 % | +0.04 pp |
+| `kernel/src/sched/mod.rs` regions | 93.97 % | 93.97 % | unchanged |
+| `kernel/src/ipc/mod.rs` regions | 97.86 % | 97.86 % | unchanged |
+
+Both AC gates remain comfortably met (sched ≥ 90 %, workspace ≥ 96 %); the shift just makes the existing margin slightly larger. The original tables above are intentionally not rewritten — the headline numbers describe the state at T-011's commit (`761af95`) and the post-fix delta lives here in this follow-up so the report stays a true historical artifact. A future B0-closure consolidated coverage rerun (in its own report) is the natural place to re-measure once T-008 / T-013 promote to Done.

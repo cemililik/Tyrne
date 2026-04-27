@@ -209,6 +209,10 @@ impl Scheduler {
 - **Task context initialisation.** How is a new task's initial `TaskContext` set up before it runs for the first time? The first `restore_context` must point at a known entry function. The ADR-0020 and the T-004 implementation will specify the initialisation convention; it is not settled here.
 - **Idle task.** With two tasks and cooperative scheduling, if both block on IPC simultaneously (a deadlock), the ready queue is empty and `yield_now` has nothing to run. A5 will panic in this case; a real idle task (spin-loop or WFI) is Phase B work.
 
+## Revision notes
+
+- **2026-04-27 — pointer to architecture doc.** [T-008](../analysis/tasks/phase-b/T-008-architecture-docs.md) created [`docs/architecture/scheduler.md`](../architecture/scheduler.md), which synthesises this ADR (FIFO ready queue + bounded arena), [ADR-0020](0020-cpu-trait-v2-context-switch.md) (`ContextSwitch` split), [ADR-0021](0021-raw-pointer-scheduler-ipc-bridge.md) (raw-pointer bridge), and [ADR-0022](0022-idle-task-and-typed-scheduler-deadlock.md) (idle task + `SchedError::Deadlock`) into a single readable picture of the scheduler's `how`. The ADR body is unchanged; this rider provides the bidirectional cross-reference T-008's DoD asks for. The "Idle task" open question above was settled by ADR-0022.
+
 ## References
 
 - [ADR-0017: IPC primitive set](0017-ipc-primitive-set.md) — the IPC layer this scheduler wires up.

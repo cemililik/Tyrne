@@ -18,7 +18,8 @@
  *          and ERET.
  *        - If CurrentEL is EL1 (QEMU virt's default), skip the drop.
  *        - If CurrentEL is EL3 (or any other unexpected value), halt
- *          via `wfe; b .-`. v1 has no EL3-aware infrastructure;
+ *          in the named-label `wfe`-loop (`halt_unsupported_el: wfe ;
+ *          b halt_unsupported_el`). v1 has no EL3-aware infrastructure;
  *          ADR-0024 §Open questions tracks the future EL3→EL2→EL1
  *          chain for hardware that requires it.
  *   3. Set the stack pointer to __stack_top (from linker.ld).

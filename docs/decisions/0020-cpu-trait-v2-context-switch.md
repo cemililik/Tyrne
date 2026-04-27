@@ -311,6 +311,10 @@ impl ContextSwitch for FakeCpu {
 - **FP / NEON context save.** Deferred to Phase B as noted above.
 - **Per-task kernel stack allocation.** Where do task stacks come from? In A5 they are static arrays allocated at link time (one per task, sized conservatively). A Phase B memory-management ADR will provide dynamic stack allocation.
 
+## Revision notes
+
+- **2026-04-27 — pointer to architecture doc.** [T-008](../analysis/tasks/phase-b/T-008-architecture-docs.md) added [`docs/architecture/scheduler.md`](../architecture/scheduler.md), which synthesises this ADR's `Cpu` / `ContextSwitch` split alongside [ADR-0019](0019-scheduler-shape.md) into a single readable picture. The ADR body is unchanged; this rider provides the bidirectional cross-reference T-008's DoD asks for.
+
 ## References
 
 - [ADR-0008: `Cpu` HAL trait signature (v1)](0008-cpu-trait.md) — the existing trait this ADR extends by addition.

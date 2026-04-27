@@ -209,6 +209,10 @@ The `notify` operation is non-blocking: it ORs bits into the `Notification` word
 - **CapRights bits for send / recv / notify.** T-003 adds `SEND`, `RECV`, and `NOTIFY` to `CapRights`. Their bit positions are implementation detail; they must not overlap existing bits (`DUPLICATE` = 0x1, `DERIVE` = 0x2, `REVOKE` = 0x4, `TRANSFER` = 0x8).
 - **Endpoint queue depth > 1.** `ENDPOINT_QUEUE_DEPTH = 1` for v1; a later ADR raises it if a real workload demands it.
 
+## Revision notes
+
+- **2026-04-27 — pointer to architecture doc.** [T-008](../analysis/tasks/phase-b/T-008-architecture-docs.md) created [`docs/architecture/ipc.md`](../architecture/ipc.md), which synthesises this ADR (three-primitive set, endpoint state machine, capability-transfer pre-flight) with [ADR-0021](0021-raw-pointer-scheduler-ipc-bridge.md) (the scheduler-bridge wrappers). The ADR body is unchanged; this rider provides the bidirectional cross-reference T-008's DoD asks for ("ADRs cited from architecture docs are the same ADRs whose §References sections cite the new architecture docs").
+
 ## References
 
 - [ADR-0001 — Capability-based microkernel architecture](0001-microkernel-architecture.md).

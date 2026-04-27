@@ -138,6 +138,10 @@ Each is a future ADR.
 - **`core::time::Duration` interop.** At what layer of the kernel (above the HAL) do we introduce `Instant` / `Duration` types? Possibly never — maybe the `u64` interface is enough forever. Revisit when scheduler grows.
 - **Deadline cancellation handle.** Should `arm_deadline` return a handle that `cancel_deadline_handle(h)` takes, for "I want to cancel *my* deadline, not whatever the scheduler armed last?" v1 assumes a single scheduler owner of the timer; multi-owner needs handles.
 
+## Revision notes
+
+- **2026-04-27 — pointer to architecture doc.** [T-008](../analysis/tasks/phase-b/T-008-architecture-docs.md) added a Timer subsection in [`docs/architecture/hal.md`](../architecture/hal.md) that synthesises this ADR with the post-T-009 implementation details (CNTVCT register-family choice, `tyrne_hal::timer` helper functions, IRQ-armed half deferred to T-012). The ADR body is unchanged; this rider provides the bidirectional cross-reference T-008's DoD asks for ("ADRs cited from architecture docs are the same ADRs whose §References sections cite the new architecture docs").
+
 ## References
 
 - [ADR-0006: Workspace layout](0006-workspace-layout.md).
