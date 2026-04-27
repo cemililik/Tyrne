@@ -21,18 +21,31 @@ The four boot stages, each with a tightly bounded responsibility:
 
 ```mermaid
 sequenceDiagram
-    participant QEMU as QEMU virt
+    participant QEMU as QEMU virt / firmware
     participant Asm as _start (asm stub)
     participant KE as kernel_entry (BSP, Rust)
     participant K as tyrne_kernel::run
     participant U as PL011 UART
 
-    QEMU->>Asm: PC = _start, DTB in x0 (ignored)
-    Asm->>Asm: SP ← __stack_top
-    Asm->>Asm: BSS zeroed (__bss_start..__bss_end)
-    Asm->>KE: bl kernel_entry
+    QEMU->>Asm: PC = _start, DTB in x0 (ignored), entry EL = 1 or 2
+    Note over Asm: Phase 1 — K3-12: msr daifset, #0xf<br/>(interrupts masked from very first instruction)
+    Note over Asm: Phase 2 — EL drop (per ADR-0024)<br/>read CurrentEL; mask bits[3:2]
+    alt CurrentEL == EL2
+        Asm->>Asm: configure HCR_EL2 (RW=1, E2H=0, TGE=0)
+        Asm->>Asm: SPSR_EL2 = EL1h | DAIF masked (0x3c5)
+        Asm->>Asm: ELR_EL2 = post_eret label; eret
+        Note over Asm: now at EL1, DAIF still masked
+    else CurrentEL == EL1
+        Note over Asm: fall through (no drop needed)
+    else CurrentEL == EL3 (unsupported)
+        Note over Asm: halt: wfe; b .-
+    end
+    Note over Asm: Phase 3 — conventional setup<br/>SP ← __stack_top<br/>CPACR_EL1.FPEN ← 0b11; isb<br/>BSS zeroed (__bss_start..__bss_end)
+    Asm->>KE: bl kernel_entry  (EL = 1, guaranteed)
+    Note over KE: T-009 / UNSAFE-2026-0016 asserts CurrentEL == 1<br/>as a load-bearing post-condition of Phase 2
+    KE->>KE: construct QemuVirtCpu (incl. CurrentEL self-check)
     KE->>KE: construct Pl011Uart at 0x0900_0000
-    KE->>K: call run(&console)
+    KE->>K: call run(&console, &cpu)
     K->>U: write_bytes(b"tyrne: hello from kernel_main\n")
     K->>K: spin_loop() idle
     Note over K: steady state (v0.0.1)
@@ -74,17 +87,17 @@ _start:
     mrs     x0, CurrentEL
     and     x0, x0, #(3 << 2)
     cmp     x0, #(2 << 2)
-    b.eq    el2_to_el1                ; EL2 → drop to EL1
+    b.eq    el2_to_el1                // EL2 → drop to EL1
     cmp     x0, #(1 << 2)
-    b.eq    post_eret                 ; already at EL1 → skip drop
-halt_unsupported_el:                  ; EL3 (or anything else) → halt
+    b.eq    post_eret                 // already at EL1 → skip drop
+halt_unsupported_el:                  // EL3 (or anything else) → halt
     wfe
     b       halt_unsupported_el
 
 el2_to_el1:
-    mov     x0, #(1 << 31)            ; HCR_EL2.RW = 1 (EL1 = aarch64); E2H/TGE = 0 (non-VHE)
+    mov     x0, #(1 << 31)            // HCR_EL2.RW = 1 (EL1 = aarch64); E2H/TGE = 0 (non-VHE)
     msr     hcr_el2, x0
-    mov     x0, #0x3c5                ; SPSR_EL2 = EL1h | DAIF masked
+    mov     x0, #0x3c5                // SPSR_EL2 = EL1h | DAIF masked
     msr     spsr_el2, x0
     adrp    x0, post_eret
     add     x0, x0, :lo12:post_eret
@@ -93,11 +106,11 @@ el2_to_el1:
 
 post_eret:
     /* (3) Conventional setup. From here on, EL is guaranteed = 1. */
-    adrp    x0, __stack_top           ; page-aligned base of the symbol
-    add     x0, x0, :lo12:__stack_top ; add the low 12 bits
-    mov     sp, x0                    ; set SP
+    adrp    x0, __stack_top           // page-aligned base of the symbol
+    add     x0, x0, :lo12:__stack_top // add the low 12 bits
+    mov     sp, x0                    // set SP
 
-    mov     x0, #0x300000             ; CPACR_EL1.FPEN = 0b11
+    mov     x0, #0x300000             // CPACR_EL1.FPEN = 0b11
     msr     cpacr_el1, x0
     isb
 
@@ -110,8 +123,8 @@ post_eret:
     str     xzr, [x0], #8
     b       0b
 
-1:  bl      kernel_entry              ; hand off to Rust
-2:  wfe                               ; defensive halt if we return
+1:  bl      kernel_entry              // hand off to Rust
+2:  wfe                               // defensive halt if we return
     b       2b
 ```
 

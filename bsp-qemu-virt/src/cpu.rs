@@ -23,7 +23,12 @@
 //! follows from the struct's invariants, and every inline-asm system-register
 //! read is a non-mutating MRS at EL1. See the individual `// SAFETY:` comments
 //! and the audit entries `UNSAFE-2026-0006` through `UNSAFE-2026-0009`, plus
-//! `UNSAFE-2026-0015` for the Timer-trait additions.
+//! `UNSAFE-2026-0015` for the Timer-trait additions and `UNSAFE-2026-0016`
+//! (boot-time `CurrentEL` self-check, with its T-013 Amendment recording the
+//! load-bearing-post-condition shift after ADR-0024). The `MRS CurrentEL` itself
+//! is now performed by the safe-Rust `tyrne_hal::cpu::current_el()` helper —
+//! audited under `UNSAFE-2026-0018` — rather than duplicated as an inline-asm
+//! block in this file.
 //!
 //! [ADR-0010]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0010-timer-trait.md
 //! [ADR-0020]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
@@ -88,14 +93,20 @@ impl QemuVirtCpu {
     /// values:
     ///
     /// - **`CurrentEL` is not EL1.** Tyrne expects `kernel_entry` to run
-    ///   at EL1 per [ADR-0012]; the assertion catches a future boot-flow
-    ///   change that leaves the kernel at EL2 / EL3 before any
-    ///   generic-timer MRS would silently misbehave. Audit: UNSAFE-2026-0016.
+    ///   at EL1 per [ADR-0012] / [ADR-0024]; the assertion catches a
+    ///   regression in `boot.s`'s EL drop sequence (or a future
+    ///   EL3-entry hardware target the v1 boot path does not handle)
+    ///   before any generic-timer MRS would silently misbehave. The
+    ///   read goes through `tyrne_hal::cpu::current_el()` (audited
+    ///   under UNSAFE-2026-0018); the assertion itself is audited
+    ///   under UNSAFE-2026-0016 (with its 2026-04-27 / T-013
+    ///   Amendment recording the load-bearing-post-condition shift).
     /// - **`CNTFRQ_EL0` reads as zero.** ARM ARM specifies firmware must
     ///   set this register; a zero value would make `now_ns` divide by
     ///   zero and `resolution_ns_for_freq` overflow. Audit: UNSAFE-2026-0015.
     ///
     /// [ADR-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+    /// [ADR-0024]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0024-el-drop-policy.md
     #[must_use]
     pub unsafe fn new() -> Self {
         // Runtime assertion of the ADR-0012 + ADR-0024 boot-time

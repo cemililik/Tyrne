@@ -153,14 +153,29 @@ impl<C: Cpu> Drop for IrqGuard<'_, C> {
 /// state, and `options(nostack, nomem)` is correct — there is no
 /// stack-pointer touch and no memory access. The function presents
 /// itself as `safe` because it upholds those invariants and returns a
-/// plain `u8`. Audit: UNSAFE-2026-0018.
+/// plain `u8`.
+///
+/// **Why `unsafe` is required:** there is no Rust intrinsic, `core`
+/// API, or stable safe primitive that exposes the `CurrentEL` system
+/// register; inline assembly is the only available primitive for this
+/// read on aarch64. Pulling a third-party crate (`aarch64-cpu` or
+/// similar) for a single MRS is disproportionate per the project's
+/// dependency policy. Audit: UNSAFE-2026-0018.
 #[cfg(all(target_arch = "aarch64", target_os = "none"))]
 #[must_use]
 pub fn current_el() -> u8 {
     let raw: u64;
-    // SAFETY: see the function-level safety paragraph above. The
-    // read of `CurrentEL` is non-privileged, side-effect-free, and
-    // available at every EL. Audit: UNSAFE-2026-0018.
+    // SAFETY: see the function-level safety paragraph above.
+    // (a) `unsafe` is required because aarch64 system-register reads
+    //     have no safe-Rust primitive; inline asm is the only path.
+    // (b) Invariants: `MRS x, CurrentEL` is non-privileged, side-
+    //     effect-free, and available at every EL ≥ 0;
+    //     `options(nostack, nomem)` accurately describes the lack
+    //     of stack and memory access.
+    // (c) Rejected alternatives: a `cortex-a` / `aarch64-cpu` crate
+    //     would wrap the same MRS but add a dependency for one
+    //     instruction (disproportionate per the dependency policy).
+    // Audit: UNSAFE-2026-0018.
     unsafe {
         core::arch::asm!(
             "mrs {}, CurrentEL",

@@ -1119,23 +1119,35 @@ mod tests {
         // still reaches the remaining children. Without the head-of-
         // list branch firing correctly, revoke would skip the new head
         // and the remaining children would leak.
+        //
+        // Note on list ordering: `cap_derive` *prepends* — each new
+        // child becomes the new head, with the previous head as its
+        // `next_sibling`. After the three derives below, the list head
+        // is `last` (most-recently-derived), then `middle`, then
+        // `first`. To exercise the head branch we therefore drop
+        // `last`, not `first` — the variable names track derivation
+        // order, not list position.
         let mut t = CapabilityTable::new();
         let root = t.insert_root(root_cap()).unwrap();
         let first = t.cap_derive(root, all_rights(), task_object(1)).unwrap();
         let middle = t.cap_derive(root, all_rights(), task_object(2)).unwrap();
         let last = t.cap_derive(root, all_rights(), task_object(3)).unwrap();
 
-        // Drop the head of the child list.
-        t.cap_drop(first).unwrap();
-        assert_eq!(t.lookup(first).unwrap_err(), CapError::InvalidHandle);
+        // Drop the head of the child list (= the most-recently-derived
+        // entry, `last`, by the prepend rule above).
+        t.cap_drop(last).unwrap();
+        assert_eq!(t.lookup(last).unwrap_err(), CapError::InvalidHandle);
+        assert!(
+            t.lookup(first).is_ok(),
+            "first-derived child still reachable"
+        );
         assert!(t.lookup(middle).is_ok(), "middle child still reachable");
-        assert!(t.lookup(last).is_ok(), "last child still reachable");
 
         // If `unlink_from_siblings` left `parent.first_child` pointing at
         // the freed slot, revoke would walk into a dead entry and miss
         // the surviving children. Both must be revoked by the BFS.
         t.cap_revoke(root).unwrap();
+        assert_eq!(t.lookup(first).unwrap_err(), CapError::InvalidHandle);
         assert_eq!(t.lookup(middle).unwrap_err(), CapError::InvalidHandle);
-        assert_eq!(t.lookup(last).unwrap_err(), CapError::InvalidHandle);
     }
 }

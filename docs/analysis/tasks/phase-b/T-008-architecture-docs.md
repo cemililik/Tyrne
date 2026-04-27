@@ -108,7 +108,7 @@ Beyond the acceptance criteria:
 - [`docs/standards/documentation-style.md`](../../../standards/documentation-style.md) — required reading before writing.
 - [`docs/architecture/overview.md`](../../../architecture/overview.md) — outer-shape doc the new docs link back to.
 - [`docs/architecture/hal.md`](../../../architecture/hal.md) — receives the Timer subsection update.
-- [T-004 user story](T-004-scheduler-and-context-switch.md) — scheduler implementation.
+- [T-004 user story](../phase-a/T-004-cooperative-scheduler.md) — scheduler implementation.
 - [T-006 user story](T-006-raw-pointer-scheduler-api.md) — raw-pointer bridge implementation.
 - [T-009 user story](T-009-timer-init-cntvct.md) — Timer implementation.
 

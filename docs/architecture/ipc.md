@@ -9,7 +9,7 @@ Three Accepted ADRs and one Phase-A task fix the IPC design:
 - [ADR-0017: IPC primitive set](../decisions/0017-ipc-primitive-set.md) — Tyrne offers exactly three primitives: synchronous `ipc_send`, synchronous `ipc_recv`, and non-blocking `ipc_notify`. No reply-recv composite primitive in v1.
 - [ADR-0018: Badge scheme and reply-recv deferral](../decisions/0018-badge-scheme-and-reply-recv-deferral.md) — endpoint badge handling and the deferral of seL4-style `reply_recv` to a later phase.
 - [ADR-0021: Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — the scheduler-side wrapper functions that block / yield / resume around the IPC primitives. The discipline behind the wrappers is summarised in [`scheduler.md`](scheduler.md) §"The raw-pointer bridge".
-- [T-003 (Phase A IPC primitive set)](../analysis/tasks/phase-a/T-003-ipc-primitive-set.md) and [T-005 (two-task IPC demo)](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) shipped the implementation; [T-006](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) refactored the scheduler-side wrapper.
+- [T-003 (Phase A IPC primitive set)](../analysis/tasks/phase-a/T-003-ipc-primitives.md) and [T-005 (two-task IPC demo)](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) shipped the implementation; [T-006](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) refactored the scheduler-side wrapper.
 
 Why a custom IPC layer rather than reusing a port from another microkernel? ADR-0017 §"Decision drivers" enumerates: capability-system interaction (capabilities must move atomically with messages, which most ports do not), tight kernel-object coupling (endpoints share their state machine with the scheduler's wake path), and audit-friendliness (the entire IPC surface fits in one ~990-line file under `unsafe-policy.md` review).
 
@@ -23,7 +23,7 @@ Why a custom IPC layer rather than reusing a port from another microkernel? ADR-
 | `ipc_recv(ep_arena, queues, ep_cap, table)` | Receive a message; collect a transferred cap if present. | Non-blocking at the kernel level; the scheduler's wrapper (`ipc_recv_and_yield`) blocks the caller when no message is ready. | `RecvOutcome::{Received { msg, cap }, Pending}` or `IpcError`. |
 | `ipc_notify(notif_arena, notif_cap, table, bits)` | OR `bits` into a `Notification`'s saturating word. | Always non-blocking; no waiter wake-up in v1. | `()` or `IpcError`. |
 
-The three are free functions in `kernel/src/ipc/mod.rs`; they take the arenas and the caller's capability table by `&mut`. They never block on their own — blocking is the scheduler-bridge wrapper's job. This separation lets host tests exercise the IPC state machine without booting a scheduler ([T-003](../analysis/tasks/phase-a/T-003-ipc-primitive-set.md) wrote the bulk of the existing IPC tests this way).
+The three are free functions in `kernel/src/ipc/mod.rs`; they take the arenas and the caller's capability table by `&mut`. They never block on their own — blocking is the scheduler-bridge wrapper's job. This separation lets host tests exercise the IPC state machine without booting a scheduler ([T-003](../analysis/tasks/phase-a/T-003-ipc-primitives.md) wrote the bulk of the existing IPC tests this way).
 
 ### `Endpoint` and its state machine
 
@@ -95,7 +95,7 @@ IpcError::ReceiverTableFull     // pre-flight: receiver's cap table has no free 
 IpcError::PendingAfterResume    // scheduler-bridge invariant violation; see scheduler.md
 ```
 
-The taxonomy is closed and `#[non_exhaustive]` so a future variant cannot silently break callers. `PendingAfterResume` is special: it is produced *only* by the scheduler bridge's resume path, never by the bare `ipc_recv` primitive, and it indicates a kernel-internal invariant violation rather than a userspace-reachable error. ADR-0022 §Revision notes (second rider) records why the typed return replaces a `debug_assert!` that was untestable.
+The enum is annotated `#[non_exhaustive]`, which deliberately *opens* it for future extension: external matches must include a wildcard arm, so new variants can be added without silently breaking callers. `PendingAfterResume` is special among the variants — it is produced *only* by the scheduler bridge's resume path, never by the bare `ipc_recv` primitive, and it indicates a kernel-internal invariant violation rather than a userspace-reachable error. ADR-0022 §Revision notes (second rider) records why the typed return replaces a `debug_assert!` that was untestable.
 
 ### The scheduler-bridge wrappers
 
@@ -134,7 +134,7 @@ The BSP calls the wrappers through `*mut Scheduler<C>`, `*mut EndpointArena`, `*
 1. **Single derivation per pointer.** Re-borrowing through `core::ptr::from_mut(&mut x)` twice on the same referent invalidates the earlier pointer's Stacked-Borrows tag. The BSP must hand each pointer to the wrapper exactly once and must not interleave a `&mut x` borrow that would re-tag. UNSAFE-2026-0014 captures the audit context.
 2. **`StaticCell::as_mut_ptr` for the arena pointers.** The BSP's static-cell helpers expose `as_mut_ptr` instead of letting the caller materialise a `&mut`. UNSAFE-2026-0013 documents the helper's safety contract.
 
-The discipline is mechanical and is verified at host-test time by Miri's Stacked Borrows checker (currently 143/143 clean across the workspace per [the 2026-04-27 coverage rerun](../analysis/reports/2026-04-27-coverage-rerun.md)). The two-task demo's `task_a` and `task_b` ([`bsp-qemu-virt/src/lib.rs`](../../bsp-qemu-virt/src/lib.rs)) are the canonical reference for the discipline.
+The discipline is mechanical and is verified at host-test time by Miri's Stacked Borrows checker (currently 143/143 clean across the workspace per [the 2026-04-27 coverage rerun](../analysis/reports/2026-04-27-coverage-rerun.md)). The two-task demo's `task_a` and `task_b` ([`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs)) are the canonical reference for the discipline.
 
 ## Invariants
 
@@ -165,7 +165,7 @@ The discipline is mechanical and is verified at host-test time by Miri's Stacked
 - [ADR-0018 — Badge scheme and reply-recv deferral](../decisions/0018-badge-scheme-and-reply-recv-deferral.md) — endpoint badge design + reasons to defer `reply_recv`.
 - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — the bridge's raw-pointer shape.
 - [`docs/architecture/scheduler.md`](scheduler.md) — what the bridge does on the scheduler side.
-- [T-003 — IPC primitive set](../analysis/tasks/phase-a/T-003-ipc-primitive-set.md) — the original implementation arc.
+- [T-003 — IPC primitive set](../analysis/tasks/phase-a/T-003-ipc-primitives.md) — the original implementation arc.
 - [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — the BSP-side reference implementation.
 - [T-006 — Raw-pointer scheduler API refactor](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — the move from `&mut self` to raw-pointer wrappers.
 - [T-011 — Missing tests bundle](../analysis/tasks/phase-b/T-011-missing-tests-bundle.md) — the targeted coverage additions for IPC.
