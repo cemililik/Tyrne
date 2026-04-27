@@ -5,8 +5,8 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 ---
 
 - **Active phase:** B — opened 2026-04-21. First milestone B0 in progress.
-- **Active milestone:** B0 — Phase A exit hygiene (T-006, T-007, T-009 **Done** 2026-04-27 per independent-agent approval review; T-011 Draft → ready to start; T-008 remains to open). B1 — Drop to EL1 + exception infrastructure (T-012 Draft, T-013 Draft; ADR-0024 **Accepted** 2026-04-27, T-013 unblocked).
-- **Active task:** None — three tasks just promoted to Done. Next: T-008 (architecture docs) opening, OR T-011 (missing tests) flipping to In Progress now that dependencies clear.
+- **Active milestone:** B0 — Phase A exit hygiene (T-006, T-007, T-009 **Done** 2026-04-27 per independent-agent approval review; T-008 **Draft** opened 2026-04-27; T-011 Draft → ready to start). B1 — Drop to EL1 + exception infrastructure (T-012 Draft, T-013 Draft; ADR-0024 **Accepted** 2026-04-27, T-013 unblocked).
+- **Active task:** None — three tasks just promoted to Done; T-008 newly opened as Draft. Next: T-011 (missing tests) flipping to In Progress, OR T-008 (architecture docs) flipping from Draft to In Progress, OR T-013 (EL drop) starting now that ADR-0024 is Accepted.
 - **In review:** none.
 - **Working branch:** `development`.
 - **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.** B0 closure pending T-008 and T-011.
@@ -24,7 +24,7 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
   - [ADR-0022 — Idle task and typed scheduler deadlock error](../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — `Accepted` (2026-04-22). Implemented by T-007. First rider's WFI activation gated on T-012; T-009 closes only the time-source half.
   - [ADR-0024 — EL drop to EL1 policy](../decisions/0024-el-drop-policy.md) — `Accepted` (2026-04-27). Implemented by T-013 (B1, Draft, now unblocked). First ADR to use ADR-0025's *Dependency chain* section in production; same-day Accept after careful re-read per [ADR-0025 §Revision notes](../decisions/0025-adr-governance-amendments.md) (cool-down rule withdrawn pre-Accept).
   - [ADR-0025 — ADR governance amendments](../decisions/0025-adr-governance-amendments.md) — `Accepted` (2026-04-27). Two normative rules for ADR drafting: (§Rule 1) every forward-reference points at a real T-NNN, (§Rule 2) riders are not failures — their *frequency* is the signal. Cool-down rule withdrawn pre-Accept on maintainer feedback; substance preserved in the write-adr skill's careful-re-read step.
-- **Next task to open:** T-008 (architecture docs) — last B0 task without a file. T-011 promotes from `Draft` to `In Progress` once T-006 and T-007 are `Done`.
+- **Next task to open:** none — every B0 task now has a file (T-008 opened 2026-04-27; T-011 already Draft). Next status flip: T-011 → `In Progress`, T-008 → `In Progress`, or T-013 → `In Progress` (any of the three is unblocked).
 - **Next review trigger:** B0 closure — a full business review once T-006..T-011 are all Done. (T-006 mini-retro filed 2026-04-22.)
 
 ## Notes

@@ -51,7 +51,7 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 
 - [T-006 — Raw-pointer scheduler API refactor + TaskArena global migration](../../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — Done (2026-04-27)
 - [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — Done (2026-04-27)
-- T-008 — Architecture docs for kernel-objects / IPC / scheduler *(not yet opened)*
+- [T-008 — Architecture docs (scheduler.md + ipc.md + hal.md/overview.md updates)](../../analysis/tasks/phase-b/T-008-architecture-docs.md) — Draft (opened 2026-04-27)
 - [T-009 — Timer init + `CNTVCT_EL0` measurement](../../analysis/tasks/phase-b/T-009-timer-init-cntvct.md) — Done (2026-04-27)
 - T-010 — (optional) Split of T-007 if ADR-0022 scope grows past one task *(not yet opened)*
 - [T-011 — Missing tests bundle](../../analysis/tasks/phase-b/T-011-missing-tests-bundle.md) — Draft (opened 2026-04-23)
