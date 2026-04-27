@@ -1,0 +1,108 @@
+# T-012 — Exception infrastructure and interrupt delivery
+
+- **Phase:** B
+- **Milestone:** B1 — Drop to EL1 in boot, install exception infrastructure
+- **Status:** Draft
+- **Created:** 2026-04-27
+- **Author:** @cemililik (+ Claude Opus 4.7 agent)
+- **Dependencies:** [T-009](T-009-timer-init-cntpct.md) (`In Review`, time-source half of `Timer` impl) — T-012 builds on it for the deadline-arming half. ADR-0024 (EL drop policy, B1 sub-item 1) must be `Accepted` before T-012 lands its boot-side `VBAR_EL1` install.
+- **Informs:** Closes the deferred halves of [ADR-0010](../../../decisions/0010-timer-trait.md) (`arm_deadline` / `cancel_deadline`) and [ADR-0022](../../../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) first rider (idle's WFI activation). Unblocks every later milestone that needs preemption, periodic ticks, or any IRQ-driven work.
+- **ADRs required:** No new ADR for the GIC driver pattern (covered by [ADR-0011](../../../decisions/0011-irq-controller-trait.md), already `Accepted`). A small ADR — likely **ADR-0026** — may be needed for the exception-vector-table / handler-dispatch shape if non-obvious choices arise during implementation; that ADR is in scope of T-012 if it becomes necessary.
+
+---
+
+## User story
+
+As the Tyrne kernel running on QEMU virt aarch64, I want a working exception vector table at `VBAR_EL1`, a configured GIC v2 controller, a generic-timer IRQ wired through to a handler, and `Timer::arm_deadline` / `cancel_deadline` as real implementations — so that `arm_deadline` actually fires IRQs at the requested time, idle's body can move from `core::hint::spin_loop()` to `cpu.wait_for_interrupt()` (closing ADR-0022's first rider), and every later Phase B milestone can rely on an interrupt-driven kernel rather than a pure-cooperative one.
+
+## Context
+
+Phase A and B0 shipped a kernel that does not handle interrupts. Boot at EL1 with DAIF masked; cooperative scheduler that requires every task to `yield_now`; idle that spin-yields because there is no IRQ source to wake `wfi` from (per ADR-0022 first rider's empirically-confirmed hang). This is correct for v1's two-task IPC demo, but every later Phase B feature — preemptive scheduling, periodic ticks, deadline-driven `time_sleep_until` syscalls, eventually userspace SVC handling — depends on the kernel knowing how to receive an interrupt and dispatch it.
+
+T-012 lands the missing infrastructure in one bundle:
+
+1. **GIC v2 driver** for QEMU virt's interrupt controller. Distributor and CPU interface MMIO programming. Per ADR-0011's [`IrqController`](../../../../hal/src/irq_controller.rs) trait the BSP gains a `QemuVirtGic` (or equivalent) impl.
+2. **Exception vector table install at `VBAR_EL1`** with the 16 standard aarch64 vector entries (4 categories × 4 EL/SP combinations). Each entry trampolines to a Rust handler with a known register frame.
+3. **Generic-timer IRQ routing** — enable the timer's IRQ line at the GIC, install a handler that recognises the timer-IRQ ID, and make `Timer::arm_deadline` / `cancel_deadline` real implementations (writing `CNTV_CVAL_EL0` + `CNTV_CTL_EL0`, marking the GIC line enabled / disabled).
+4. **Idle's WFI activation.** `idle_entry`'s body becomes `cpu.wait_for_interrupt(); yield_now(...)`. Closes ADR-0022 first rider's "Sub-rider — WFI activation requires *two* tasks" gate. The timer needs a periodic re-arm (the handler's job) so WFI has a wake source.
+5. **The audit-log surface this opens.** `VBAR_EL1` write, GIC MMIO reads/writes, `CNTV_CTL_EL0` / `CNTV_CVAL_EL0` writes, exception-vector inline-asm trampolines — likely 3–5 new audit entries (`UNSAFE-2026-0017` and onwards), each shaped per the project's `unsafe-policy.md`.
+
+This task is **substantial** — comparable in size to T-006 + T-007 combined, possibly larger. If during implementation the scope grows past one sensible commit arc, T-012 splits into T-012a (GIC + vector table install, no IRQs delivered yet) and T-012b (timer-IRQ + arm_deadline + WFI activation), per the new ADR-0013 §"Forward-reference contract" / dependency-chain rule that says forward-references must be grounded.
+
+## Acceptance criteria
+
+The criteria below cover T-012's full scope. If a T-012a / T-012b split happens during implementation, the criteria divide cleanly: items 1–3 belong to a, items 4–7 belong to b.
+
+- [ ] **GIC v2 driver in `bsp-qemu-virt`.** A new module (e.g. `bsp-qemu-virt/src/gic.rs`) implements the [`IrqController`](../../../../hal/src/irq_controller.rs) trait against QEMU virt's GIC v2 MMIO base. Distributor (`GICD_*`) and CPU interface (`GICC_*`) registers handled per ARM GICv2 architecture spec. `enable_irq` / `disable_irq` / `acknowledge` / `end_of_interrupt` all work.
+- [ ] **`VBAR_EL1` install** at the head of `kernel_entry` (or in `boot.s` before the C-ABI handoff). 16-entry vector table assembled per the aarch64 layout; each entry routes to a Rust handler with a saved-register frame.
+- [ ] **Generic-timer IRQ wired.** `arm_deadline(deadline_ns)` programs `CNTV_CVAL_EL0` (translated from ns to ticks via the inverse of `ticks_to_ns`) and sets `CNTV_CTL_EL0.ENABLE = 1, IMASK = 0`; `cancel_deadline` clears `ENABLE` and the GIC line. The handler decodes the IRQ, calls a scheduler hook, and EOIs to the GIC. **`unimplemented!()` panics in `<QemuVirtCpu as Timer>` removed.**
+- [ ] **Idle's WFI activation.** [`bsp-qemu-virt/src/main.rs::idle_entry`](../../../../bsp-qemu-virt/src/main.rs)'s body becomes `cpu.wait_for_interrupt(); sched::yield_now(...)`. ADR-0022 first rider's *Sub-rider* condition met; idle now consumes near-zero CPU. QEMU smoke trace remains the same five A6 lines + the T-009 timer banner + the T-009 boot-to-end measurement.
+- [ ] **Audit entries.** Each new `unsafe` block has a `// SAFETY:` comment that lists invariants + rejected alternatives + audit tag (per `unsafe-policy.md` §1). New audit-log entries — likely `UNSAFE-2026-0017` (VBAR_EL1 install), `0018` (GIC MMIO surface), `0019` (vector-table inline asm), `0020` (CNTV_CTL/CVAL writes) — written append-only.
+- [ ] **Tests.**
+  - Host: a `FakeIrqController` in `tyrne-test-hal` implementing `IrqController` so kernel-side handler-dispatch logic can be exercised without QEMU.
+  - QEMU smoke: a deliberate `arm_deadline(now + 100ms)` test path (gated behind a `cfg(...)` or a debug task entry) confirms the IRQ fires and the handler runs.
+- [ ] **Documentation:** ADR-0011 cross-references; new architecture doc `docs/architecture/exceptions.md` — or a section in T-008's `scheduler.md` — explaining the vector-table layout, dispatch flow, and the GIC programming sequence; ADR-0022 first rider's *Sub-rider* updated with "closed by T-012, commit `<sha>`"; ADR-0010 `arm_deadline` / `cancel_deadline` notes updated to reference real implementation.
+- [ ] **No regression.** 126 host tests + Miri 124 + QEMU smoke all stay green.
+
+## Out of scope
+
+- **GIC v3** — QEMU virt's default is GIC v2; v3 is a future BSP concern (the Pi 4's GICv2 is also v2-class).
+- **Multi-core IRQ delivery** — single-core only; per-CPU interfaces (GICR for v3, banked SGIs for v2) are Phase C / SMP work.
+- **Userspace IRQ delivery** — IRQs land in the kernel only; routing them to userspace tasks is Phase C / capability-system work.
+- **PMU / SError / FIQ infrastructure** beyond the minimum the vector table requires — only the IRQ category gets a real handler in T-012; SError and FIQ entries trampoline to a kernel-panic path. PMU is its own task whenever performance-counter work lands.
+- **Periodic-tick scheduler integration** — T-012 wires `arm_deadline` so the scheduler *can* arm a tick, but T-012 itself does not introduce a scheduler-tick loop. That is preemption-design work, a separate task. T-012 only has to demonstrate the primitive works.
+- **Architecture doc fully replacing T-008's `scheduler.md`** — T-012 may add `exceptions.md` if natural; but the broader architecture-docs task (T-008) is its own scope.
+
+## Approach
+
+In commit order — sequence chosen so each step is testable on its own and the scheduler invariants stay intact:
+
+1. **GIC v2 driver, no IRQs delivered yet.** Add `bsp-qemu-virt/src/gic.rs`. Implement `IrqController` against QEMU virt's GICD / GICC MMIO bases. `disable_irq` everything by default. Smoke test: kernel still boots, no IRQs fire (because none are enabled at the GIC and `DAIF` is masked anyway).
+2. **`VBAR_EL1` install + minimum vector table.** All 16 entries route to a `panic!("unhandled exception N")` Rust handler. Smoke test: kernel still boots; no IRQ lands because none enabled.
+3. **Unmask `DAIF.I` after vector table is installed.** Now IRQs can fire — but none are enabled at the GIC, so still no fires. Smoke test: still boots.
+4. **Generic-timer IRQ → real `arm_deadline` / `cancel_deadline`.** GIC enable for the timer-IRQ ID; vector-table handler recognises the timer interrupt; calls a scheduler hook (`sched::on_timer_irq` — to be added). Test: a debug task arms a deadline 100 ms out, asserts the handler ran.
+5. **Idle's WFI activation.** `idle_entry` body switched. Smoke test: A6 trace still produced; CPU usage in idle goes from 100 % spin to near-0 % (visible via QEMU `wallclock` or by noting the trace timing changes minimally).
+6. **Audit-log entries + SAFETY comments + new unit tests** in step with each commit, not bundled at the end.
+7. **Documentation sweep** — ADR-0010 cross-references, ADR-0022 sub-rider closure note, optional `docs/architecture/exceptions.md`.
+
+## Definition of done
+
+- [ ] `cargo fmt --all -- --check` clean.
+- [ ] `cargo host-clippy` clean with `-D warnings`.
+- [ ] `cargo kernel-clippy` clean.
+- [ ] `cargo host-test` passes (T-012 adds host tests for `FakeIrqController` and any handler-dispatch logic that doesn't need real hardware — expected ≥ 130 tests).
+- [ ] `cargo +nightly miri test --workspace --exclude tyrne-bsp-qemu-virt` passes.
+- [ ] `cargo kernel-build` clean.
+- [ ] QEMU smoke reproduces the eight-line trace from T-009 and additionally completes the deliberate-deadline test path (when enabled).
+- [ ] No new `unsafe` block without an audit entry; new entries (UNSAFE-2026-0017+) cited from every introducing site.
+- [ ] Commit messages follow [`commit-style.md`](../../../standards/commit-style.md) with `Refs: ADR-0010, ADR-0011, ADR-0022` trailers and `Audit:` trailers per affected entry.
+- [ ] **No `unimplemented!()` left in `<QemuVirtCpu as Timer>`.**
+- [ ] **`idle_entry` body uses `wait_for_interrupt`, not `spin_loop`.**
+- [ ] Task status updated to `In Review`; ADR-0022 first rider's *Sub-rider* gains a closure paragraph; [`docs/roadmap/current.md`](../../../roadmap/current.md) updated.
+
+## Design notes
+
+- **Why one task for so much?** GIC driver, vector table, IRQ routing, and idle-WFI activation form a single shippable capability ("kernel can take an interrupt"). Splitting them earlier would produce intermediate states where the kernel is half-IRQ-aware and harder to reason about. Splitting may still happen during implementation if scope balloons, but the default is one task.
+- **Why IrqController already exists in HAL but no impl until now?** ADR-0011 was accepted alongside the other HAL traits in Phase 4b but the QEMU smoke didn't need IRQs through Phase A or B0. T-012 produces the first real impl.
+- **Why GIC v2 not v3?** QEMU virt defaults to GICv2 unless `-machine gic-version=3` is specified. The Pi 4 (BCM2711) is also GICv2-class. v3 work joins the picture if a v3 BSP target appears.
+- **Why generic-timer IRQ rather than the PL011 RX IRQ first?** Two reasons: (a) `Timer::arm_deadline` is a deferred contract Tyrne already promised (ADR-0010) and finishing it is higher value than UART IRQ-driven RX (which has no caller yet); (b) idle's WFI activation gates on the timer specifically (ADR-0022 first rider). UART IRQs are a future task whenever console RX matters.
+- **Risk: GIC misconfiguration silently drops IRQs.** Mitigation: the deliberate-deadline smoke test in step 4 of §Approach is the integration check. If `arm_deadline(now + 100ms)` does not fire within ~150 ms of wall time, something is wrong with GIC config or vector wiring; debug before moving on.
+- **Connection to T-006's "trace the call graph" lesson.** Every new unsafe block in T-012 must trace its call graph for `&mut`-across-context-switch hazards (ADR-0021). Specifically: an interrupt arriving inside an `ipc_send_and_yield` call would re-enter the scheduler from a context where a `&mut Scheduler` is alive on a different task's frame. The handler-dispatch code must take this seriously — possibly via the same raw-pointer discipline ADR-0021 imposed on the cooperative bridge. Likely an ADR-0021 **Amendment** (not a new ADR — same shared-state aliasing concern, same chosen solution shape) when the IRQ handler's interaction with scheduler state is wired.
+
+## References
+
+- [ADR-0010 — Timer HAL trait](../../../decisions/0010-timer-trait.md) — defines `arm_deadline` / `cancel_deadline` semantics this task implements for real.
+- [ADR-0011 — IrqController HAL trait](../../../decisions/0011-irq-controller-trait.md) — defines the trait this task's `QemuVirtGic` implements.
+- [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../../../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — the aliasing discipline the IRQ handler must extend (likely via Amendment).
+- [ADR-0022 — Idle task + typed scheduler deadlock](../../../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — first rider's *Sub-rider* names this task as the trigger for WFI activation.
+- [T-009 task file](T-009-timer-init-cntpct.md) — the time-source half this task builds on.
+- [UNSAFE-2026-0007](../../../audits/unsafe-log.md) — precedent for inline-asm system-register reads at EL1.
+- ARM *Architecture Reference Manual* DDI 0487G.b — exception-vector layout, generic-timer compare registers, `VBAR_EL1`.
+- ARM *Generic Interrupt Controller v2 Architecture Specification* (IHI 0048B).
+- QEMU virt machine source / device tree — for MMIO base addresses (`0x0800_0000` distributor, `0x0801_0000` CPU interface on QEMU virt's default).
+
+## Review history
+
+| Date | Reviewer | Note |
+|------|----------|------|
+| 2026-04-27 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft` per the new ADR-0013 §"Forward-reference contract" rule (ADR-0022 first rider's *Sub-rider* names a "future, not-yet-opened IRQ-wiring task"; this file grounds that reference). Scope deliberately broad — single bundled task that delivers "kernel can take an interrupt" as one shippable capability. May split into T-012a / T-012b during implementation if scope balloons. Phase-b.md §B1 sub-breakdown extended with item 5 referencing this file; B1's title is now "Drop to EL1 in boot, install exception infrastructure" reflecting the scope expansion. Status will move to `In Progress` only after T-006 / T-007 / T-009 are promoted to `Done` and ADR-0024 (B1 sub-item 1) is `Accepted`. |

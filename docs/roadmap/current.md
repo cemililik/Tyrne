@@ -5,8 +5,8 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 ---
 
 - **Active phase:** B — opened 2026-04-21. First milestone B0 in progress.
-- **Active milestone:** B0 — Phase A exit hygiene. T-006, T-007, and T-009 are in review; T-011 is Draft; T-008 remains to open.
-- **Active task:** None — T-009 moved to `In Review` 2026-04-23. Next: T-008 (architecture docs) when opened, or T-011 (missing tests) once dependent tasks reach `Done`.
+- **Active milestone:** B0 — Phase A exit hygiene (T-006, T-007, T-009 In Review; T-011 Draft; T-008 remains to open). B1 — Drop to EL1 + exception infrastructure (T-012 Draft, opened 2026-04-27 to ground ADR-0022 first rider's previously-handwaved IRQ-wiring forward-reference per ADR-0013 §"Forward-reference contract").
+- **Active task:** None. Next: T-008 (architecture docs) when opened, T-011 (missing tests) once dependent tasks reach `Done`, or T-012 (exception infrastructure) once ADR-0024 is `Accepted`.
 - **In review:**
   - [T-006 — Raw-pointer scheduler API refactor](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — `In Review` since 2026-04-22.
   - [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — `In Review` since 2026-04-22; implements ADR-0022.

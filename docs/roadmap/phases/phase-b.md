@@ -68,16 +68,19 @@ B1 / B2 / B3 all depend on a panic-free scheduler and a non-UB aliasing story. B
 
 ---
 
-## Milestone B1 — Drop to EL1 in boot
+## Milestone B1 — Drop to EL1 in boot, install exception infrastructure
 
 Extend the BSP reset stub so that when QEMU delivers us at EL2, we configure `HCR_EL2`, `SPSR_EL2`, `ELR_EL2`, and issue `ERET` to land in EL1. When QEMU delivers at EL1, the stub is a no-op on that axis.
+
+The scope of this milestone was extended on 2026-04-27 (after T-009 closed the time-source half of `Timer`) to include the *exception delivery infrastructure* that ADR-0022's first-rider sub-rider gated on. Concretely: GIC v2 distributor / redistributor / interface configuration on QEMU virt, an `EL1` exception vector table install at `VBAR_EL1`, a thin handler-dispatch loop, and the generic-timer-IRQ wiring that lets `Timer::arm_deadline` actually fire interrupts. Without this work, `arm_deadline` / `cancel_deadline` remain `unimplemented!()` and idle's body cannot move from `spin_loop` to `wfi`.
 
 ### Sub-breakdown
 
 1. **ADR-0024 — EL drop policy.** Always-to-EL1 vs. keep-whichever. When does the drop happen (earliest possible; before `kernel_main`). How do we handle the case where the drop fails (panic).
 2. **Asm extension** in `bsp-qemu-virt/src/boot.s` for EL2→EL1 transition. **Bundle K3-12:** add an explicit `msr daifset, #0xf` at the top of `_start` as a BSP reset-vector standard per the [BSP boot checklist](../../standards/bsp-boot-checklist.md) update.
-3. **Rust helpers** for reading current EL (`CurrentEL` system register); probably a new method on `Cpu` or a free function.
+3. **Rust helpers** for reading current EL (`CurrentEL` system register); probably a new method on `Cpu` or a free function. (T-009 already shipped the inline-asm pattern in `QemuVirtCpu::new`'s self-check, audited under UNSAFE-2026-0016 — this sub-item formalises it as a HAL-level method.)
 4. **Tests** — boot at EL1 under QEMU (default) and at EL2 (via `-machine virtualization=on`) and verify both land at EL1 in `kernel_entry`.
+5. **Exception infrastructure and interrupt delivery** — covered by [T-012](../../analysis/tasks/phase-b/T-012-exception-and-irq-infrastructure.md). Closes the deferred halves of ADR-0010 (`Timer::arm_deadline` / `cancel_deadline`) and ADR-0022 first rider (idle's WFI activation). Substantial scope; may split into T-012a / T-012b if scope balloons during implementation per the new ADR-0013 dependency-chain rule.
 
 ### Acceptance criteria
 
@@ -86,6 +89,7 @@ Extend the BSP reset stub so that when QEMU delivers us at EL2, we configure `HC
 - Smoke test boots both QEMU variants and asserts the greeting still appears.
 - `boot.s` starts with explicit IRQ masking.
 - BSP boot checklist updated with the "mask DAIF before anything else" rule.
+- **T-012 closed:** `arm_deadline` fires real IRQs through the GIC; `idle_entry`'s body is `wait_for_interrupt` + `yield_now` (closing ADR-0022's first rider in full).
 
 ---
 
