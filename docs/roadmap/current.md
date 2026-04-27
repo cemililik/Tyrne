@@ -15,6 +15,7 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 - **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.**
 - **Last completed task:** [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — `Done` 2026-04-21.
 - **Last reviews:**
+  - [T-009 mini-retro (2026-04-27)](../analysis/reviews/business-reviews/2026-04-27-T-009-mini-retro.md)
   - [T-006 mini-retro (2026-04-22)](../analysis/reviews/business-reviews/2026-04-22-T-006-mini-retro.md)
   - [A6 completion / Phase A retrospective (2026-04-21)](../analysis/reviews/business-reviews/2026-04-21-A6-completion.md)
   - [Code review — Tyrne → Phase A exit (2026-04-21)](../analysis/reviews/code-reviews/2026-04-21-tyrne-to-phase-a.md)
