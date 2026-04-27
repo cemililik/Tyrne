@@ -1,4 +1,4 @@
-# T-009 — Timer init + `CNTPCT_EL0` measurement
+# T-009 — Timer init + `CNTVCT_EL0` measurement
 
 - **Phase:** B
 - **Milestone:** B0 — Phase A exit hygiene
@@ -13,11 +13,11 @@
 
 ## User story
 
-As the Tyrne kernel running on QEMU virt aarch64, I want a working monotonic time source via the ARM Generic Timer's `CNTPCT_EL0` and `CNTFRQ_EL0` system registers — so that performance reviews can measure IPC round-trip latency and context-switch overhead in real nanoseconds rather than instruction counts, and so that future preemption / scheduling work has the time-source primitive it depends on already in place.
+As the Tyrne kernel running on QEMU virt aarch64, I want a working monotonic time source via the ARM Generic Timer's `CNTVCT_EL0` (virtual counter) and `CNTFRQ_EL0` system registers — so that performance reviews can measure IPC round-trip latency and context-switch overhead in real nanoseconds rather than instruction counts, and so that future preemption / scheduling work has the time-source primitive it depends on already in place. The virtual counter is chosen over the physical (`CNTPCT_EL0`) so the read side and the deferred deadline-arming side (`CNTV_CVAL_EL0` / `CNTV_CTL_EL0`, named in ADR-0010's References list) live in the same register family — preventing a silent break the moment any boot path leaves a non-zero `CNTVOFF_EL2`.
 
 ## Context
 
-[ADR-0010](../../../decisions/0010-timer-trait.md) accepted the `Timer` trait shape on 2026-04-20 — four object-safe methods with `u64` nanoseconds throughout. Phase A shipped the trait declaration in `tyrne-hal` and a `FakeTimer` in `tyrne-test-hal`, but the BSP's `QemuVirtCpu` never implemented it. The 2026-04-21 [A6 baseline performance review](../../reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md) §"What we did not measure" explicitly notes: *"Measuring IPC latency requires a free-running timer readable at EL1. The system counter (`CNTPCT_EL0`) needs the `CNTKCTL_EL1.EL0PCTEN` bit set, and a counter frequency (`CNTFRQ_EL0`) must be initialised — neither is done in Phase A."*
+[ADR-0010](../../../decisions/0010-timer-trait.md) accepted the `Timer` trait shape on 2026-04-20 — four object-safe methods with `u64` nanoseconds throughout. Phase A shipped the trait declaration in `tyrne-hal` and a `FakeTimer` in `tyrne-test-hal`, but the BSP's `QemuVirtCpu` never implemented it. The 2026-04-21 [A6 baseline performance review](../../reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md) §"What we did not measure" notes that measuring IPC latency requires a free-running timer readable at EL1 and `CNTFRQ_EL0` must be initialised — neither is done in Phase A. (The baseline-review wording mentioned `CNTPCT_EL0`; T-009's implementation reads `CNTVCT_EL0` instead per the register-family alignment described in the User story.)
 
 T-009 closes that gap for the **measurement-only** path. The full deadline-arming half of `Timer` (`arm_deadline` / `cancel_deadline`) requires GIC + interrupt-vector-table wiring that is its own future task — phase-b.md §B0 item 5 explicitly says *"wire a free-running counter so IPC round-trip latency and context-switch overhead can be measured"*, scoping out IRQ delivery. The two unimplemented methods are left as `unimplemented!()` with an explicit deferral message so a regression that wires arm_deadline elsewhere does not silently no-op.
 
@@ -25,10 +25,10 @@ ADR-0022's first revision-notes rider expects T-009 to bring WFI back into idle'
 
 ## Acceptance criteria
 
-- [x] **`QemuVirtCpu` implements `tyrne_hal::Timer`** with four methods. Commit `beb0963`.
-  - [x] `now_ns(&self) -> u64` — reads `CNTPCT_EL0`, multiplies by the cached resolution, returns nanoseconds since boot. Monotonic by hardware contract.
-  - [x] `resolution_ns(&self) -> u64` — derived once at construction from `CNTFRQ_EL0` as `1_000_000_000 / freq_hz`.
-  - [x] `arm_deadline(&self, _: u64)` — `unimplemented!()` with a message naming the missing IRQ-wiring task.
+- [x] **`QemuVirtCpu` implements `tyrne_hal::Timer`** with four methods. Commit `beb0963` (initial); register-family swap to `CNTVCT_EL0` in commit `39fb66c`.
+  - [x] `now_ns(&self) -> u64` — reads `CNTVCT_EL0`, forwards to [`tyrne_hal::timer::ticks_to_ns`] which performs `count * 1e9 / frequency_hz` via a 128-bit intermediate. Monotonic by hardware contract; saturating cast back to `u64` preserves monotonicity at the ~584-year extreme.
+  - [x] `resolution_ns(&self) -> u64` — round-to-nearest result of [`tyrne_hal::timer::resolution_ns_for_freq`] cached at construction; floor of 1 ns for high-frequency counters > 2 GHz.
+  - [x] `arm_deadline(&self, _: u64)` — `unimplemented!()` with a message naming the missing IRQ-wiring task ([T-012](T-012-exception-and-irq-infrastructure.md), Draft).
   - [x] `cancel_deadline(&self)` — `unimplemented!()` with the same naming.
 - [x] **`QemuVirtCpu::new` reads `CNTFRQ_EL0` and asserts non-zero.** The frequency is cached on the struct as `frequency_hz`; resolution is pre-computed and cached as `resolution_ns`. Commit `beb0963`.
 - [x] **No overflow on the conversion.** Implementation uses `tyrne_hal::timer::ticks_to_ns`, which performs the `count * 1e9 / frequency_hz` arithmetic via a `u128` intermediate and saturates the cast back to `u64`. Overflow margin: ~584 years at any frequency (since `count * resolution_ns ≈ elapsed_ns ≤ u64::MAX = ~584 years`); the saturating cast preserves `Timer::now_ns`'s monotonicity at the rare extreme rather than wrapping. **Earlier inline-multiply form (`count * resolution_ns` with `wrapping_mul`) was rejected during second-read review** because it (a) silently wraps on overflow, breaking ADR-0010 monotonicity, and (b) drifts on non-divisor frequencies (e.g. 19.2 MHz → 0.16 % drift over time). See review-history row dated 2026-04-23.

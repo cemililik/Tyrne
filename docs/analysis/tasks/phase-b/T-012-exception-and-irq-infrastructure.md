@@ -5,7 +5,7 @@
 - **Status:** Draft
 - **Created:** 2026-04-27
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
-- **Dependencies:** [T-009](T-009-timer-init-cntpct.md) (`In Review`, time-source half of `Timer` impl) — T-012 builds on it for the deadline-arming half. ADR-0024 (EL drop policy, B1 sub-item 1) must be `Accepted` before T-012 lands its boot-side `VBAR_EL1` install.
+- **Dependencies:** [T-009](T-009-timer-init-cntvct.md) (`In Review`, time-source half of `Timer` impl) — T-012 builds on it for the deadline-arming half. ADR-0024 (EL drop policy, B1 sub-item 1) must be `Accepted` before T-012 lands its boot-side `VBAR_EL1` install.
 - **Informs:** Closes the deferred halves of [ADR-0010](../../../decisions/0010-timer-trait.md) (`arm_deadline` / `cancel_deadline`) and [ADR-0022](../../../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) first rider (idle's WFI activation). Unblocks every later milestone that needs preemption, periodic ticks, or any IRQ-driven work.
 - **ADRs required:** No new ADR for the GIC driver pattern (covered by [ADR-0011](../../../decisions/0011-irq-controller-trait.md), already `Accepted`). A small ADR — likely **ADR-0026** — may be needed for the exception-vector-table / handler-dispatch shape if non-obvious choices arise during implementation; that ADR is in scope of T-012 if it becomes necessary.
 
@@ -95,7 +95,7 @@ In commit order — sequence chosen so each step is testable on its own and the 
 - [ADR-0011 — IrqController HAL trait](../../../decisions/0011-irq-controller-trait.md) — defines the trait this task's `QemuVirtGic` implements.
 - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../../../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — the aliasing discipline the IRQ handler must extend (likely via Amendment).
 - [ADR-0022 — Idle task + typed scheduler deadlock](../../../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — first rider's *Sub-rider* names this task as the trigger for WFI activation.
-- [T-009 task file](T-009-timer-init-cntpct.md) — the time-source half this task builds on.
+- [T-009 task file](T-009-timer-init-cntvct.md) — the time-source half this task builds on.
 - [UNSAFE-2026-0007](../../../audits/unsafe-log.md) — precedent for inline-asm system-register reads at EL1.
 - ARM *Architecture Reference Manual* DDI 0487G.b — exception-vector layout, generic-timer compare registers, `VBAR_EL1`.
 - ARM *Generic Interrupt Controller v2 Architecture Specification* (IHI 0048B).

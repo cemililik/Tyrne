@@ -114,6 +114,20 @@ pub const fn ticks_to_ns(count: u64, frequency_hz: u64) -> u64 {
 /// (QEMU virt) this gives 16 ns exactly; for a 19.2 MHz counter
 /// (52.0833… ns true period) it gives 52 ns.
 ///
+/// # Floor of 1 ns
+///
+/// For `frequency_hz > 2_000_000_000` (2 GHz), the integer round-to-
+/// nearest formula would return `0` (the true period is <0.5 ns). A
+/// resolution of 0 ns is meaningless to callers and would risk
+/// divide-by-zero in any code that uses the resolution as a divisor.
+/// The implementation therefore clamps the result to at least `1` ns,
+/// which is the smallest representable resolution at nanosecond unit.
+/// Sub-nanosecond precision is silently lost — consistent with the
+/// trait contract's "finer precision at the call site is silently
+/// lost" wording. No timer Tyrne currently targets runs above 1 GHz,
+/// but the clamp future-proofs against high-rate counters (e.g. x86
+/// invariant TSCs at 3+ GHz).
+///
 /// # Panics
 ///
 /// Panics with a named message if `frequency_hz == 0`. The assertion
@@ -128,7 +142,14 @@ pub const fn resolution_ns_for_freq(frequency_hz: u64) -> u64 {
     // pattern for positive integers. Overflow analysis: u64::MAX / 2
     // ≈ 9.2e18, so adding 1e9 stays well within u64 for any frequency
     // a real timer would report.
-    (NANOS_PER_SECOND + frequency_hz / 2) / frequency_hz
+    let raw = (NANOS_PER_SECOND + frequency_hz / 2) / frequency_hz;
+    // Clamp to ≥ 1: at frequencies above ~2 GHz the round-to-nearest
+    // formula truncates to 0; see the "Floor of 1 ns" doc-section.
+    if raw == 0 {
+        1
+    } else {
+        raw
+    }
 }
 
 #[cfg(test)]
@@ -230,6 +251,26 @@ mod tests {
     fn resolution_const_fn_works_in_const_context() {
         const RES: u64 = resolution_ns_for_freq(62_500_000);
         assert_eq!(RES, 16);
+    }
+
+    #[test]
+    fn resolution_clamps_to_one_above_2ghz() {
+        // Naive formula `(1e9 + freq/2) / freq` truncates to 0 for
+        // freq > 2 * NANOS_PER_SECOND. The clamp makes the floor 1 ns
+        // — the smallest representable resolution at nanosecond unit.
+        // 3 GHz: true period ≈ 0.333 ns → clamped to 1 ns.
+        assert_eq!(resolution_ns_for_freq(3_000_000_000), 1);
+        // 10 GHz: true period 0.1 ns → still clamped to 1 ns.
+        assert_eq!(resolution_ns_for_freq(10_000_000_000), 1);
+        // u64::MAX Hz: even more extreme → clamped to 1 ns.
+        assert_eq!(resolution_ns_for_freq(u64::MAX), 1);
+    }
+
+    #[test]
+    fn resolution_two_ghz_is_one_ns_exactly() {
+        // Boundary case: exactly 2 GHz gives raw = 1 ns (no clamp
+        // needed). (1e9 + 1e9) / 2e9 = 1.
+        assert_eq!(resolution_ns_for_freq(2_000_000_000), 1);
     }
 
     // ── Explicit-panic-on-zero-frequency contract ────────────────────────────

@@ -37,7 +37,7 @@ use tyrne_hal::{ContextSwitch, CoreId, Cpu, IrqState, Timer};
 
 /// The QEMU `virt` aarch64 CPU implementation.
 ///
-/// Holds the cached generic-timer parameters read once at construction; all
+/// Holds the generic-timer parameters read once at construction; all
 /// other behaviour comes from DAIF register manipulation and the
 /// context-switch assembly stub. Construct via [`QemuVirtCpu::new`].
 ///
@@ -45,15 +45,26 @@ use tyrne_hal::{ContextSwitch, CoreId, Cpu, IrqState, Timer};
 ///
 /// Two `u64` fields, both populated from system registers in [`Self::new`]:
 ///
-/// - `frequency_hz` — value of `CNTFRQ_EL0`, the system counter frequency in
-///   Hz. ARM ARM treats this as firmware-set; QEMU virt sets it to 62.5 MHz.
-/// - `resolution_ns` — derived as `1_000_000_000 / frequency_hz`. Cached so
-///   `now_ns` is a single multiply rather than a multiply + divide.
+/// - `frequency_hz` — value of `CNTFRQ_EL0`, the system counter frequency
+///   in Hz. ARM ARM treats this as firmware-set; QEMU virt sets it to
+///   62.5 MHz. `Timer::now_ns` reads it on every call (along with
+///   `CNTVCT_EL0`) and forwards to [`tyrne_hal::timer::ticks_to_ns`],
+///   which performs the 128-bit `count * 1e9 / frequency_hz` conversion.
+/// - `resolution_ns` — round-to-nearest result of
+///   [`tyrne_hal::timer::resolution_ns_for_freq`] computed once at
+///   construction. **Cached only to serve the `Timer::resolution_ns`
+///   trait method** — `now_ns`'s hot path does NOT use it; the
+///   conversion is exact via the `ticks_to_ns` u128 path. Earlier
+///   drafts of T-009 used `count * resolution_ns` for `now_ns`'s
+///   conversion, but second-read review found that form drifts on
+///   non-divisor frequencies (e.g. 19.2 MHz → 0.16 % drift) and was
+///   replaced.
 pub struct QemuVirtCpu {
     /// Counter frequency from `CNTFRQ_EL0`, in Hz. Read once at construction.
     frequency_hz: u64,
-    /// Pre-computed `1_000_000_000 / frequency_hz`. Cached so [`Timer::now_ns`]
-    /// avoids a 64-bit divide on every call.
+    /// Pre-computed `resolution_ns_for_freq(frequency_hz)`. Used **only**
+    /// by the [`Timer::resolution_ns`] trait method; [`Timer::now_ns`]
+    /// converts via `ticks_to_ns` and does not consult this field.
     resolution_ns: u64,
 }
 

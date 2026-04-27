@@ -25,7 +25,7 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 2. **ADR-0022 — Idle task + typed `SchedError::Deadlock`.** Register a kernel idle task at boot so the ready queue is never empty; convert the `panic!("deadlock: …")` at [`kernel/src/sched/mod.rs:388-395`](../../../kernel/src/sched/mod.rs#L388-L395) to a typed error. Bundle: also convert `Scheduler::start`'s empty-queue panic at [sched/mod.rs:246-253](../../../kernel/src/sched/mod.rs#L246-L253) to `Err(SchedError::QueueEmpty)`; also harden the `debug_assert!` in the `ipc_recv_and_yield` resume path at [sched/mod.rs:417-421](../../../kernel/src/sched/mod.rs#L417-L421) to a release-mode `Err(...)`. Security review §4; code review §Correctness (Scheduler bullets 2, 4).
 3. **ADR-0023 — Cross-table capability revocation policy.** Record the v1 single-table scope of the "Revocation is transitive" invariant (already qualified in [`docs/architecture/security-model.md`](../../architecture/security-model.md) by commit `de66d68`). 🚩 **Decision:** accept-deferred (option a; recommended — no code work, document the limitation and push cross-table CDT to Phase C) vs. implement-now (option b; substantial storage + IPC rewiring, only justified if a multi-task server appears in B3–B6 that needs post-transfer revocation).
 4. **Architecture docs × 3** via the [`write-architecture-doc`](../../../.claude/skills/write-architecture-doc/SKILL.md) skill: `docs/architecture/kernel-objects.md` (ADR-0016 + Arena pattern), `docs/architecture/ipc.md` (ADR-0017 + ADR-0018 + state machine), `docs/architecture/scheduler.md` (ADR-0019 + ADR-0020 + IPC bridge + UNSAFE-2026-0008). Code review §Documentation follow-up #2.
-5. **Timer initialisation** — populate `QemuVirtCpu`'s `Timer` trait impl with `CNTPCT_EL0` / `CNTFRQ_EL0` reads; wire a free-running counter so IPC round-trip latency and context-switch overhead can be measured. Unlocks the first hypothesis-driven performance-review cycle (baseline at [`2026-04-21-A6-baseline.md`](../../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md) is blocked on this).
+5. **Timer initialisation** — populate `QemuVirtCpu`'s `Timer` trait impl with `CNTVCT_EL0` (virtual counter, register-family-aligned with the deferred `CNTV_*` deadline-arming registers per ADR-0010) and `CNTFRQ_EL0` reads; wire a free-running counter so IPC round-trip latency and context-switch overhead can be measured. Unlocks the first hypothesis-driven performance-review cycle (baseline at [`2026-04-21-A6-baseline.md`](../../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md) is blocked on this). *Note: the original phase-plan wording said "CNTPCT_EL0"; T-009 second-read review surfaced the register-family mismatch and switched to `CNTVCT_EL0`.*
 6. **Scheduler / IPC hardening bundle.** Grouped in T-010 with ADR-0022's implementation:
    - `const { assert!(N > 0) }` on `SchedQueue::new` and `CapabilityTable::new` so zero-capacity constructions are a build-time error, matching `Arena::new`'s pattern.
    - `debug_assert_ne!(current_idx, next_idx)` before the split-borrow `unsafe` blocks in `yield_now` / `ipc_recv_and_yield` to catch regressions that stop dequeuing the running task.
@@ -42,7 +42,7 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 - No `panic!(...)` remaining in `kernel/src/sched/mod.rs`; `#[allow(clippy::panic)]` attributes removed.
 - `docs/audits/unsafe-log.md` UNSAFE-2026-0012 entry marked `Removed` with the resolution commit (or formally narrowed if any aliasing window survives, with a security re-review).
 - Three architecture docs committed; linked from `docs/architecture/README.md`.
-- `QemuVirtCpu` implements `Timer`; IPC round-trip latency measurable via CNTPCT_EL0.
+- `QemuVirtCpu` implements `Timer`; IPC round-trip latency measurable via `CNTVCT_EL0` (virtual counter, register-family-aligned with the future deadline-arming `CNTV_*` registers).
 - 109+ host tests still green (four new tests added by T-011).
 - QEMU smoke still matches the A6 trace (no behavioural regression).
 - Phase-A security-review blocker #1, #2, #3 all closed (blocker #2 may close via the "accept-deferred" ADR path).
@@ -52,7 +52,7 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 - [T-006 — Raw-pointer scheduler API refactor + TaskArena global migration](../../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — In Review (opened 2026-04-22)
 - [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — In Review (opened 2026-04-22)
 - T-008 — Architecture docs for kernel-objects / IPC / scheduler *(not yet opened)*
-- [T-009 — Timer init + `CNTPCT_EL0` measurement](../../analysis/tasks/phase-b/T-009-timer-init-cntpct.md) — In Review (opened 2026-04-23)
+- [T-009 — Timer init + `CNTVCT_EL0` measurement](../../analysis/tasks/phase-b/T-009-timer-init-cntvct.md) — In Review (opened 2026-04-23)
 - T-010 — (optional) Split of T-007 if ADR-0022 scope grows past one task *(not yet opened)*
 - [T-011 — Missing tests bundle](../../analysis/tasks/phase-b/T-011-missing-tests-bundle.md) — Draft (opened 2026-04-23)
 

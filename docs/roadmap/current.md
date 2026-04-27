@@ -10,7 +10,7 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 - **In review:**
   - [T-006 — Raw-pointer scheduler API refactor](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — `In Review` since 2026-04-22.
   - [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — `In Review` since 2026-04-22; implements ADR-0022.
-  - [T-009 — Timer init + `CNTPCT_EL0` measurement](../analysis/tasks/phase-b/T-009-timer-init-cntpct.md) — `In Review` since 2026-04-23; implements ADR-0010 (BSP side).
+  - [T-009 — Timer init + `CNTVCT_EL0` measurement](../analysis/tasks/phase-b/T-009-timer-init-cntvct.md) — `In Review` since 2026-04-23; implements ADR-0010 (BSP side).
 - **Working branch:** `development`.
 - **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.**
 - **Last completed task:** [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — `Done` 2026-04-21.
