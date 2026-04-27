@@ -2,7 +2,7 @@
 
 - **Phase:** B
 - **Milestone:** B0 — Phase A exit hygiene
-- **Status:** In Review
+- **Status:** Done
 - **Created:** 2026-04-22
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** Phase A complete (T-001..T-005 all Done). No sibling task dependencies within B0 — T-006 may run in parallel with T-008 (architecture docs) and T-009 (timer init).

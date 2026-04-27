@@ -24,6 +24,12 @@ Terminology used throughout Tyrne. Entries are alphabetical. If a term appears i
 
 **CDT (Capability Derivation Tree).** The parent/child tree of capabilities derived from one another via `cap_derive`. Revocation is transitive along this tree: revoking a parent revokes every descendant. In v1 the tree is per-table; cross-table transitivity is deferred (see [ADR-0023](decisions/0023-cross-table-capability-revocation-policy.md) when opened).
 
+**`CNTFRQ_EL0`.** ARM aarch64 system register that reports the Generic Timer's counter frequency in Hz. Set by firmware before kernel entry; read at EL0/EL1 (subject to `CNTHCTL_EL2.EL1PCTEN` only in VHE mode, which Tyrne does not use). QEMU virt sets it to 62.5 MHz. On real Pi 4 / BCM2711 the rate is firmware-dependent (mainline Linux configures 54 MHz; older Pi-class boards used 19.2 MHz) — BSPs read the firmware-provided value rather than hard-coding. Tyrne reads `CNTFRQ_EL0` once at `QemuVirtCpu::new` and caches the derived `resolution_ns`.
+
+**`CNTPCT_EL0`.** ARM aarch64 system register that exposes the 64-bit free-running **physical** counter of the Generic Timer. Monotonic by hardware contract. Tyrne does **not** read this register directly; the Timer impl reads `CNTVCT_EL0` instead so the read side stays aligned with the deferred deadline-arming side (`CNTV_*`).
+
+**`CNTVCT_EL0`.** ARM aarch64 system register that exposes the 64-bit free-running **virtual** counter of the Generic Timer. Computed as `CNTPCT_EL0 - CNTVOFF_EL2`; on QEMU virt with `CNTVOFF_EL2 = 0` it coincides with the physical counter. Monotonic by hardware contract. Tyrne reads `CNTVCT_EL0` for `Timer::now_ns` so the read side is in the same family as the future deadline-arming registers (`CNTV_CVAL_EL0` / `CNTV_CTL_EL0`) per ADR-0010.
+
 **Context switch.** The operation of saving the CPU state of one task and loading another so that the second task runs. Cost and frequency of context switches are the classic trade-off driver between monolithic and microkernel designs. In Tyrne the primitive is [`ContextSwitch::context_switch`](../hal/src/context_switch.rs) per [ADR-0020](decisions/0020-cpu-trait-v2-context-switch.md).
 
 **Cooperative scheduling.** A scheduling model in which the CPU is only taken from a running task when that task voluntarily yields. Tyrne v1 is cooperative and single-core; preemption arrives later in Phase B / Phase C.
@@ -31,6 +37,8 @@ Terminology used throughout Tyrne. Entries are alphabetical. If a term appears i
 **Endpoint.** In seL4-style IPC, a kernel object used to rendezvous senders and receivers. Possessing a capability to an endpoint is what grants the right to send or receive.
 
 **Generation tag.** The counter stored alongside every arena slot that detects stale handles. When a slot is freed and reused, its generation increments; a handle carries the generation it was issued with, so lookup can distinguish "same slot, new object" from "same slot, same object". See [ADR-0016](decisions/0016-kernel-object-storage.md).
+
+**Generic Timer (ARM).** The standard aarch64 timekeeping subsystem: a free-running 64-bit counter exposed in two views (physical `CNTPCT_EL0` and virtual `CNTVCT_EL0 = CNTPCT_EL0 - CNTVOFF_EL2`), a firmware-reported frequency (`CNTFRQ_EL0`), and per-EL compare registers (`CNTP_*` / `CNTV_*`) that fire interrupts when the counter passes a programmed deadline. Tyrne's `Timer` HAL trait wraps the **virtual** counter half (read-only, no IRQ) in v1; the deadline-firing half is gated on GIC wiring (a future task).
 
 **HAL (Hardware Abstraction Layer).** The set of traits and types that decouple the kernel from any specific CPU or board. A BSP implements HAL traits; the kernel depends only on the traits.
 

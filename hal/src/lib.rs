@@ -20,6 +20,15 @@
 //! [`ContextSwitch`] (ADR-0020).
 //! The remaining trait stub below is a placeholder whose method surface
 //! will be pinned by its own ADR when a concrete caller needs it.
+//!
+//! Alongside the traits, this crate hosts a small set of utility helpers
+//! whose semantics are shared across every concrete implementation —
+//! [`CoreId`], [`IrqState`], [`IrqGuard`], [`FmtWriter`], the
+//! [`MappingFlags`] / [`PhysAddr`] / [`PhysFrame`] / [`VirtAddr`] / [`PAGE_SIZE`]
+//! geometry types, and the tick-to-ns arithmetic helpers in the
+//! [`timer`] module ([`timer::ticks_to_ns`], [`timer::resolution_ns_for_freq`],
+//! [`timer::NANOS_PER_SECOND`]). These are pure, host-testable utilities
+//! that any BSP implementing the corresponding trait can reuse.
 
 #![no_std]
 
@@ -28,7 +37,7 @@ mod context_switch;
 mod cpu;
 mod irq_controller;
 mod mmu;
-mod timer;
+pub mod timer;
 
 pub use console::{Console, FmtWriter};
 pub use context_switch::ContextSwitch;

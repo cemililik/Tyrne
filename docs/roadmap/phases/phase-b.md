@@ -25,7 +25,7 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 2. **ADR-0022 — Idle task + typed `SchedError::Deadlock`.** Register a kernel idle task at boot so the ready queue is never empty; convert the `panic!("deadlock: …")` at [`kernel/src/sched/mod.rs:388-395`](../../../kernel/src/sched/mod.rs#L388-L395) to a typed error. Bundle: also convert `Scheduler::start`'s empty-queue panic at [sched/mod.rs:246-253](../../../kernel/src/sched/mod.rs#L246-L253) to `Err(SchedError::QueueEmpty)`; also harden the `debug_assert!` in the `ipc_recv_and_yield` resume path at [sched/mod.rs:417-421](../../../kernel/src/sched/mod.rs#L417-L421) to a release-mode `Err(...)`. Security review §4; code review §Correctness (Scheduler bullets 2, 4).
 3. **ADR-0023 — Cross-table capability revocation policy.** Record the v1 single-table scope of the "Revocation is transitive" invariant (already qualified in [`docs/architecture/security-model.md`](../../architecture/security-model.md) by commit `de66d68`). 🚩 **Decision:** accept-deferred (option a; recommended — no code work, document the limitation and push cross-table CDT to Phase C) vs. implement-now (option b; substantial storage + IPC rewiring, only justified if a multi-task server appears in B3–B6 that needs post-transfer revocation).
 4. **Architecture docs × 3** via the [`write-architecture-doc`](../../../.claude/skills/write-architecture-doc/SKILL.md) skill: `docs/architecture/kernel-objects.md` (ADR-0016 + Arena pattern), `docs/architecture/ipc.md` (ADR-0017 + ADR-0018 + state machine), `docs/architecture/scheduler.md` (ADR-0019 + ADR-0020 + IPC bridge + UNSAFE-2026-0008). Code review §Documentation follow-up #2.
-5. **Timer initialisation** — populate `QemuVirtCpu`'s `Timer` trait impl with `CNTPCT_EL0` / `CNTFRQ_EL0` reads; wire a free-running counter so IPC round-trip latency and context-switch overhead can be measured. Unlocks the first hypothesis-driven performance-review cycle (baseline at [`2026-04-21-A6-baseline.md`](../../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md) is blocked on this).
+5. **Timer initialisation** — populate `QemuVirtCpu`'s `Timer` trait impl with `CNTVCT_EL0` (virtual counter, register-family-aligned with the deferred `CNTV_*` deadline-arming registers per ADR-0010) and `CNTFRQ_EL0` reads; wire a free-running counter so IPC round-trip latency and context-switch overhead can be measured. Unlocks the first hypothesis-driven performance-review cycle (baseline at [`2026-04-21-A6-baseline.md`](../../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md) is blocked on this). *Note: the original phase-plan wording said "CNTPCT_EL0"; T-009 second-read review surfaced the register-family mismatch and switched to `CNTVCT_EL0`.*
 6. **Scheduler / IPC hardening bundle.** Grouped in T-010 with ADR-0022's implementation:
    - `const { assert!(N > 0) }` on `SchedQueue::new` and `CapabilityTable::new` so zero-capacity constructions are a build-time error, matching `Arena::new`'s pattern.
    - `debug_assert_ne!(current_idx, next_idx)` before the split-borrow `unsafe` blocks in `yield_now` / `ipc_recv_and_yield` to catch regressions that stop dequeuing the running task.
@@ -42,17 +42,17 @@ Cleans up the items the 2026-04-21 Phase-A code and security reviews surfaced. E
 - No `panic!(...)` remaining in `kernel/src/sched/mod.rs`; `#[allow(clippy::panic)]` attributes removed.
 - `docs/audits/unsafe-log.md` UNSAFE-2026-0012 entry marked `Removed` with the resolution commit (or formally narrowed if any aliasing window survives, with a security re-review).
 - Three architecture docs committed; linked from `docs/architecture/README.md`.
-- `QemuVirtCpu` implements `Timer`; IPC round-trip latency measurable via CNTPCT_EL0.
+- `QemuVirtCpu` implements `Timer`; IPC round-trip latency measurable via `CNTVCT_EL0` (virtual counter, register-family-aligned with the future deadline-arming `CNTV_*` registers).
 - 109+ host tests still green (four new tests added by T-011).
 - QEMU smoke still matches the A6 trace (no behavioural regression).
 - Phase-A security-review blocker #1, #2, #3 all closed (blocker #2 may close via the "accept-deferred" ADR path).
 
 ### Tasks under B0
 
-- [T-006 — Raw-pointer scheduler API refactor + TaskArena global migration](../../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — In Review (opened 2026-04-22)
-- [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — In Review (opened 2026-04-22)
-- T-008 — Architecture docs for kernel-objects / IPC / scheduler *(not yet opened)*
-- T-009 — Timer initialisation and CNTPCT_EL0-based measurement *(not yet opened)*
+- [T-006 — Raw-pointer scheduler API refactor + TaskArena global migration](../../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — Done (2026-04-27)
+- [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — Done (2026-04-27)
+- [T-008 — Architecture docs (scheduler.md + ipc.md + hal.md/overview.md updates)](../../analysis/tasks/phase-b/T-008-architecture-docs.md) — Draft (opened 2026-04-27)
+- [T-009 — Timer init + `CNTVCT_EL0` measurement](../../analysis/tasks/phase-b/T-009-timer-init-cntvct.md) — Done (2026-04-27)
 - T-010 — (optional) Split of T-007 if ADR-0022 scope grows past one task *(not yet opened)*
 - [T-011 — Missing tests bundle](../../analysis/tasks/phase-b/T-011-missing-tests-bundle.md) — Draft (opened 2026-04-23)
 
@@ -68,16 +68,19 @@ B1 / B2 / B3 all depend on a panic-free scheduler and a non-UB aliasing story. B
 
 ---
 
-## Milestone B1 — Drop to EL1 in boot
+## Milestone B1 — Drop to EL1 in boot, install exception infrastructure
 
 Extend the BSP reset stub so that when QEMU delivers us at EL2, we configure `HCR_EL2`, `SPSR_EL2`, `ELR_EL2`, and issue `ERET` to land in EL1. When QEMU delivers at EL1, the stub is a no-op on that axis.
 
+The scope of this milestone was extended on 2026-04-27 (after T-009 — the time-source half of `Timer` — landed in `In Review`) to include the *exception delivery infrastructure* that ADR-0022's first-rider sub-rider gated on. Concretely: **GICv2 distributor + CPU interface** configuration on QEMU virt (GICv2 has no redistributor — that is GICv3 terminology; QEMU virt defaults to GICv2 unless `-machine gic-version=3` is set), an EL1 exception vector table install at `VBAR_EL1`, a thin handler-dispatch loop, and the generic-timer-IRQ wiring that lets `Timer::arm_deadline` and `Timer::cancel_deadline` actually fire interrupts. Without this work, `arm_deadline` / `cancel_deadline` remain `unimplemented!()` and idle's body cannot move from `spin_loop` to `wfi`.
+
 ### Sub-breakdown
 
-1. **ADR-0024 — EL drop policy.** Always-to-EL1 vs. keep-whichever. When does the drop happen (earliest possible; before `kernel_main`). How do we handle the case where the drop fails (panic).
-2. **Asm extension** in `bsp-qemu-virt/src/boot.s` for EL2→EL1 transition. **Bundle K3-12:** add an explicit `msr daifset, #0xf` at the top of `_start` as a BSP reset-vector standard per the [BSP boot checklist](../../standards/bsp-boot-checklist.md) update.
-3. **Rust helpers** for reading current EL (`CurrentEL` system register); probably a new method on `Cpu` or a free function.
-4. **Tests** — boot at EL1 under QEMU (default) and at EL2 (via `-machine virtualization=on`) and verify both land at EL1 in `kernel_entry`.
+1. **[ADR-0024](../../decisions/0024-el-drop-policy.md) — EL drop to EL1 policy** *(Accepted 2026-04-27)*. Settled choice: always drop to EL1 in `boot.s`, regardless of where firmware/emulator delivers the kernel. EL3 entry halts; VHE explicitly off.
+2. **Asm extension** in `bsp-qemu-virt/src/boot.s` for EL2→EL1 transition — covered by [T-013](../../analysis/tasks/phase-b/T-013-el-drop-to-el1.md). **Bundle K3-12:** explicit `msr daifset, #0xf` at the top of `_start` as a BSP reset-vector standard per the [BSP boot checklist](../../standards/bsp-boot-checklist.md) update.
+3. **Rust helper for reading current EL** — also T-013. Either free function `tyrne_hal::cpu::current_el() -> u8` or `Cpu::current_el(&self)` method (T-013 §Approach picks one). T-009 already shipped the inline-asm pattern in `QemuVirtCpu::new`'s self-check, audited under UNSAFE-2026-0016 — this sub-item formalises it as a HAL-level helper.
+4. **Tests** — boot at EL1 under QEMU (default) and at EL2 (via `-machine virtualization=on`) and verify both land at EL1 in `kernel_entry`. Covered by T-013.
+5. **Exception infrastructure and interrupt delivery** — covered by [T-012](../../analysis/tasks/phase-b/T-012-exception-and-irq-infrastructure.md). Closes the deferred halves of ADR-0010 (`Timer::arm_deadline` / `cancel_deadline`) and ADR-0022 first rider (idle's WFI activation). Depends on T-013 being closed first (T-012's `VBAR_EL1` install assumes EL1). Substantial scope; may split into T-012a / T-012b if scope balloons during implementation per ADR-0025 §Rule 1 (forward-reference contract / dependency-chain).
 
 ### Acceptance criteria
 
@@ -86,6 +89,7 @@ Extend the BSP reset stub so that when QEMU delivers us at EL2, we configure `HC
 - Smoke test boots both QEMU variants and asserts the greeting still appears.
 - `boot.s` starts with explicit IRQ masking.
 - BSP boot checklist updated with the "mask DAIF before anything else" rule.
+- **T-012 closed:** `arm_deadline` fires real IRQs through the GIC; `idle_entry`'s body is `wait_for_interrupt` + `yield_now` (closing ADR-0022's first rider in full).
 
 ---
 
@@ -95,7 +99,7 @@ Turn on the MMU with an identity map for the kernel image region and its stack. 
 
 ### Sub-breakdown
 
-1. **ADR-0025 — Kernel virtual memory layout.** Identity at `0x4000_0000` vs. high-half split; memory type attributes (normal cached for RAM, device-nGnRnE for MMIO). Mapping-mutation calls on the [`Mmu`](../../../hal/src/mmu.rs) trait should return a **typed "must-acknowledge" flush token** (analogous to `x86_64::structures::paging::MapperFlush`): each mutation produces a token that must be either explicitly `.flush()`-ed (executes the required TLB invalidation) or `.ignore()`-ed. Silent drop produces a compile-time warning. This keeps "did you remember to flush?" out of the reviewer's head and into the type system.
+1. **ADR-0027 — Kernel virtual memory layout.** Identity at `0x4000_0000` vs. high-half split; memory type attributes (normal cached for RAM, device-nGnRnE for MMIO). Mapping-mutation calls on the [`Mmu`](../../../hal/src/mmu.rs) trait should return a **typed "must-acknowledge" flush token** (analogous to `x86_64::structures::paging::MapperFlush`): each mutation produces a token that must be either explicitly `.flush()`-ed (executes the required TLB invalidation) or `.ignore()`-ed. Silent drop produces a compile-time warning. This keeps "did you remember to flush?" out of the reviewer's head and into the type system.
 2. **Physical frame allocator** — a minimal bitmap or free-list allocator in the kernel. Needed before page tables can be populated.
 3. **Initial page-table construction** — kernel mappings for `.text`, `.rodata`, `.data`, `.bss`, stack; MMIO mappings for the active UART and GIC.
 4. **MMU activation sequence** — the exact `TTBR`, `TCR`, `MAIR`, `SCTLR` writes and the required barriers.
@@ -104,7 +108,7 @@ Turn on the MMU with an identity map for the kernel image region and its stack. 
 
 ### Acceptance criteria
 
-- ADR-0025 Accepted.
+- ADR-0027 Accepted.
 - Kernel runs with the MMU on.
 - Physical frame allocator has host-tested correctness and a QEMU integration smoke.
 - Deliberate traps route through the exception-vector table.
@@ -125,7 +129,7 @@ Multiple per-task translation tables. Capability-gated map / unmap. Activation o
 
 ### Sub-breakdown
 
-1. **ADR-0026 — Address-space data structure.** How a BSP-specific `AddressSpace` is represented; who owns its page tables; how it integrates with the `Mmu` trait's associated type.
+1. **ADR-0028 — Address-space data structure.** How a BSP-specific `AddressSpace` is represented; who owns its page tables; how it integrates with the `Mmu` trait's associated type.
 2. **`AddressSpace` kernel object** — a new kernel-object type, like those from A3, with `AddressSpaceCap`.
 3. **Map / unmap operations** — wrappers around [`Mmu::map`](../../../hal/src/mmu.rs) / `Mmu::unmap` that validate the caller's capabilities.
 4. **TLB invalidation on unmap** — single-core only; multi-core is Phase C.
@@ -134,7 +138,7 @@ Multiple per-task translation tables. Capability-gated map / unmap. Activation o
 
 ### Acceptance criteria
 
-- ADR-0026 Accepted.
+- ADR-0028 Accepted.
 - Two address spaces coexist; the kernel activates each when its owning task runs.
 - Isolation verified on QEMU: AS-X cannot read AS-Y's data.
 
@@ -150,14 +154,14 @@ Load a userspace binary into an address space. For B4 the binary is statically e
 
 ### Sub-breakdown
 
-1. **ADR-0027 — Initial userspace image format.** Raw flat binary vs. minimal ELF subset. v1 favours raw flat (simplest).
+1. **ADR-0029 — Initial userspace image format.** Raw flat binary vs. minimal ELF subset. v1 favours raw flat (simplest).
 2. **Loader** — maps the embedded binary into a fresh address space under its `MemoryRegionCap`, sets up the initial stack, marks the entry point.
 3. **Task creation from a binary** — `task_create_from_image(image, as_cap, initial_caps) -> TaskCap`.
 4. **Tests** — host-side loader correctness (given an image blob, produce the expected mapping); QEMU-side task creation without yet running the task (that's B6).
 
 ### Acceptance criteria
 
-- ADR-0027 Accepted.
+- ADR-0029 Accepted.
 - A kernel test can load the embedded userspace image into an address space and report the entry point and initial stack pointer.
 
 ---
@@ -168,8 +172,8 @@ Traps from EL0 into EL1 via `SVC` (or the chosen mechanism). Syscall dispatch va
 
 ### Sub-breakdown
 
-1. **ADR-0028 — Syscall ABI.** Register calling convention (which regs carry syscall number vs. arguments vs. return); maximum arg count; error-return convention (register + flag vs. `Result`-like encoding); asynchronous vs. synchronous semantics. **Bundle K2-5:** design the full userspace error taxonomy as part of this ADR — split `IpcError::InvalidCapability` into `StaleHandle` / `MissingRight` / `WrongObjectKind` (code review §Correctness IPC bullet 4) so the syscall error space and the in-kernel error space agree from the start.
-2. **ADR-0029 — Initial syscall set for B-phase.** At minimum: `send`, `recv`, `console_write` (debug-gated), `task_yield`, `task_exit`. No more in v1.
+1. **ADR-0030 — Syscall ABI.** Register calling convention (which regs carry syscall number vs. arguments vs. return); maximum arg count; error-return convention (register + flag vs. `Result`-like encoding); asynchronous vs. synchronous semantics. **Bundle K2-5:** design the full userspace error taxonomy as part of this ADR — split `IpcError::InvalidCapability` into `StaleHandle` / `MissingRight` / `WrongObjectKind` (code review §Correctness IPC bullet 4) so the syscall error space and the in-kernel error space agree from the start.
+2. **ADR-0031 — Initial syscall set for B-phase.** At minimum: `send`, `recv`, `console_write` (debug-gated), `task_yield`, `task_exit`. No more in v1.
 3. **Exception-vector dispatch** — the EL0-synchronous vector routes to a Rust syscall dispatcher after saving user registers.
 4. **Syscall dispatcher** — maps a syscall number to a handler, validates capabilities, performs the operation, returns. **Must be panic-free on every untrusted input** (typed error for every failure path), consistent with B0's hardening pattern.
 5. **Copy-from / copy-to user** — validated access to userspace memory through the active address space. No raw dereferencing of user pointers.
@@ -178,17 +182,17 @@ Traps from EL0 into EL1 via `SVC` (or the chosen mechanism). Syscall dispatch va
 
 ### Acceptance criteria
 
-- ADR-0028 and ADR-0029 Accepted.
+- ADR-0030 and ADR-0031 Accepted.
 - Syscall entry works from EL0 back to EL1 and back; register state is preserved correctly.
 - Invalid syscalls (bad number, missing capability, out-of-bounds pointer) return typed errors without panicking.
 - Copy-from-user never dereferences raw user pointers outside the validated mapping.
-- `IpcError` variants are split per ADR-0028's taxonomy; all call sites and tests updated.
+- `IpcError` variants are split per ADR-0030's taxonomy; all call sites and tests updated.
 - `Capability` `Debug` output redacts security-sensitive fields.
 
 ### Flags to resolve during B5
 
 - 🚩 **Fault containment (K3-4).** Task-body `.expect` / `panic!` still halts the whole kernel today. The syscall dispatcher itself must be panic-free (acceptance criterion above), but full fault containment (a supervisor endpoint the crashing task's parent can observe) is Phase E work (first real driver task). Decision at B5: confirm the split — dispatcher panic-free now, supervisor design deferred. Recommendation: defer to Phase E.
-- 🚩 **`IpcError` split timing.** If ADR-0028 becomes too large, split the error-taxonomy portion into a sibling ADR and implement it in parallel; ensure both land before the first userspace call.
+- 🚩 **`IpcError` split timing.** If ADR-0030 becomes too large, split the error-taxonomy portion into a sibling ADR and implement it in parallel; ensure both land before the first userspace call.
 
 ---
 
@@ -233,12 +237,14 @@ When B6 is Done, run a business review. Phase C becomes active after that review
 | ADR-0021 | Raw-pointer scheduler API (UNSAFE-2026-0012 resolution) | B0 | new — from 2026-04-21 security review blocker #1 |
 | ADR-0022 | Idle task + typed scheduler deadlock error | B0 | new — from 2026-04-21 security review blocker #3 |
 | ADR-0023 | Cross-table capability revocation policy | B0 (accept-deferred expected) | new — from 2026-04-21 security review blocker #2 |
-| ADR-0024 | EL drop policy | B1 | was ADR-0021 in the pre-review plan |
-| ADR-0025 | Kernel virtual memory layout | B2 | was ADR-0022 |
-| ADR-0026 | Address-space data structure | B3 | was ADR-0023 |
-| ADR-0027 | Initial userspace image format | B4 | was ADR-0024 |
-| ADR-0028 | Syscall ABI (includes `IpcError` taxonomy per K2-5) | B5 | was ADR-0025; scope enlarged to cover error taxonomy |
-| ADR-0029 | Initial syscall set | B5 | was ADR-0026 |
+| ADR-0024 | EL drop policy | B1 (Accepted 2026-04-27) | was ADR-0021 in the pre-review plan |
+| ADR-0025 | ADR governance amendments (forward-reference, riders) | meta-process (Accepted 2026-04-27) | new — captures the rules T-006/T-009 retros surfaced; not B-phase content. Cool-down rule withdrawn pre-Accept; see ADR-0025 §Revision notes |
+| ADR-0026 | Exception-vector-table / handler-dispatch shape (T-012, conditional) | B1 | reserved by T-012 if non-obvious choices arise; may go unused if T-011 absorbs the exception-vector design |
+| ADR-0027 | Kernel virtual memory layout | B2 | was ADR-0025 in the pre-2026-04-27 plan; renumbered down by 2 because ADR-0025 (governance) and ADR-0026 (T-012 reservation) consumed slots |
+| ADR-0028 | Address-space data structure | B3 | was ADR-0026 |
+| ADR-0029 | Initial userspace image format | B4 | was ADR-0027 |
+| ADR-0030 | Syscall ABI (includes `IpcError` taxonomy per K2-5) | B5 | was ADR-0028; scope still enlarged to cover error taxonomy |
+| ADR-0031 | Initial syscall set | B5 | was ADR-0029 |
 
 Numbers are tentative. Final numbers are assigned when the ADR is actually written, per [ADR-0013](../../decisions/0013-roadmap-and-planning.md).
 
@@ -253,7 +259,7 @@ Numbers are tentative. Final numbers are assigned when the ADR is actually writt
 - 🚩 **B2 — Generation wrap-around (K3-1).** Raise counter, monotonic scheme, or document the bound.
 - 🚩 **B3 — Cross-table revocation, revisit.** If the deferred ADR-0023 decision bites any B3 test, promote.
 - 🚩 **B5 — Fault containment scope (K3-4).** Confirm the split: dispatcher panic-free in B5, supervisor endpoint in Phase E.
-- 🚩 **B5 — `IpcError` split timing.** Bundle with ADR-0028 or split into its own ADR.
+- 🚩 **B5 — `IpcError` split timing.** Bundle with ADR-0030 or split into its own ADR.
 - 🚩 **B6 — CI rollout timing (K3-7).** Wire QEMU-smoke regression gate if CI exists.
 - 🚩 **B6 — `cargo-vet init` (K3-8).** Prerequisite only if an external dep lands during Phase B.
 - 🚩 **B6 — `write_bytes` TX timeout (K3-5).** Only applies when a non-QEMU BSP exists.

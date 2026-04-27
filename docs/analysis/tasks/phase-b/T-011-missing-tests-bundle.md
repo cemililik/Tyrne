@@ -47,9 +47,9 @@ T-011 bundles these items into a single task so the test-writing discipline land
 ## Out of scope
 
 - Branch coverage for every `cap/table.rs` error return — diminishing returns; five targeted tests is the cap.
-- BSP coverage — T-011 does not touch `bsp-qemu-virt`; BSP-side measurement is a follow-up for T-009 (Timer init / perf measurement, [planned under B0](../../../roadmap/phases/phase-b.md), not yet opened).
+- BSP coverage — T-011 does not touch `bsp-qemu-virt`; BSP-side measurement is a follow-up for [T-009](T-009-timer-init-cntvct.md) (Timer init / perf measurement) and the IRQ-wiring task [T-012](T-012-exception-and-irq-infrastructure.md) (exception infrastructure, B1 Draft).
 - `ResetQueuesCpu` or `FakeCpu` API changes — existing test-harness shapes are sufficient.
-- Performance tests — measurements are the scope of T-009 (Timer init / perf measurement, [planned under B0](../../../roadmap/phases/phase-b.md), not yet opened).
+- Performance tests — measurements are the scope of [T-009](T-009-timer-init-cntvct.md) (Timer init / perf measurement, `In Review` since 2026-04-23).
 - New ADRs — the code shapes already exist; T-011 only writes tests.
 - Test-hal crate coverage improvements — 95 %+ already; the remaining gaps are no-op stubs.
 

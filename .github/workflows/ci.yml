@@ -144,23 +144,27 @@ jobs:
         run: |
           rustup toolchain install $NIGHTLY_PIN --component llvm-tools-preview --no-self-update
           rustup override set $NIGHTLY_PIN
-      - name: Cache cargo registry, bin (cargo-llvm-cov), and llvm-cov target
+      - name: Install pinned cargo-llvm-cov via prebuilt-binary action
+        # taiki-e/install-action downloads a prebuilt cargo-llvm-cov
+        # binary instead of compiling from source. Two wins versus the
+        # earlier `cargo install --locked`: (1) the version is pinned
+        # explicitly here, so an upstream cargo-llvm-cov release cannot
+        # silently change the coverage numbers; (2) it's a download
+        # rather than a 1-2 min compile, so the cache-miss path is fast.
+        # Bump CARGO_LLVM_COV_VERSION below in lockstep with NIGHTLY_PIN
+        # — see docs/guides/ci.md "Nightly pinning" for the procedure.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.6.16
+      - name: Cache cargo registry and llvm-cov target
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-llvmcov-${{ env.NIGHTLY_PIN }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-llvmcov-${{ env.NIGHTLY_PIN }}-
-      - name: Install cargo-llvm-cov (cached)
-        run: |
-          # `cargo install --locked cargo-llvm-cov` is idempotent: if the
-          # pinned version is already in ~/.cargo/bin from the cache
-          # restore above, this is a no-op (~1 s) instead of a 1-2 min
-          # rebuild.
-          cargo install --locked cargo-llvm-cov
       - name: cargo llvm-cov --summary-only
         run: cargo llvm-cov --workspace --exclude tyrne-bsp-qemu-virt --summary-only

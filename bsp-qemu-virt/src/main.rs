@@ -31,7 +31,7 @@ use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
-use tyrne_hal::{Console, FmtWriter};
+use tyrne_hal::{Console, FmtWriter, Timer};
 use tyrne_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
 use tyrne_kernel::ipc::{IpcQueues, Message, RecvOutcome};
 use tyrne_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
@@ -178,6 +178,13 @@ static CPU: StaticCell<QemuVirtCpu> = StaticCell::new();
 
 /// The PL011 console — used by task functions for diagnostic output.
 static CONSOLE: StaticCell<Pl011Uart> = StaticCell::new();
+
+/// Boot-time `now_ns()` snapshot, written once by `kernel_entry` after the
+/// CPU is constructed and read by `task_a` to compute the boot-to-end
+/// elapsed time. T-009 measurement scaffold; replaced by a richer
+/// instrumentation surface when the first hypothesis-driven performance
+/// review is conducted.
+static BOOT_NS: StaticCell<u64> = StaticCell::new();
 
 // ─── IPC infrastructure ───────────────────────────────────────────────────────
 
@@ -417,6 +424,23 @@ fn task_a() -> ! {
     );
     console.write_bytes(b"tyrne: all tasks complete\n");
 
+    // T-009 measurement: print boot-to-end elapsed time. Uses `now_ns` on
+    // the live Timer impl and the BOOT_NS snapshot taken in `kernel_entry`.
+    // `saturating_sub` is defensive — the hardware counter is monotonic so
+    // `now >= boot_ns` always holds, but the saturating form makes the
+    // subtraction's correctness obvious to a reader scanning for overflow
+    // hazards.
+    //
+    // SAFETY: CPU and BOOT_NS were both initialised in `kernel_entry`
+    // before `start()`; single-core cooperative scheduling prevents any
+    // concurrent writer. Audit: UNSAFE-2026-0010.
+    let elapsed_ns = unsafe {
+        let cpu = (*CPU.0.get()).assume_init_ref();
+        let boot_ns = *(*BOOT_NS.0.get()).assume_init_ref();
+        cpu.now_ns().saturating_sub(boot_ns)
+    };
+    let _ = writeln!(w, "tyrne: boot-to-end elapsed = {elapsed_ns} ns",);
+
     loop {
         core::hint::spin_loop();
     }
@@ -463,6 +487,29 @@ pub extern "C" fn kernel_entry() -> ! {
     let cpu = unsafe { (*CPU.0.get()).assume_init_ref() };
 
     console.write_bytes(b"tyrne: hello from kernel_main\n");
+
+    // ── Timer banner + boot timestamp (T-009) ───────────────────────────────
+    //
+    // The CPU's Timer impl is live the moment `QemuVirtCpu::new` returned
+    // (it sampled CNTFRQ_EL0 and cached the resolution). Print the timer
+    // parameters so QEMU output makes the measurement visible, then
+    // snapshot `now_ns()` so `task_a`'s "all tasks complete" path can
+    // print boot-to-end elapsed nanoseconds.
+    {
+        let mut w = FmtWriter(console);
+        let _ = writeln!(
+            w,
+            "tyrne: timer ready ({} Hz, resolution {} ns)",
+            cpu.frequency_hz(),
+            cpu.resolution_ns()
+        );
+    }
+    let boot_ns = cpu.now_ns();
+    // SAFETY: single-core; no concurrent writer exists before `start()`.
+    // Audit: UNSAFE-2026-0001.
+    unsafe {
+        (*BOOT_NS.0.get()).write(boot_ns);
+    }
 
     // ── Kernel-object setup ───────────────────────────────────────────────────
 

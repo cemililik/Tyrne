@@ -26,6 +26,31 @@ Chosen option: **<Option X>**.
 
 <Why this one. Usually a paragraph or two connecting the decision drivers to the chosen option.>
 
+### Dependency chain
+
+<List every task / piece of infrastructure / prior decision that must already
+exist for this ADR's chosen option to be **fully** in effect, in
+implementation order. Each line either points at an existing T-NNN file or
+flags it as a gap that must be opened before the ADR claims its full benefit.
+This subsection exists to prevent the failure mode the A → B0 arc rediscovered
+four times: an ADR's "future task X will do Y" handwave going unverified until
+implementation surfaces the gap (see ADR-0025 §Rule 1 (forward-reference contract)).>
+
+Example:
+```
+For this decision to be fully in effect:
+1. CNTVCT_EL0 read path — T-009 (In Review)
+2. Generic-timer compare register programming — T-012 (Draft, IRQ-wiring task)
+3. GICv2 distributor + CPU interface configuration — T-012
+4. EL1 exception vector table install — T-012
+
+T-009 closes only step 1. Steps 2-4 are scoped under T-012, opened
+in the same commit as this ADR.
+```
+
+If a step has no T-NNN slot, the ADR cannot Accept until one is opened (per
+ADR-0025 §Rule 1 (forward-reference contract)).
+
 ## Consequences
 
 ### Positive

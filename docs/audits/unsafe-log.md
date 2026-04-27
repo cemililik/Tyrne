@@ -79,6 +79,10 @@ Both forms are time-stamped so a reader can reconstruct the entry's state at any
 - **Rejected alternatives:** The compiler cannot derive `Send`/`Sync` for structs containing raw pointers; since `QemuVirtCpu` uses inline assembly to access system registers rather than storing raw pointers, this is a marker assertion rather than a pointer-safety claim.
 - **Reviewed by:** @cemililik (self-review, solo phase).
 - **Status:** Active.
+- **Amendment (2026-04-23, commit `39fb66c`): scope extended to cover the post-T-009 struct shape.** T-009 added two `u64` fields to `QemuVirtCpu` — `frequency_hz` and `resolution_ns` — populated once in `new()` from `MRS CNTFRQ_EL0` and the derived round-to-nearest resolution. The original body's *Invariants relied on* line "`QemuVirtCpu` is a zero-size type with no fields" no longer holds; this Amendment records the new invariants explicitly without rewriting the original entry (per unsafe-policy §3 append-only).
+  - **Updated invariant:** `QemuVirtCpu` holds two `u64` fields written exactly once at construction and never mutated thereafter; it has no interior mutability and no pointers. The Send/Sync claim now rests on "fields are immutable after `new()`" rather than on "fields do not exist".
+  - **Updated invariant:** The hardware resources accessed via per-core system registers now include the ARM Generic Timer (`CNTVCT_EL0`, `CNTFRQ_EL0`) in addition to DAIF and MPIDR. All three are per-core registers, so the same single-core thread-locality argument applies.
+  - **Rejected alternatives unchanged:** wrapping the cached fields in `AtomicU64` would add overhead with no benefit — the values are written once and read many times, with no concurrent writer in the v1 single-core cooperative model.
 
 ### UNSAFE-2026-0007 — inline assembly in `QemuVirtCpu::Cpu` methods
 
@@ -209,4 +213,46 @@ Both forms are time-stamped so a reader can reconstruct the entry's state at any
   - Interrupts are masked by `IrqGuard` for the duration of the switch.
 - **Rejected alternatives:** Extending the `&mut self` signatures is the hazard UNSAFE-2026-0012 describes; see ADR-0021 §Decision outcome. Using `NonNull<T>` instead of `*mut T` throughout would add a `NonNull::as_mut` call at every site and does not strengthen the aliasing contract (the caller already guarantees non-null via the shared safety contract). `core::ptr::addr_of_mut!` can avoid constructing an intermediate `&mut` to the parent scheduler when walking into `self.contexts`, but the context-switch call still uses the split-borrow idiom documented under UNSAFE-2026-0008; no net change.
 - **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
+- **Status:** Active.
+
+### UNSAFE-2026-0015 — generic-timer system-register reads (`CNTPCT_EL0`, `CNTFRQ_EL0`)
+
+- **Introduced:** 2026-04-23, T-009 — Timer trait implementation for QEMU virt.
+- **Location:** [`bsp-qemu-virt/src/cpu.rs`](../../bsp-qemu-virt/src/cpu.rs) — `QemuVirtCpu::new` (one `MRS CNTFRQ_EL0`) and `<QemuVirtCpu as Timer>::now_ns` (one `MRS CNTPCT_EL0` per call).
+- **Operation:** Two read-only inline-asm `MRS` instructions:
+  - `MRS xN, CNTFRQ_EL0` — reads the firmware-set generic-timer frequency in Hz. Sampled exactly once per `QemuVirtCpu` instance, at construction.
+  - `MRS xN, CNTPCT_EL0` — reads the 64-bit free-running system counter. Sampled on every call to `now_ns`. The architecture guarantees monotonic non-decreasing reads.
+- **Invariants relied on:**
+  - Both registers are non-privileged reads at EL1; QEMU virt and any aarch64 hardware Tyrne targets run the kernel at EL1 by construction.
+  - `MRS` does not modify any state; `options(nostack, nomem)` is correct (no stack pointer touch, no memory access from the asm itself).
+  - `CNTFRQ_EL0` is set by firmware before kernel entry. `QemuVirtCpu::new` asserts it is non-zero; a zero value would cause a divide-by-zero in the resolution computation, so failing loudly at boot is preferable to a silent infinite resolution.
+  - `CNTPCT_EL0` is monotonic per ARM ARM §D11 — successive reads on the same core return non-decreasing values without an explicit barrier. No `ISB` is issued before the read; the trait contract permits sub-resolution drift across reads.
+  - Reordering: the inline-asm block carries no `clobber_abi` and does not declare `memory`, so the compiler may reorder it relative to surrounding non-asm code. For latency measurement this is acceptable; correctness of the kernel does not depend on the precise placement of the read.
+- **Rejected alternatives:**
+  - **Safe Rust intrinsic.** None exists; system-register access is intrinsically `unsafe` at the asm level. The `Timer` trait is the safe wrapper.
+  - **A higher-level crate** (e.g. `cortex-a` or `aarch64-cpu`). Would add a dependency for two `MRS` reads. Per the project's dependency policy (`docs/standards/infrastructure.md`), pulling a crate for a six-line operation is out of proportion. Revisit if a third or fourth system-register surface joins the picture.
+  - **Reading `CNTPCT_EL0` only and computing `freq` from a known-clock calibration.** Would couple the BSP to a specific platform; QEMU virt and Pi 4 differ. Reading firmware-set `CNTFRQ_EL0` is the portable choice.
+  - **Caching `now_ns` results.** Would defeat the trait's monotonic-time guarantee. Not considered.
+- **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
+- **Status:** Active. **Note for casual readers:** the original *Operation* / *Invariants* fields above describe `CNTPCT_EL0` and an "EL1 unconditional" claim; both are superseded by the 2026-04-23 Amendment below — current implementation reads `CNTVCT_EL0` and the EL precondition is documented against ADR-0012's non-VHE EL1 path. Read the Amendment first when assessing the current state of this audit entry.
+- **Amendment (2026-04-23, commit `39fb66c`): switched read register from `CNTPCT_EL0` (physical) to `CNTVCT_EL0` (virtual); EL precondition language tightened.** Two corrections caught in the T-009 second-read review (commit `1df3641` + earlier `beb0963`). The original entry body is left intact per unsafe-policy §3; this Amendment records the change explicitly.
+  - **Register family corrected.** ADR-0010's *References* list and ADR-0022's first-rider sub-rider both name the **virtual** family (`CNTVCT_EL0`, `CNTV_CVAL_EL0`, `CNTV_TVAL_EL0`, `CNTV_CTL_EL0`). The original implementation read `CNTPCT_EL0` (physical), which on QEMU virt with `CNTVOFF_EL2 = 0` coincides with `CNTVCT_EL0` but would silently mismatch the deferred deadline-arming side once a non-zero offset was set. Read site is now `MRS xN, CNTVCT_EL0`; the `MRS xN, CNTFRQ_EL0` half is unchanged because `CNTFRQ_EL0` is shared between physical and virtual families.
+  - **EL precondition tightened.** The original *Invariants relied on* line "QEMU virt and any aarch64 hardware Tyrne targets run the kernel at EL1 by construction" was overconfident. ARM ARM §D11 documents `CNTHCTL_EL2.EL1{V,P}CTEN` gating that applies to EL1 access in VHE mode (`HCR_EL2.{E2H, TGE} = {1, 0}`). Tyrne enters `kernel_entry` at EL1 in non-VHE mode per [ADR-0012](../decisions/0012-boot-flow-qemu-virt.md), where the gating bits do not apply, so `CNTVCT_EL0` and `CNTFRQ_EL0` remain unconditionally readable — but the precondition now cites ADR-0012 explicitly rather than asserting "by construction" without backup.
+  - **Saturating arithmetic.** The conversion path `count → ns` was extracted to `tyrne_hal::timer::ticks_to_ns`, which uses 128-bit intermediate arithmetic and a saturating cast back to `u64`. `ticks_to_ns` returns `u64::MAX` if the elapsed nanoseconds would overflow `u64` — preserving `Timer::now_ns`'s monotonic-time contract instead of silently wrapping. The original entry's "monotonic per ARM ARM §D11" invariant is now backed by a software-side guarantee at the conversion boundary, not only a hardware-side guarantee at the counter.
+
+### UNSAFE-2026-0016 — boot-time `CurrentEL` self-check in `QemuVirtCpu::new`
+
+- **Introduced:** 2026-04-27, T-009 second-read review follow-up. Closes the runtime-check half of Review 1's Yüksek #1 finding (the documentation half landed in commit `39fb66c`).
+- **Location:** [`bsp-qemu-virt/src/cpu.rs`](../../bsp-qemu-virt/src/cpu.rs) — `QemuVirtCpu::new`, prior to the generic-timer reads it audits.
+- **Operation:** One read-only inline-asm `MRS xN, CurrentEL` instruction. The two-bit Exception-Level field (bits [3:2] of `CurrentEL`) is shifted into the low bits and asserted equal to `1` (EL1). A mismatch panics with the observed EL — turning a future boot-flow regression into a loud, named boot-time error rather than letting subsequent `MRS CNTVCT_EL0` / `MRS CNTFRQ_EL0` calls trap or read undefined values at EL2 / EL3.
+- **Invariants relied on:**
+  - `CurrentEL` is readable at every Exception Level. ARM ARM §D11.2 specifies the register layout; bits [3:2] hold the current EL.
+  - The MRS does not modify any state; `options(nostack, nomem)` is correct (no stack pointer touch, no memory access from the asm itself).
+  - The shift `(raw >> 2) & 0b11` extracts the EL field exactly; the implementation does not depend on RES0 bits being zero.
+- **Rejected alternatives:**
+  - **Skip the check, document only.** This is what commit `39fb66c` did; the second-read review's Yüksek #1 explicitly asked for the runtime check on top of documentation. Skipping leaves a boot-flow regression silently producing wrong timer values until much later behaviour falls out of spec.
+  - **Move the check into `boot.s`.** The boot stub's job is to set up the C-ABI environment, not to validate Exception Level (boot.s already presumes EL1 via `MSR cpacr_el1`). Putting the check at the head of `QemuVirtCpu::new` means it runs at the latest possible moment before the assumption is load-bearing — narrow scope, narrow audit.
+  - **A higher-level crate** (`aarch64-cpu` or similar). Same dependency-policy argument as UNSAFE-2026-0015: pulling a crate for one MRS is disproportionate.
+  - **Defer the check until preemption / SMP work lands.** v1 has no caller other than `kernel_entry`, but the cost of the check (one MRS + one compare) is negligible and the defensive value compounds the moment a second BSP or a future EL-drop sequence ships.
+- **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent + two independent review agents).
 - **Status:** Active.

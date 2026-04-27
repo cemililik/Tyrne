@@ -2,7 +2,7 @@
 
 > A capability-based microkernel for high-assurance devices, written in Rust.
 
-**Status:** Pre-alpha — architecture phase. No bootable kernel yet. Design documents and Architecture Decision Records are being written before implementation begins.
+**Status:** Pre-alpha. Phase A complete (2026-04-21) — the kernel boots on QEMU `virt` aarch64 and runs a two-task IPC demo end-to-end with capability-gated message transfer. Phase B underway: scheduler hardening, idle task, monotonic time source via the ARM Generic Timer, and the path toward EL drop / MMU / userspace. See [`docs/roadmap/current.md`](docs/roadmap/current.md) for the active task.
 
 ---
 
@@ -13,7 +13,7 @@ Tyrne is an operating system microkernel being built from scratch around two har
 1. **Security-first.** A capability-based design in the spirit of seL4, Hubris, and Fuchsia/Zircon. There is no ambient authority: every action a component can take is tied to a capability it was explicitly granted. Drivers, filesystems, and network stacks live in userspace compartments, not in the kernel. Memory safety is enforced by Rust; every `unsafe` block is justified, bounded, and audited.
 2. **Heterogeneous hardware.** The same kernel is intended to scale from constrained smart-home devices to single-board computers, and eventually to mobile-class hardware, through a cleanly separated Hardware Abstraction Layer (HAL). The first real hardware target is the Raspberry Pi 4 (aarch64, Cortex-A72).
 
-The name comes from Latin *umbra* — "shadow" — for the silent, minimal, always-present guardian a kernel should be.
+The name *Tyrne* is a clean-slate invented identifier — no etymology, no shadow / guardian motif, no shared trademark surface.
 
 ## Hardware tiers
 
