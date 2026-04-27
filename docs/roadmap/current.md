@@ -22,9 +22,10 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
   - [Security review — Tyrne → Phase A exit (2026-04-21)](../analysis/reviews/security-reviews/2026-04-21-tyrne-to-phase-a.md)
   - [A6 baseline performance review (2026-04-21)](../analysis/reviews/performance-optimization-reviews/2026-04-21-A6-baseline.md)
 - **Active decisions:**
-  - [ADR-0010 — Timer HAL trait](../decisions/0010-timer-trait.md) — `Accepted` (2026-04-20). BSP side implemented by T-009 (2026-04-23); IRQ-delivery half deferred to a future task.
+  - [ADR-0010 — Timer HAL trait](../decisions/0010-timer-trait.md) — `Accepted` (2026-04-20). BSP side implemented by T-009 (2026-04-23); IRQ-delivery half deferred to T-012.
   - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — `Accepted` (2026-04-22). Implemented by T-006.
-  - [ADR-0022 — Idle task and typed scheduler deadlock error](../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — `Accepted` (2026-04-22). Implemented by T-007. First rider's WFI activation gated on a follow-up IRQ-wiring task; T-009 closes only the time-source half.
+  - [ADR-0022 — Idle task and typed scheduler deadlock error](../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — `Accepted` (2026-04-22). Implemented by T-007. First rider's WFI activation gated on T-012; T-009 closes only the time-source half.
+  - [ADR-0024 — EL drop to EL1 policy](../decisions/0024-el-drop-policy.md) — `Proposed` (2026-04-27). Cool-down period until ≥ 2026-04-28 per ADR-0013 §"ADR cool-down". Implemented by T-013 (B1, Draft). First real test of the new ADR-0013 rules.
 - **Next task to open:** T-008 (architecture docs) — last B0 task without a file. T-011 promotes from `Draft` to `In Progress` once T-006 and T-007 are `Done`.
 - **Next review trigger:** B0 closure — a full business review once T-006..T-011 are all Done. (T-006 mini-retro filed 2026-04-22.)
 
