@@ -55,14 +55,18 @@ Today `coverage` is informational: `continue-on-error: true` in the workflow. Af
 
 Miri and cargo-llvm-cov use a **pinned** nightly declared via the `NIGHTLY_PIN` env var at the top of [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml). Rolling nightly means that a miri or `llvm-tools` regression on the public nightly channel breaks CI without any commit of ours being the cause; pinning isolates us from that.
 
-Current pin: `nightly-2026-01-15` (set 2026-04-23 when R6 landed).
+cargo-llvm-cov itself is also pinned — installed via [`taiki-e/install-action`](https://github.com/taiki-e/install-action) which downloads a prebuilt binary rather than compiling from source. The version is in the workflow as `tool: cargo-llvm-cov@<x.y.z>` (`0.6.16` at the time of writing). Pinning the tool prevents an upstream release from silently changing what "coverage" reports.
 
-To bump the pin:
+Current pins:
+- `NIGHTLY_PIN = nightly-2026-01-15` (set 2026-04-23 when R6 landed).
+- `cargo-llvm-cov 0.6.16` (set 2026-04-28; see `coverage` job in `ci.yml`).
 
-1. Open an issue titled "Bump nightly pin to nightly-YYYY-MM-DD" stating the reason (new Miri check we want, a compiler feature we need, a security advisory, routine refresh).
-2. Update `NIGHTLY_PIN` in `.github/workflows/ci.yml` and the "Current pin" line above.
+To bump either pin:
+
+1. Open an issue titled "Bump &lt;pin&gt; to &lt;new-version&gt;" stating the reason (new Miri check we want, a compiler feature we need, a cargo-llvm-cov bug fix, a security advisory, routine refresh).
+2. Update the `NIGHTLY_PIN` env var or the `tool: cargo-llvm-cov@…` line in `.github/workflows/ci.yml` and the "Current pins" list above.
 3. Run `cargo +nightly-YYYY-MM-DD miri test --workspace --exclude tyrne-bsp-qemu-virt` and `cargo +nightly-YYYY-MM-DD llvm-cov --workspace --exclude tyrne-bsp-qemu-virt --summary-only` locally; make sure both are green on the new pin.
-4. Land the pin bump in its own commit with `Refs:` to the issue.
+4. Land the pin bump in its own commit with `Refs:` to the issue. The two pins can be bumped together or independently.
 
 ## Branch protection and `continue-on-error`
 

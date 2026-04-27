@@ -34,14 +34,14 @@ implementation order. Each line either points at an existing T-NNN file or
 flags it as a gap that must be opened before the ADR claims its full benefit.
 This subsection exists to prevent the failure mode the A → B0 arc rediscovered
 four times: an ADR's "future task X will do Y" handwave going unverified until
-implementation surfaces the gap (see ADR-0013 §Forward-reference contract).>
+implementation surfaces the gap (see ADR-0025 §Rule 2 (forward-reference contract)).>
 
 Example:
 ```
 For this decision to be fully in effect:
 1. CNTVCT_EL0 read path — T-009 (In Review)
 2. Generic-timer compare register programming — T-012 (Draft, IRQ-wiring task)
-3. GIC v2 distributor + redistributor configuration — T-012
+3. GICv2 distributor + CPU interface configuration — T-012
 4. EL1 exception vector table install — T-012
 
 T-009 closes only step 1. Steps 2-4 are scoped under T-012, opened
@@ -49,7 +49,7 @@ in the same commit as this ADR.
 ```
 
 If a step has no T-NNN slot, the ADR cannot Accept until one is opened (per
-ADR-0013 §Forward-reference contract).
+ADR-0025 §Rule 2 (forward-reference contract)).
 
 ## Consequences
 

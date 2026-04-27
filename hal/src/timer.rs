@@ -273,6 +273,66 @@ mod tests {
         assert_eq!(resolution_ns_for_freq(2_000_000_000), 1);
     }
 
+    // ── Property-style monotonicity guards (per ADR-0010 contract) ────────────
+
+    /// Sweep increasing tick counts and assert `ticks_to_ns` never
+    /// decreases. This locks the trait-level monotonicity guarantee
+    /// against future regressions — `wrapping_mul` would silently
+    /// fail this; `saturating_mul` (the chosen behaviour) passes it.
+    /// Run for representative frequencies (1 Hz extreme, QEMU virt
+    /// 62.5 MHz, Pi-3-class 19.2 MHz, 1 GHz). Lightweight: ≤ 200
+    /// samples per frequency, all on the host.
+    #[test]
+    fn ticks_to_ns_is_monotonic_across_frequencies() {
+        for &freq in &[1, 19_200_000, 62_500_000, 1_000_000_000_u64] {
+            let mut prev = 0;
+            // Step pattern that exercises both small counts and the
+            // saturation neighbourhood — geometric progression with
+            // a final value past the saturation boundary at freq=1.
+            for &count in &[
+                0,
+                1,
+                100,
+                10_000,
+                1_000_000,
+                100_000_000,
+                10_000_000_000,
+                1_000_000_000_000,
+                u64::MAX / 2,
+                u64::MAX,
+            ] {
+                let now = ticks_to_ns(count, freq);
+                assert!(
+                    now >= prev,
+                    "monotonicity violated at freq={freq}, count={count}: \
+                     prev={prev}, now={now}"
+                );
+                prev = now;
+            }
+        }
+    }
+
+    /// Confirm that the saturation branch fires at `u64::MAX` for at
+    /// least one realistic frequency, and that successive calls past
+    /// that point all return `u64::MAX` (no wrap to 0). Pairs with
+    /// `ticks_to_ns_saturates_at_u64_max` above; this version tests
+    /// the *plateau* property rather than just the single value.
+    #[test]
+    fn ticks_to_ns_plateaus_at_u64_max_after_saturation() {
+        // At 1 Hz, u64::MAX ticks = u64::MAX seconds = vastly more than
+        // u64::MAX ns. Any count past the saturation boundary returns
+        // u64::MAX; further increases stay at u64::MAX (plateau).
+        let just_over = u64::MAX / NANOS_PER_SECOND + 1;
+        let way_over = u64::MAX / 2;
+        let max = u64::MAX;
+        assert_eq!(ticks_to_ns(just_over, 1), u64::MAX);
+        assert_eq!(ticks_to_ns(way_over, 1), u64::MAX);
+        assert_eq!(ticks_to_ns(max, 1), u64::MAX);
+        // Plateau holds: saturated value never decreases as count grows.
+        assert!(ticks_to_ns(way_over, 1) >= ticks_to_ns(just_over, 1));
+        assert!(ticks_to_ns(max, 1) >= ticks_to_ns(way_over, 1));
+    }
+
     // ── Explicit-panic-on-zero-frequency contract ────────────────────────────
 
     #[test]

@@ -52,6 +52,7 @@ Each ADR contains:
 | 0021 | [Raw-pointer scheduler IPC-bridge API](0021-raw-pointer-scheduler-ipc-bridge.md) | Accepted | 2026-04-22 |
 | 0022 | [Idle task and typed scheduler deadlock error](0022-idle-task-and-typed-scheduler-deadlock.md) | Accepted | 2026-04-22 |
 | 0024 | [EL drop to EL1 policy](0024-el-drop-policy.md) | Proposed | 2026-04-27 |
+| 0025 | [ADR governance amendments: cool-down, forward-reference contract, rider hygiene](0025-adr-governance-amendments.md) | Proposed | 2026-04-28 |
 
 ## Creating a new ADR
 

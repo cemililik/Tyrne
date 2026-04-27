@@ -144,33 +144,6 @@ Reviews are **event-triggered**, not calendar-triggered. See the individual revi
 
 The roadmap does not replace ADRs. It sequences them. A task may require an ADR as an acceptance criterion; an ADR may result in new tasks being added.
 
-The Phase A → B0 implementation arc surfaced three rules that the original framing of this ADR left implicit. They are recorded here so they are followed by every future ADR rather than rediscovered each time.
-
-#### ADR cool-down: no same-day Accept
-
-An ADR drafted today does not move from `Proposed` to `Accepted` today. A minimum of one calendar day separates the two states; the maintainer (or a reviewing agent) re-reads the draft after sleeping on it, then accepts it. This rule exists because four ADRs in the A → B0 arc (ADR-0021 mid-proposal revision, ADR-0021 post-Accept rider, ADR-0022 first rider, ADR-0022 first-rider sub-rider) had implementation-detected gaps that an extra day of reading would have caught at near-zero cost. Faster acceptance saves hours; slower acceptance saves rework.
-
-The cool-down does not apply to status flips that don't change content (e.g. fixing a typo, reformatting). It applies to "the decision the ADR records is final" transitions.
-
-#### Forward-reference contract: every "future task" claim is grounded
-
-If an ADR — in any section, including riders — states "task X will do Y", task X must be either:
-
-- An existing T-NNN file (any status, including `Draft`), or
-- Opened as part of the same commit that lands the ADR claim.
-
-"Future, not-yet-opened task" wording is forbidden. The reason: forward-references that have no slot drift into purgatory. ADR-0022's first rider's claim "T-009 wires a timer IRQ" was wrong, in part, because no task file constrained T-009's actual scope at the moment the rider was written. The rider would have caught itself if the contract had required pointing at a real T-009 file.
-
-When a future task genuinely cannot be opened yet (because its scope depends on something the maintainer has not decided), state that explicitly: "see Open questions §X — task TBD pending decision Y" — and the corresponding *Open questions* section must list the unresolved input.
-
-#### Riders are not failures; their *frequency* is a signal
-
-ADR riders — `Revision notes` entries appended after the original Accept, and Amendment blocks in the audit log — are valid records of learning. They are not failures of the ADR process; they are how implementation feedback enters the design history. Trying to eliminate them is overcorrection.
-
-What *is* a signal is the *rate* of riders per ADR over time. An ADR that picks up 3+ riders in its first week of life indicates the original draft missed something structural. The rule is not "no riders"; it is "if rider rate climbs, audit the ADR-writing process, not the rider-writers."
-
-Riders themselves are append-only by the same logic that makes the unsafe-log append-only (`docs/standards/unsafe-policy.md §3`): the original body stays intact; the rider explicitly states what it changes and why. In-place rewrites of the original body are forbidden.
-
 ## Consequences
 
 ### Positive
@@ -231,6 +204,10 @@ Riders themselves are append-only by the same logic that makes the unsafe-log ap
 - **Priority and size fields on tasks.** Add if pain shows.
 - **Review archive policy.** As `analysis/reviews/<type>/` grows, an index by milestone or by calendar period may be needed.
 - **Master-plan evolution history.** A master plan is a living document; should we track its amendments in a `CHANGELOG.md` within each review type, or inline in the file? Defer until the first amendment.
+
+## Revision notes
+
+- **2026-04-28 — pointer to ADR-0025.** [ADR-0025 — ADR governance amendments](0025-adr-governance-amendments.md) extends this ADR with three rules surfaced by the Phase A → B0 implementation arc: ADR cool-down (no same-day Accept), Forward-reference contract (every "future task X will do Y" grounded at a real T-NNN), and Riders-are-not-failures (frequency is the signal). ADR-0025 stands on its own; this ADR's body is intact. An earlier draft (commit `56fd9eb`, since reverted) attempted to rewrite this ADR's body in place — that was an append-only-policy violation surfaced by the second-read review and corrected by extracting the rules into ADR-0025.
 
 ## References
 

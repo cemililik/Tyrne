@@ -45,7 +45,7 @@ VHE is explicitly off: `HCR_EL2.{E2H, TGE}` are both cleared to zero before the 
 
 ### Dependency chain
 
-For Option A to be fully in effect, the following must exist (every step grounded in a real T-NNN per ADR-0013 §"Forward-reference contract"):
+For Option A to be fully in effect, the following must exist (every step grounded in a real T-NNN per ADR-0025 §Rule 2 (forward-reference contract)):
 
 1. **`CurrentEL` read primitive.** ✅ Exists today — UNSAFE-2026-0016 in `QemuVirtCpu::new`, shipped with T-009 (commit `db3a4c7`). The same MRS pattern can be lifted to a HAL-level helper in step 3 below; the audit precedent is in place.
 2. **`boot.s` EL2→EL1 transition asm.** Implemented by **[T-013](../analysis/tasks/phase-b/T-013-el-drop-to-el1.md)** (`Draft`, opened 2026-04-27 alongside this ADR). Configures `HCR_EL2` / `SPSR_EL2` / `ELR_EL2` and issues `ERET`. Includes K3-12 (explicit `msr daifset, #0xf` at the head of `_start`).

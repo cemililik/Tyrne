@@ -5,7 +5,7 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 ---
 
 - **Active phase:** B — opened 2026-04-21. First milestone B0 in progress.
-- **Active milestone:** B0 — Phase A exit hygiene (T-006, T-007, T-009 In Review; T-011 Draft; T-008 remains to open). B1 — Drop to EL1 + exception infrastructure (T-012 Draft, opened 2026-04-27 to ground ADR-0022 first rider's previously-handwaved IRQ-wiring forward-reference per ADR-0013 §"Forward-reference contract").
+- **Active milestone:** B0 — Phase A exit hygiene (T-006, T-007, T-009 In Review; T-011 Draft; T-008 remains to open). B1 — Drop to EL1 + exception infrastructure (T-012 Draft, opened 2026-04-27 to ground ADR-0022 first rider's previously-handwaved IRQ-wiring forward-reference per ADR-0025 §Rule 2 (forward-reference contract)).
 - **Active task:** None. Next: T-008 (architecture docs) when opened, T-011 (missing tests) once dependent tasks reach `Done`, or T-012 (exception infrastructure) once ADR-0024 is `Accepted`.
 - **In review:**
   - [T-006 — Raw-pointer scheduler API refactor](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — `In Review` since 2026-04-22.
@@ -25,7 +25,7 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
   - [ADR-0010 — Timer HAL trait](../decisions/0010-timer-trait.md) — `Accepted` (2026-04-20). BSP side implemented by T-009 (2026-04-23); IRQ-delivery half deferred to T-012.
   - [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — `Accepted` (2026-04-22). Implemented by T-006.
   - [ADR-0022 — Idle task and typed scheduler deadlock error](../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — `Accepted` (2026-04-22). Implemented by T-007. First rider's WFI activation gated on T-012; T-009 closes only the time-source half.
-  - [ADR-0024 — EL drop to EL1 policy](../decisions/0024-el-drop-policy.md) — `Proposed` (2026-04-27). Cool-down period until ≥ 2026-04-28 per ADR-0013 §"ADR cool-down". Implemented by T-013 (B1, Draft). First real test of the new ADR-0013 rules.
+  - [ADR-0024 — EL drop to EL1 policy](../decisions/0024-el-drop-policy.md) — `Proposed` (2026-04-27). Cool-down period until ≥ 2026-04-28 per ADR-0025 §Rule 1 (cool-down). Implemented by T-013 (B1, Draft). First real test of the new ADR-0025 rules.
 - **Next task to open:** T-008 (architecture docs) — last B0 task without a file. T-011 promotes from `Draft` to `In Progress` once T-006 and T-007 are `Done`.
 - **Next review trigger:** B0 closure — a full business review once T-006..T-011 are all Done. (T-006 mini-retro filed 2026-04-22.)
 

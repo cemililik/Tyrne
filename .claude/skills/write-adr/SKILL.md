@@ -36,7 +36,7 @@ Before starting, the agent must have:
    - **Decision drivers.** Bulleted list of the forces pushing toward or away from each option. These must be specific to this decision; do not reuse generic drivers.
    - **Considered options.** At least two; three is often better. Each option gets a one-sentence description here.
    - **Decision outcome.** State the chosen option and connect the decision drivers to the choice. One or two paragraphs.
-   - **Decision outcome → Dependency chain.** A subsection listing every task / piece of infrastructure / prior decision that must already exist for the chosen option to be **fully** in effect. Each line either points at an existing T-NNN file or is opened as part of the same commit that lands the ADR (per ADR-0013 §Forward-reference contract — "future, not-yet-opened task" wording is forbidden). If a step has no T-NNN slot, **stop** and open the slot first; the ADR cannot Accept until the chain is grounded.
+   - **Decision outcome → Dependency chain.** A subsection listing every task / piece of infrastructure / prior decision that must already exist for the chosen option to be **fully** in effect. Each line either points at an existing T-NNN file or is opened as part of the same commit that lands the ADR (per [ADR-0025](../../../docs/decisions/0025-adr-governance-amendments.md) §Rule 2 — "future, not-yet-opened task" wording is forbidden). If a step has no T-NNN slot, **stop** and open the slot first; the ADR cannot Accept until the chain is grounded.
    - **Consequences.** Three subsections: *Positive*, *Negative*, *Neutral*. Negative consequences must include a mitigation or an explicit "we accept this cost because…".
    - **Pros and cons of the options.** For each option, a short list of pros and cons. The rejected options need real cons, not strawmen.
    - **References.** External links, prior art, papers, existing systems. At least one reference for anything non-obvious.
@@ -55,7 +55,7 @@ Before starting, the agent must have:
    - Body: one or two sentences explaining the decision.
    - Trailer: `Refs: ADR-NNNN`.
 
-10. **Cool-down before Accept.** The ADR lands at status `Proposed`. Per ADR-0013 §"ADR cool-down: no same-day Accept", a minimum of one calendar day separates `Proposed` from `Accepted`. Do not flip the status in the same session as drafting. The cool-down is the cheapest mechanism for catching the implementation-feedback gaps that a same-day Accept misses (the A → B0 arc rediscovered this lesson four times). Accept happens in a separate, second commit after re-reading.
+10. **Cool-down before Accept.** The ADR lands at status `Proposed`. Per [ADR-0025](../../../docs/decisions/0025-adr-governance-amendments.md) §Rule 1 ("ADR cool-down: no same-day Accept"), a minimum of one calendar day separates `Proposed` from `Accepted`. Do not flip the status in the same session as drafting. The cool-down is the cheapest mechanism for catching the implementation-feedback gaps that a same-day Accept misses (the A → B0 arc rediscovered this lesson four times). Accept happens in a separate, second commit after re-reading.
 
 ## Acceptance criteria
 
