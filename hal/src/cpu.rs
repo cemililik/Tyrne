@@ -120,3 +120,60 @@ impl<C: Cpu> Drop for IrqGuard<'_, C> {
         self.cpu.restore_irq_state(self.prev);
     }
 }
+
+/// Read the current Exception Level on aarch64 bare-metal targets.
+///
+/// Returns the 2-bit `EL` field of the `CurrentEL` system register
+/// (0 = EL0, 1 = EL1, 2 = EL2, 3 = EL3). This is the safe-Rust entry
+/// point for any code that needs to assert which EL it is currently
+/// running at — it lets callers avoid duplicating the inline-asm `MRS`
+/// pattern from one site to another.
+///
+/// Free function rather than a [`Cpu`] trait method per ADR-0024
+/// §Open questions: the early-boot path (between `_start` and
+/// `kernel_entry`) needs to read the EL before any `Cpu` instance has
+/// been constructed, so the helper must be callable without a `&self`
+/// receiver. Test mocks (e.g. the `FakeCpu` instances in
+/// [`tyrne_test_hal`] and the kernel's `sched` test module) therefore
+/// do not need to declare an EL of their own.
+///
+/// # Availability
+///
+/// Defined only on `target_arch = "aarch64"` AND `target_os = "none"`
+/// (i.e. the bare-metal kernel build). On hosted targets — including
+/// `aarch64-apple-darwin` running unit tests, where `CurrentEL` reads
+/// would trap with a `SIGILL` because user code is not in EL1 — the
+/// function is intentionally absent. Host tests must mock the EL
+/// rather than call this helper.
+///
+/// # Safety
+///
+/// `MRS x, CurrentEL` is a non-privileged read of a read-only system
+/// register. It is callable at every EL ≥ 0, does not modify any
+/// state, and `options(nostack, nomem)` is correct — there is no
+/// stack-pointer touch and no memory access. The function presents
+/// itself as `safe` because it upholds those invariants and returns a
+/// plain `u8`. Audit: UNSAFE-2026-0018.
+#[cfg(all(target_arch = "aarch64", target_os = "none"))]
+#[must_use]
+pub fn current_el() -> u8 {
+    let raw: u64;
+    // SAFETY: see the function-level safety paragraph above. The
+    // read of `CurrentEL` is non-privileged, side-effect-free, and
+    // available at every EL. Audit: UNSAFE-2026-0018.
+    unsafe {
+        core::arch::asm!(
+            "mrs {}, CurrentEL",
+            out(reg) raw,
+            options(nostack, nomem),
+        );
+    }
+    // CurrentEL bits [3:2] hold the EL field (0..=3); mask + shift
+    // and the result fits in u8 trivially.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "EL field is 2 bits — masked value is in 0..=3, fits in u8"
+    )]
+    let el = ((raw >> 2) & 0b11) as u8;
+    el
+}

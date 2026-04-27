@@ -34,7 +34,7 @@
 
 mod console;
 mod context_switch;
-mod cpu;
+pub mod cpu;
 mod irq_controller;
 mod mmu;
 pub mod timer;

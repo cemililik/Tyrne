@@ -12,14 +12,68 @@ Work through the items in order — each failure mode masks the next.
 
 **Question:** At what EL does QEMU (or hardware) drop us?
 
-- QEMU `virt` → EL1 (not EL2; verified 2026-04-21).
+- QEMU `virt` (default) → EL1.
+- QEMU `virt -machine virtualization=on` → EL2.
 - RPi4 → EL2 by default; must drop to EL1 before enabling kernel features.
+- TF-A / U-Boot stacks → typically EL2.
 
-**Action:** Confirm EL in the BSP header comment and in the boot sequence ADR.
-If EL transition is needed, do it before any other boot step.
+**Action:** Always drop to EL1 in the BSP's reset vector per
+[ADR-0024](../decisions/0024-el-drop-policy.md), regardless of where the
+firmware delivers the kernel. The BSP must:
+
+1. Read `CurrentEL`; mask bits[3:2] to get the EL field.
+2. If EL2: configure `HCR_EL2` (`RW=1`, `E2H=0`, `TGE=0` — non-VHE EL1),
+   `SPSR_EL2` (mode = EL1h, DAIF masked), `ELR_EL2` (post-`eret` label),
+   then `eret`.
+3. If EL1: skip the drop (no-op).
+4. If EL3 (or any unexpected value): halt loudly. v1 has no EL3-aware
+   infrastructure; ADR-0024 §Open questions tracks the future
+   EL3→EL2→EL1 chain.
+
+T-009's `UNSAFE-2026-0016` runtime check inside `QemuVirtCpu::new`
+asserts `CurrentEL == 1` after the drop has run — a load-bearing
+post-condition rather than a defensive guard.
+
+**Reference implementation:** [`bsp-qemu-virt/src/boot.s`](../../bsp-qemu-virt/src/boot.s)
++ audit entry [`UNSAFE-2026-0017`](../audits/unsafe-log.md).
 
 **What goes wrong if skipped:** System-register writes target the wrong EL;
-writes silently have no effect or trap.
+writes silently have no effect, or trap. The kernel runs `MRS DAIF`,
+`MRS MPIDR_EL1`, `MRS CNTVCT_EL0`, and (eventually) `VBAR_EL1` /
+`TTBR0_EL1` accesses that all assume EL1 — at EL2 they are different
+registers with different layouts and the kernel silently misbehaves.
+
+---
+
+## 1a. K3-12: mask DAIF at the very head of `_start`
+
+**Question:** Does `_start` mask DAIF before any other instruction?
+
+The reset vector runs with whatever PSTATE the firmware/emulator delivered.
+If interrupts are not masked, a spurious IRQ or asynchronous abort during
+the brief window between reset and the first vector-table install (later,
+in T-012) jumps into an uninstalled vector and hangs.
+
+**Action:** First instruction at `_start` must be `msr daifset, #0xf` —
+sets D, A, I, F mask bits atomically. The mask carries across the EL drop
+because `SPSR_EL2.DAIF` propagates to PSTATE on `eret`.
+
+```asm
+_start:
+    msr     daifset, #0xf       /* (1) mask everything before anything else */
+    /* ... EL drop, stack setup, BSS zero, bl kernel_entry, ... */
+```
+
+Tasks unmask interrupts explicitly via `Cpu::restore_irq_state(IrqState(0))`
+when they need them. No code path in `_start` or the early kernel
+unmasks DAIF.
+
+**What goes wrong if skipped:** A spurious interrupt during BSS zeroing
+or stack setup jumps into address 0x0 / 0x200 (the reset value of
+VBAR_EL1), fetches zeros there, and hangs silently with no output. The
+failure mode is identical to the FP/SIMD-trap-without-VBAR case below
+(item 2 / item 3) but harder to diagnose because the trigger is
+asynchronous.
 
 ---
 

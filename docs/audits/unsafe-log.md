@@ -256,3 +256,47 @@ Both forms are time-stamped so a reader can reconstruct the entry's state at any
   - **Defer the check until preemption / SMP work lands.** v1 has no caller other than `kernel_entry`, but the cost of the check (one MRS + one compare) is negligible and the defensive value compounds the moment a second BSP or a future EL-drop sequence ships.
 - **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent + two independent review agents).
 - **Status:** Active.
+
+  **Amendment (2026-04-27, T-013): assertion is now load-bearing; reads via `tyrne_hal::cpu::current_el` helper.**
+  Before T-013, the `CurrentEL == 1` assertion guarded against a hypothetical future regression — `boot.s` performed no EL transition and relied on QEMU virt's default of delivering at EL1. T-013 lands the actual EL2 → EL1 drop in `boot.s` per [ADR-0024](../decisions/0024-el-drop-policy.md); see UNSAFE-2026-0017 for the new boot-time MSR sequence. The assertion's behaviour is unchanged but its role has shifted: it is now the post-condition of T-013's `eret` rather than a safety net for an absent transition. A failure here would indicate a regression in `boot.s`'s EL drop logic (or a future EL3-entry hardware target the v1 boot path does not handle), not a missing transition. T-013's tests do not remove this assertion — per the task's acceptance criteria the assertion remains in place to catch any regression in the new transition's correctness.
+
+  As part of the same T-013 arc, the inline-asm `MRS x, CurrentEL` block this entry originally documented has been replaced by a call to `tyrne_hal::cpu::current_el()` — the safe-Rust wrapper introduced by T-013 and audited under [UNSAFE-2026-0018](#unsafe-2026-0018--tyrne_halcpucurrent_el-safe-wrapper-around-mrs-currentel). The MRS instruction is unchanged; the `unsafe` block now lives in one auditable helper rather than at the call site, and any future caller (e.g. `kernel_entry` validating the EL drop's outcome before constructing `QemuVirtCpu`) reuses the same audited path. The assertion's panic message remains identical, so external behaviour is unchanged.
+
+### UNSAFE-2026-0017 — `boot.s` reset-vector DAIF mask + EL2 → EL1 transition
+
+- **Introduced:** 2026-04-27, [T-013 — EL drop to EL1 in boot](../analysis/tasks/phase-b/T-013-el-drop-to-el1.md). Implements [ADR-0024](../decisions/0024-el-drop-policy.md)'s "always drop to EL1" policy at the BSP reset vector.
+- **Location:** [`bsp-qemu-virt/src/boot.s`](../../bsp-qemu-virt/src/boot.s) — pure aarch64 assembly; no surrounding Rust. The audit covers two contiguous code blocks at `_start`:
+  1. **K3-12 DAIF mask.** A single `msr daifset, #0xf` at the very head of `_start`, before any other code. Sets D, A, I, F mask bits so the reset vector cannot accidentally take an interrupt before the kernel installs an exception vector table.
+  2. **EL drop sequence.** `mrs x0, CurrentEL` to read the current Exception Level, masked to bits [3:2]. Branches: EL1 → fall through to the existing boot path; EL2 → configure `HCR_EL2` (RW=1, E2H=0, TGE=0; non-VHE explicit per ADR-0024), `SPSR_EL2` (mode = EL1h, DAIF masked), `ELR_EL2` (= post-`eret` label), then `eret`; any other EL (notably EL3) → halt via `wfe; b -1b` (no Rust panic infrastructure available pre-`kernel_entry`).
+- **Invariants relied on:**
+  - `MSR DAIFSet, #imm` is a write-only-to-DAIF-mask-bits instruction; available at every EL ≥ 1. The reset vector runs at the entry EL (EL1 or EL2 in v1 targets), so the instruction is always permitted.
+  - `MRS xN, CurrentEL` is a non-privileged, read-only access to a read-only system register. ARM ARM §D11.2 specifies the layout; bits [3:2] hold the EL.
+  - **Non-VHE configuration.** `HCR_EL2.E2H = 0` and `HCR_EL2.TGE = 0` together produce non-VHE EL1, the configuration the rest of the kernel assumes (see UNSAFE-2026-0015's first Amendment "non-VHE EL1" precondition for `CNTVCT_EL0` / `CNTFRQ_EL0` access). `RW = 1` ensures EL1 runs aarch64 rather than aarch32; without it `eret` would land in aarch32 and crash on the first Rust instruction.
+  - **`SPSR_EL2 = 0x3c5` propagates DAIF to EL1.** The DAIF bits in `SPSR_EL2` become PSTATE.DAIF after `eret`, so the K3-12 mask carried in via the EL2 path remains in effect at EL1 — no second `msr daifset` is needed at the post-`eret` label.
+  - **`ELR_EL2`'s adrp + add :lo12: addressing.** PC-relative resolution to a label in the same `.text.boot` section; works regardless of where the linker lays out the kernel image. `__stack_top`, `__bss_start`, `__bss_end` already use the same pattern.
+- **Rejected alternatives:**
+  - **No EL drop (status quo before T-013).** Works on QEMU virt's default but breaks under `-machine virtualization=on` (delivered at EL2) and on most real-hardware boot stacks (TF-A → U-Boot → kernel typically arrives at EL2). T-009's UNSAFE-2026-0016 would catch the violation but only as a panic, not a recoverable transition. ADR-0024 §"Considered options" has the full enumeration.
+  - **Adapt the kernel to whichever EL it arrives in.** Multi-EL kernel code per ADR-0024 Option B; rejected because every `MRS DAIF`, `VBAR_EL1`, `TTBR0_EL1`, etc. call site would need an EL2-aware sibling. The maintenance tax compounds across Phase B; the savings (skip ~10 lines of boot asm) do not.
+  - **Hard-fail on non-EL1 (ADR-0024 Option C).** Cheaper than the drop but loses compatibility with EL2-delivering boot environments. UNSAFE-2026-0016 already provides the post-condition assertion at the Rust level; promoting it to the only check leaves us less portable, not more.
+  - **Move the DAIF mask to Rust (e.g. as the first thing `kernel_entry` does).** The window between reset and `kernel_entry` is then unprotected — a spurious interrupt during BSS zeroing or stack setup would jump into an uninstalled vector table. K3-12 in pure asm is the only way to close that window.
+  - **Configure `SCTLR_EL1` before the `eret`.** The post-T-013 path inherits whatever reset value `SCTLR_EL1` had (MMU off, alignment-checks off — QEMU's default). The pre-T-013 EL1-direct path also relied on this and worked. Adding a `SCTLR_EL1` configuration would be a separate scope expansion; deferred to the MMU bring-up in Phase B2 where it belongs.
+  - **Halt on EL3 with a panic frame.** No Rust runtime is up at this point — the panic handler depends on `Pl011Uart` construction (UNSAFE-2026-0001) which has not run. `wfe; b .-` is the visible silence; ADR-0024 §Open questions records the future EL3→EL2→EL1 chain for hardware that requires it.
+- **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
+- **Status:** Active.
+
+### UNSAFE-2026-0018 — `tyrne_hal::cpu::current_el` safe wrapper around `MRS CurrentEL`
+
+- **Introduced:** 2026-04-27, T-013. Provides a safe-Rust entry point for code that needs to read the Exception Level — formalises the inline-asm pattern UNSAFE-2026-0016 introduced inside `QemuVirtCpu::new`.
+- **Location:** [`hal/src/cpu.rs`](../../hal/src/cpu.rs) — the free function `pub fn current_el() -> u8`, gated by `#[cfg(all(target_arch = "aarch64", target_os = "none"))]`.
+- **Operation:** Single inline-asm `MRS xN, CurrentEL` read inside an `unsafe` block. Bits [3:2] are masked + shifted to produce a `u8` in `0..=3`. The function's outer signature is `safe`; the `unsafe` block is contained.
+- **Invariants relied on:**
+  - Same MRS-of-`CurrentEL` invariants as UNSAFE-2026-0016: read-only system register, available at every EL ≥ 0, no state mutation, `options(nostack, nomem)` correct.
+  - **Cfg-gating.** The function is *absent* on non-bare-metal targets. On `aarch64-apple-darwin` (host tests on Apple Silicon) and other hosted Unix-like targets, user code reading `CurrentEL` would trap or yield `EL0` with no useful information — the gate prevents accidental host-side use. Test mocks must declare their own EL rather than calling this helper.
+  - The 2-bit EL field returned via `(raw >> 2) & 0b11` fits in `u8` trivially; the `as u8` cast is annotated with the appropriate `#[allow(clippy::cast_possible_truncation, reason = …)]`.
+- **Rejected alternatives:**
+  - **`Cpu::current_el(&self) -> u8` trait method instead of a free function.** ADR-0024 §Open questions documents the trade-off: a method aligns with the rest of the HAL trait surface but forces every Cpu implementor (including test-hal mocks and the kernel's `FakeCpu` in `sched` tests) to declare an EL it does not really have. The early-boot path also needs this before any `Cpu` instance has been constructed (`kernel_entry` could call `current_el()` to validate the EL drop's outcome before constructing `QemuVirtCpu`). The free function serves both the early-boot use and avoids the test-side ergonomic cost.
+  - **Inline the MRS at every call site.** Two call sites today (`QemuVirtCpu::new`'s self-check; future kernel-side validation) — each duplicates the mask + shift dance. Centralising in one auditable helper turns N audit-log entries into one reusable abstraction.
+  - **Use a higher-level crate.** Same dependency-policy argument as UNSAFE-2026-0015 / 0016 — disproportionate.
+  - **Make the function `unsafe fn`.** The MRS upholds every invariant required for a safe abstraction (read-only, side-effect-free, available at every EL ≥ 0); requiring callers to write `unsafe { current_el() }` would push noise upward without adding safety. The `unsafe` block in the body is the correctly-narrow scope.
+- **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
+- **Status:** Active.

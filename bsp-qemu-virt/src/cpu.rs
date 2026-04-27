@@ -98,28 +98,24 @@ impl QemuVirtCpu {
     /// [ADR-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
     #[must_use]
     pub unsafe fn new() -> Self {
-        // Runtime assertion of the ADR-0012 boot-time precondition: QEMU
-        // virt is supposed to deliver `kernel_entry` at EL1, and `boot.s`
-        // performs no EL transition. The MRS reads below assume that
-        // contract; if a future boot-flow change accidentally leaves us at
-        // EL2 or EL3, the timer system-register accesses would either
+        // Runtime assertion of the ADR-0012 + ADR-0024 boot-time
+        // precondition: after `boot.s`'s EL drop sequence (per ADR-0024)
+        // the kernel runs at EL1 unconditionally. The MRS reads below
+        // assume that contract; if a future boot-flow change leaves us
+        // at EL2 or EL3, the timer system-register accesses would either
         // trap or read undefined values. Catching the violation here —
         // before any timer read — turns a subtle hardware-level
         // misbehaviour into a loud, named boot panic.
-        let current_el_raw: u64;
-        // SAFETY: `MRS x, CurrentEL` is a non-privileged read of a
-        // read-only system register, available at every Exception Level.
-        // The instruction does not modify any state. `options(nostack,
-        // nomem)` is correct. Rejected alternatives: there is no safe-Rust
-        // path to read CurrentEL; this assertion is the safe abstraction.
-        // Audit: UNSAFE-2026-0016.
-        unsafe {
-            asm!("mrs {}, CurrentEL", out(reg) current_el_raw, options(nostack, nomem));
-        }
-        let current_el = (current_el_raw >> 2) & 0b11;
+        //
+        // The `tyrne_hal::cpu::current_el()` call is the safe-Rust
+        // wrapper around the `MRS CurrentEL` introduced by T-013;
+        // see UNSAFE-2026-0018 for the helper's audit and
+        // UNSAFE-2026-0016's Amendment for why this assertion is now a
+        // load-bearing post-condition rather than a defensive guard.
+        let current_el = tyrne_hal::cpu::current_el();
         assert_eq!(
             current_el, 1,
-            "QemuVirtCpu::new must run at EL1 per ADR-0012; observed EL{current_el} instead",
+            "QemuVirtCpu::new must run at EL1 per ADR-0012/ADR-0024; observed EL{current_el} instead",
         );
 
         let frequency_hz: u64;
