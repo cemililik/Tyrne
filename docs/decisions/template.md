@@ -34,7 +34,7 @@ implementation order. Each line either points at an existing T-NNN file or
 flags it as a gap that must be opened before the ADR claims its full benefit.
 This subsection exists to prevent the failure mode the A → B0 arc rediscovered
 four times: an ADR's "future task X will do Y" handwave going unverified until
-implementation surfaces the gap (see ADR-0025 §Rule 2 (forward-reference contract)).>
+implementation surfaces the gap (see ADR-0025 §Rule 1 (forward-reference contract)).>
 
 Example:
 ```
@@ -49,7 +49,7 @@ in the same commit as this ADR.
 ```
 
 If a step has no T-NNN slot, the ADR cannot Accept until one is opened (per
-ADR-0025 §Rule 2 (forward-reference contract)).
+ADR-0025 §Rule 1 (forward-reference contract)).
 
 ## Consequences
 

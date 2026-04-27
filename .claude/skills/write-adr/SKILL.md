@@ -36,7 +36,7 @@ Before starting, the agent must have:
    - **Decision drivers.** Bulleted list of the forces pushing toward or away from each option. These must be specific to this decision; do not reuse generic drivers.
    - **Considered options.** At least two; three is often better. Each option gets a one-sentence description here.
    - **Decision outcome.** State the chosen option and connect the decision drivers to the choice. One or two paragraphs.
-   - **Decision outcome → Dependency chain.** A subsection listing every task / piece of infrastructure / prior decision that must already exist for the chosen option to be **fully** in effect. Each line either points at an existing T-NNN file or is opened as part of the same commit that lands the ADR (per [ADR-0025](../../../docs/decisions/0025-adr-governance-amendments.md) §Rule 2 — "future, not-yet-opened task" wording is forbidden). If a step has no T-NNN slot, **stop** and open the slot first; the ADR cannot Accept until the chain is grounded.
+   - **Decision outcome → Dependency chain.** A subsection listing every task / piece of infrastructure / prior decision that must already exist for the chosen option to be **fully** in effect. Each line either points at an existing T-NNN file or is opened as part of the same commit that lands the ADR (per [ADR-0025](../../../docs/decisions/0025-adr-governance-amendments.md) §Rule 1 — "future, not-yet-opened task" wording is forbidden). If a step has no T-NNN slot, **stop** and open the slot first; the ADR cannot Accept until the chain is grounded.
    - **Consequences.** Three subsections: *Positive*, *Negative*, *Neutral*. Negative consequences must include a mitigation or an explicit "we accept this cost because…".
    - **Pros and cons of the options.** For each option, a short list of pros and cons. The rejected options need real cons, not strawmen.
    - **References.** External links, prior art, papers, existing systems. At least one reference for anything non-obvious.
@@ -55,7 +55,7 @@ Before starting, the agent must have:
    - Body: one or two sentences explaining the decision.
    - Trailer: `Refs: ADR-NNNN`.
 
-10. **Cool-down before Accept.** The ADR lands at status `Proposed`. Per [ADR-0025](../../../docs/decisions/0025-adr-governance-amendments.md) §Rule 1 ("ADR cool-down: no same-day Accept"), a minimum of one calendar day separates `Proposed` from `Accepted`. Do not flip the status in the same session as drafting. The cool-down is the cheapest mechanism for catching the implementation-feedback gaps that a same-day Accept misses (the A → B0 arc rediscovered this lesson four times). Accept happens in a separate, second commit after re-reading.
+10. **Careful re-read before Accept.** The ADR lands at status `Proposed`. Before flipping to `Accepted`, re-read the ADR end-to-end — out loud or in a fresh editor pane — paying particular attention to: (a) every forward-reference points at a real T-NNN (per [ADR-0025](../../../docs/decisions/0025-adr-governance-amendments.md) §Rule 1); (b) the dependency chain is complete and each step's slot exists; (c) the *Negative consequences* are real costs the project is willing to pay, not hand-waved mitigations. An earlier draft of ADR-0025 imposed a hard 24-hour cool-down between `Proposed` and `Accepted` — that rule was withdrawn before Accept on maintainer judgement that the *substance* (deliberate re-reading) is achievable through this step plus independent agent reviews, without a calendar delay (see [ADR-0025 §Revision notes](../../../docs/decisions/0025-adr-governance-amendments.md)). Same-day Accept is therefore permitted, *provided* this re-read step actually happens; if the re-read surfaces a gap, fix it and re-read again before flipping the status. Accept is a separate commit from the initial Propose commit so that the careful-re-read pass shows up as its own diff.
 
 ## Acceptance criteria
 
@@ -66,7 +66,7 @@ Before starting, the agent must have:
 - [ ] Consequences include both positive and negative items.
 - [ ] ADR index at [`docs/decisions/README.md`](../../../docs/decisions/README.md) has the new row.
 - [ ] No contradiction with a prior Accepted ADR; if there was one, the [supersede-adr](../supersede-adr/SKILL.md) skill was used instead.
-- [ ] **Status lands at `Proposed`, not `Accepted`.** Same-session Accept is a policy violation per ADR-0013; Accept is a separate commit at least one calendar day later.
+- [ ] **Initial commit lands the ADR at `Proposed`.** The Propose commit is separate from any subsequent Accept commit so the careful-re-read pass shows up as its own diff. Accept may follow same-day after the re-read of step 10 (no calendar gate per [ADR-0025 §Revision notes](../../../docs/decisions/0025-adr-governance-amendments.md)), but never in the same commit as the initial draft.
 
 ## Anti-patterns
 
@@ -75,8 +75,8 @@ Before starting, the agent must have:
 - **Template placeholders in the committed file.** `<Option A>` in the pros-and-cons section is a failed review.
 - **Skipping "Consequences — Negative".** Every non-trivial decision has costs. Pretending otherwise is unhelpful.
 - **Writing the ADR after the code.** ADRs are proposed before work begins, accepted when the design is settled. Retroactive ADRs are acceptable only as a recovery move and should be marked explicitly.
-- **Same-day `Proposed → Accepted`.** A draft accepted in the session it was written has no cool-down. The A → B0 arc produced four ADRs with same-day Accept, and all four needed riders within a week. The cool-down is cheap insurance.
-- **Forward-reference handwaving.** "Future task X will do Y" — without X being a real T-NNN file — drifts into purgatory. Open the slot in the same commit, even as `Draft`.
+- **Skipping the careful re-read before Accept.** Accept is permitted same-day, but only if step 10's deliberate re-read actually happens. Flipping `Proposed → Accepted` in the same diff as the initial draft (or without a real second pass) is the failure mode that ADR-0025's withdrawn cool-down rule was originally trying to prevent — the rule was withdrawn, the discipline was not.
+- **Forward-reference handwaving.** "Future task X will do Y" — without X being a real T-NNN file — drifts into purgatory. Open the slot in the same commit, even as `Draft`. (Per [ADR-0025 §Rule 1](../../../docs/decisions/0025-adr-governance-amendments.md).)
 
 ## References
 

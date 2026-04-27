@@ -5,9 +5,9 @@
 - **Status:** Draft
 - **Created:** 2026-04-27
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
-- **Dependencies:** [ADR-0024](../../../decisions/0024-el-drop-policy.md) (`Proposed`, in cool-down) — must be `Accepted` before this task moves to `In Progress`.
+- **Dependencies:** [ADR-0024](../../../decisions/0024-el-drop-policy.md) — must be `Accepted` before this task moves to `In Progress`.
 - **Informs:** Precondition for [T-012](T-012-exception-and-irq-infrastructure.md) — T-012's `VBAR_EL1` install assumes EL1; without T-013's drop, a future BSP that boots at EL2 would silently break the assumption T-009's `UNSAFE-2026-0016` runtime check catches.
-- **ADRs required:** [ADR-0024 — EL drop to EL1 policy](../../../decisions/0024-el-drop-policy.md) *(Proposed 2026-04-27; Accepted 2026-04-28 at earliest per cool-down)*. ADR-0008 (Cpu trait) potentially extended with a `current_el` accessor — see §Approach.
+- **ADRs required:** [ADR-0024 — EL drop to EL1 policy](../../../decisions/0024-el-drop-policy.md). ADR-0008 (Cpu trait) potentially extended with a `current_el` accessor — see §Approach.
 
 ---
 
@@ -23,7 +23,7 @@ phase-b.md §B1 sub-breakdown items 2 + 3 (asm extension + Rust helpers) are thi
 
 ## Acceptance criteria
 
-- [ ] **ADR-0024 Accepted** before any code lands. Per ADR-0025 §Rule 1 (cool-down), this is at least 2026-04-28.
+- [ ] **ADR-0024 Accepted** before any code lands.
 - [ ] **`boot.s` EL2→EL1 transition.** When `CurrentEL` reads as EL2 at the reset vector, `boot.s` configures `HCR_EL2`, `SPSR_EL2`, `ELR_EL2` (target = next instruction post-`ERET`), and issues `ERET`. When `CurrentEL` reads as EL1, the transition block is skipped (no-op). When `CurrentEL` reads as EL3, the boot panics (or halts; v1 has no EL3-aware infrastructure) — the failure mode ADR-0024 settles.
 - [ ] **Bundle K3-12 (per phase-b.md §B1 item 2):** explicit `msr daifset, #0xf` at the head of `_start` as a BSP reset-vector standard, before any code that could be interrupted.
 - [ ] **Cpu HAL helper for `current_el`.** Either (a) a free function `tyrne_hal::cpu::current_el() -> u8` (read CurrentEL inline-asm, return the 2-bit EL field), or (b) a `Cpu::current_el(&self) -> u8` method on the trait. The choice depends on whether the BSP needs to call this before `QemuVirtCpu` is constructed (early-boot path). Decision deferred to §Approach.
@@ -86,4 +86,4 @@ ADR-0024 will settle the policy questions before T-013's code lands. At sketch l
 
 | Date | Reviewer | Note |
 |------|----------|------|
-| 2026-04-27 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft`, paired with ADR-0024 (`Proposed`) per ADR-0025 §Rule 2 (forward-reference contract) (ADR-0024's *Dependency chain* requires a real T-NNN file for the implementation step; this task is that file). Will move to `In Progress` only after ADR-0024 is `Accepted` (per the new ADR cool-down rule, no earlier than 2026-04-28). |
+| 2026-04-27 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft`, paired with ADR-0024 (`Proposed`) per ADR-0025 §Rule 1 (forward-reference contract) (ADR-0024's *Dependency chain* requires a real T-NNN file for the implementation step; this task is that file). Will move to `In Progress` only after ADR-0024 is `Accepted`. |

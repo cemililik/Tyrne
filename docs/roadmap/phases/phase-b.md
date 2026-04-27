@@ -76,11 +76,11 @@ The scope of this milestone was extended on 2026-04-27 (after T-009 — the time
 
 ### Sub-breakdown
 
-1. **[ADR-0024](../../decisions/0024-el-drop-policy.md) — EL drop to EL1 policy** *(Proposed 2026-04-27; Accepted 2026-04-28 at earliest per ADR-0025 §Rule 1 (cool-down))*. Settled choice: always drop to EL1 in `boot.s`, regardless of where firmware/emulator delivers the kernel. EL3 entry halts; VHE explicitly off.
+1. **[ADR-0024](../../decisions/0024-el-drop-policy.md) — EL drop to EL1 policy** *(Accepted 2026-04-27)*. Settled choice: always drop to EL1 in `boot.s`, regardless of where firmware/emulator delivers the kernel. EL3 entry halts; VHE explicitly off.
 2. **Asm extension** in `bsp-qemu-virt/src/boot.s` for EL2→EL1 transition — covered by [T-013](../../analysis/tasks/phase-b/T-013-el-drop-to-el1.md). **Bundle K3-12:** explicit `msr daifset, #0xf` at the top of `_start` as a BSP reset-vector standard per the [BSP boot checklist](../../standards/bsp-boot-checklist.md) update.
 3. **Rust helper for reading current EL** — also T-013. Either free function `tyrne_hal::cpu::current_el() -> u8` or `Cpu::current_el(&self)` method (T-013 §Approach picks one). T-009 already shipped the inline-asm pattern in `QemuVirtCpu::new`'s self-check, audited under UNSAFE-2026-0016 — this sub-item formalises it as a HAL-level helper.
 4. **Tests** — boot at EL1 under QEMU (default) and at EL2 (via `-machine virtualization=on`) and verify both land at EL1 in `kernel_entry`. Covered by T-013.
-5. **Exception infrastructure and interrupt delivery** — covered by [T-012](../../analysis/tasks/phase-b/T-012-exception-and-irq-infrastructure.md). Closes the deferred halves of ADR-0010 (`Timer::arm_deadline` / `cancel_deadline`) and ADR-0022 first rider (idle's WFI activation). Depends on T-013 being closed first (T-012's `VBAR_EL1` install assumes EL1). Substantial scope; may split into T-012a / T-012b if scope balloons during implementation per ADR-0025 §Rule 2 (forward-reference contract / dependency-chain).
+5. **Exception infrastructure and interrupt delivery** — covered by [T-012](../../analysis/tasks/phase-b/T-012-exception-and-irq-infrastructure.md). Closes the deferred halves of ADR-0010 (`Timer::arm_deadline` / `cancel_deadline`) and ADR-0022 first rider (idle's WFI activation). Depends on T-013 being closed first (T-012's `VBAR_EL1` install assumes EL1). Substantial scope; may split into T-012a / T-012b if scope balloons during implementation per ADR-0025 §Rule 1 (forward-reference contract / dependency-chain).
 
 ### Acceptance criteria
 
@@ -237,8 +237,8 @@ When B6 is Done, run a business review. Phase C becomes active after that review
 | ADR-0021 | Raw-pointer scheduler API (UNSAFE-2026-0012 resolution) | B0 | new — from 2026-04-21 security review blocker #1 |
 | ADR-0022 | Idle task + typed scheduler deadlock error | B0 | new — from 2026-04-21 security review blocker #3 |
 | ADR-0023 | Cross-table capability revocation policy | B0 (accept-deferred expected) | new — from 2026-04-21 security review blocker #2 |
-| ADR-0024 | EL drop policy | B1 (Proposed 2026-04-27) | was ADR-0021 in the pre-review plan |
-| ADR-0025 | ADR governance amendments (cool-down, forward-reference, riders) | meta-process (Proposed 2026-04-27) | new — captures the rules T-006/T-009 retros surfaced; not B-phase content |
+| ADR-0024 | EL drop policy | B1 (Accepted 2026-04-27) | was ADR-0021 in the pre-review plan |
+| ADR-0025 | ADR governance amendments (forward-reference, riders) | meta-process (Accepted 2026-04-27) | new — captures the rules T-006/T-009 retros surfaced; not B-phase content. Cool-down rule withdrawn pre-Accept; see ADR-0025 §Revision notes |
 | ADR-0026 | Exception-vector-table / handler-dispatch shape (T-012, conditional) | B1 | reserved by T-012 if non-obvious choices arise; may go unused if T-011 absorbs the exception-vector design |
 | ADR-0027 | Kernel virtual memory layout | B2 | was ADR-0025 in the pre-2026-04-27 plan; renumbered down by 2 because ADR-0025 (governance) and ADR-0026 (T-012 reservation) consumed slots |
 | ADR-0028 | Address-space data structure | B3 | was ADR-0026 |

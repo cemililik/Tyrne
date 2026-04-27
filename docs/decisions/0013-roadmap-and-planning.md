@@ -208,6 +208,7 @@ The roadmap does not replace ADRs. It sequences them. A task may require an ADR 
 ## Revision notes
 
 - **2026-04-27 — pointer to ADR-0025.** [ADR-0025 — ADR governance amendments](0025-adr-governance-amendments.md) extends this ADR with three rules surfaced by the Phase A → B0 implementation arc: ADR cool-down (no same-day Accept), Forward-reference contract (every "future task X will do Y" grounded at a real T-NNN), and Riders-are-not-failures (frequency is the signal). ADR-0025 stands on its own; this ADR's body is intact. An earlier draft (commit `56fd9eb`, since reverted) attempted to rewrite this ADR's body in place — that was an append-only-policy violation surfaced by the second-read review and corrected by extracting the rules into ADR-0025.
+- **2026-04-27 — follow-up: ADR-0025 shipped with two rules, not three.** ADR-0025 landed at `Accepted` on 2026-04-27 with the cool-down rule withdrawn pre-Accept on maintainer feedback (see [ADR-0025 §Revision notes](0025-adr-governance-amendments.md)). The two surviving rules are Forward-reference contract (now §Rule 1) and Riders-are-not-failures (now §Rule 2). The substance the cool-down was meant to enforce — careful re-reading before Accept — is preserved as a write-adr-skill responsibility (the careful-re-read step) rather than a calendar-day delay. The previous bullet's "three rules" wording remains intact per the append-only invariant; this bullet supersedes it on the rule count.
 
 ## References
 

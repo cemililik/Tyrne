@@ -1,6 +1,6 @@
-# 0025 — ADR governance amendments: cool-down, forward-reference contract, rider hygiene
+# 0025 — ADR governance amendments: forward-reference contract, rider hygiene
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-04-27
 - **Deciders:** @cemililik
 
@@ -8,45 +8,37 @@
 
 [ADR-0013](0013-roadmap-and-planning.md) settled the project's roadmap-and-planning process on 2026-04-20. Its §"Integration with ADRs" said: *"The roadmap does not replace ADRs. It sequences them. A task may require an ADR as an acceptance criterion; an ADR may result in new tasks being added."* That single paragraph was the entire normative content for how ADRs interact with the planning process.
 
-The Phase A → B0 implementation arc — six days of work spanning T-006 / T-007 / T-009 — produced four ADRs (ADR-0021, ADR-0022) that needed post-Accept riders within their first week, plus one (ADR-0021) that needed a mid-proposal revision before Accept. Every rider was, in retrospect, a gap that an extra calendar day of cool-down would have caught at near-zero cost. Every rider's content traced back to one of three implicit rules that ADR-0013's framing had not made explicit:
+The Phase A → B0 implementation arc — six days of work spanning T-006 / T-007 / T-009 — produced four ADRs (ADR-0021, ADR-0022) that needed post-Accept riders within their first week, plus one (ADR-0021) that needed a mid-proposal revision before Accept. Each rider's content traced back to one of two implicit rules that ADR-0013's framing had not made explicit:
 
-1. **Same-day `Proposed → Accepted` produces drafty decisions.** A draft that hasn't been re-read after sleeping on it carries assumptions the author did not stress-test. The four post-Accept riders in A → B0 each closed a gap that a second read would have surfaced.
-2. **Forward-references that don't ground at a real T-NNN drift into purgatory.** ADR-0022's first rider claimed "T-009 wires a timer IRQ" without T-009 having a task file constraining its scope. The implementation discovered the conflation; a sub-rider was needed to disambiguate.
-3. **Riders themselves get treated as failures.** When a third rider appears, the temptation is to rush the next ADR to "get it right this time" — which produces *more* riders, not fewer. The signal is the *rate* of riders, not their presence.
+1. **Forward-references that don't ground at a real T-NNN drift into purgatory.** ADR-0022's first rider claimed "T-009 wires a timer IRQ" without T-009 having a task file constraining its scope. The implementation discovered the conflation; a sub-rider was needed to disambiguate.
+2. **Riders themselves get treated as failures.** When a third rider appears, the temptation is to rush the next ADR to "get it right this time" — which produces *more* riders, not fewer. The signal is the *rate* of riders, not their presence.
 
-ADR-0013 was edited in-place on 2026-04-27 (commit `56fd9eb`) to add three subsections codifying these rules. That edit was itself an append-only-policy violation: ADR-0013 was already `Accepted`, and the new content rewrote its body rather than appending. The second-read review surfaced the contradiction (ADR-0013 was the document defining the append-only rule it was being edited in violation of). This ADR-0025 is the correction: extract the three rules into a new ADR that stands on its own, leave ADR-0013's body intact except for a single rider/pointer, and follow ADR-0025's own rules in landing it (Proposed today; Accepted ≥ 2026-04-28 per the cool-down rule this ADR codifies).
+(A third rule — a 24-hour ADR cool-down between `Proposed` and `Accepted` — was drafted alongside these but withdrawn before Accept on maintainer feedback. See §Revision notes for the full reasoning. The substance the cool-down was meant to enforce — careful re-reading before Accept — remains a write-adr-skill responsibility, just without the enforced calendar-day delay.)
+
+ADR-0013 was edited in-place on 2026-04-27 (commit `56fd9eb`) to add three subsections codifying these rules. That edit was itself an append-only-policy violation: ADR-0013 was already `Accepted`, and the new content rewrote its body rather than appending. The second-read review surfaced the contradiction (ADR-0013 was the document defining the append-only rule it was being edited in violation of). This ADR-0025 is the correction: extract the rules into a new ADR that stands on its own, leave ADR-0013's body intact except for a single rider/pointer.
 
 ## Decision drivers
 
 - **Honour the append-only invariant.** ADR-0013 cannot be edited in place once Accepted. The rules need their own ADR to exist as a first-class decision, citable and revisable on its own terms.
-- **Make the rules followable mechanically.** "Sleep on it" is a rule the maintainer (or an agent) can mechanically apply. So is "every forward-reference must point at a real T-NNN file". So is "rider count > N is a signal". Lessons-as-prose got rediscovered four times across A → B0; lessons-as-rules need to fire on the next ADR (ADR-0024 is the validation event).
+- **Make the rules followable mechanically.** "Every forward-reference must point at a real T-NNN file" is a rule the maintainer (or an agent) can mechanically apply. So is "rider count > N is a signal". Lessons-as-prose got rediscovered four times across A → B0; lessons-as-rules need to fire on the next ADR.
+- **Substance over ceremony.** Initial drafts of this ADR included a hard 24-hour cool-down between `Proposed` and `Accepted`. The maintainer judged that the *substance* the cool-down enforced (careful re-reading) is achievable through the existing review skills (write-adr's careful-review step, independent agent reviews, the dependency-chain section's forced upfront thinking) without a fixed calendar delay. Withdrawn before Accept; see §Revision notes.
 - **Do not over-correct.** Riders are how implementation feedback enters the design record. Trying to eliminate them is the wrong target. The rules name what is acceptable (riders, dated and append-only) and what is not (in-place body rewrites, ungrounded forward-references).
 - **Compatible with single-author + AI-agent reality.** Tyrne is solo development with AI-agent assistance. The rules do not assume a multi-person review board. They assume that the maintainer plus a reviewing agent (manually or via a skill) is the review surface — which means the rules must be cheap, mechanical, and self-checkable.
 
 ## Considered options
 
-1. **Option A — Three rules in their own ADR (this ADR-0025; chosen).** ADR-0013 stays Accepted, body intact, with a single pointer rider. New rules are first-class, citable, supersedable on their own terms.
+1. **Option A — Two rules in their own ADR (this ADR-0025; chosen).** ADR-0013 stays Accepted, body intact, with a single pointer rider. New rules are first-class, citable, supersedable on their own terms.
 2. **Option B — Edit ADR-0013 in place.** What was attempted in commit `56fd9eb`; rejected because it violates the append-only invariant ADR-0013 is meant to define. Already reverted.
-3. **Option C — `propose-standard-change` skill instead of an ADR.** The rules are arguably standards (process discipline), not architectural decisions. Could go in `docs/standards/adr-governance.md` instead. Rejected because the rules are *about ADRs* and need to be cited from inside ADR text — having them in a `standards/` file requires every ADR that cites the cool-down rule to dereference into a non-ADR file. Easier to keep ADR-internal cross-references inside the ADR set.
-4. **Option D — Inline rules into the `write-adr` skill, no ADR.** Skills are how procedures are encoded; adding the cool-down step to `write-adr` is necessary anyway (it has been done in commit `56fd9eb`). But skills are agent-facing procedures; the *normative* statement of why those steps exist needs an ADR to cite. The skill update happens regardless; the ADR is the rationale.
+3. **Option C — `propose-standard-change` skill instead of an ADR.** The rules are arguably standards (process discipline), not architectural decisions. Could go in `docs/standards/adr-governance.md` instead. Rejected because the rules are *about ADRs* and need to be cited from inside ADR text — having them in a `standards/` file requires every ADR that cites them to dereference into a non-ADR file. Easier to keep ADR-internal cross-references inside the ADR set.
+4. **Option D — Inline rules into the `write-adr` skill, no ADR.** Skills are how procedures are encoded; the skill update was necessary anyway (shipped in `56fd9eb`). But skills are agent-facing procedures; the *normative* statement of why those steps exist needs an ADR to cite. The skill update happens regardless; the ADR is the rationale.
 
 ## Decision outcome
 
-**Chosen: Option A — three rules in their own ADR.**
+**Chosen: Option A — two rules in their own ADR.**
 
-The three rules below are normative for every ADR drafted from this ADR's Accept date forward. They do not retroactively apply to ADRs already Accepted (ADR-0001 through ADR-0024 stand on their original bodies; their riders, where they exist, were written before this ADR codified the rider format and are grandfathered).
+The two rules below are normative for every ADR drafted from this ADR's Accept date forward. They do not retroactively apply to ADRs already Accepted (ADR-0001 through ADR-0024 stand on their original bodies; their riders, where they exist, were written before this ADR codified the rider format and are grandfathered).
 
-### Rule 1 — ADR cool-down: no same-day Accept
-
-An ADR drafted today does not move from `Proposed` to `Accepted` today. A minimum of one calendar day separates the two states; the maintainer (or a reviewing agent) re-reads the draft after sleeping on it, then accepts it.
-
-This rule exists because four ADRs in the A → B0 arc (ADR-0021 mid-proposal revision, ADR-0021 post-Accept rider, ADR-0022 first rider, ADR-0022 first-rider sub-rider) had implementation-detected gaps that an extra day of reading would have caught at near-zero cost.
-
-The cool-down does **not** apply to status flips that don't change content (e.g. fixing a typo, reformatting). It applies to "the decision the ADR records is final" transitions.
-
-The cool-down also applies to **this** ADR. ADR-0025 is `Proposed` 2026-04-27; Accept happens 2026-04-28 at earliest, in a separate commit, after re-reading. ADR-0024 (proposed 2026-04-27, scheduled for Accept 2026-04-28) is the first ADR to use this rule; ADR-0025 itself is paired with it on the same Date — both Accept commits land on the same day in separate commits.
-
-### Rule 2 — Forward-reference contract: every "future task" claim is grounded
+### Rule 1 — Forward-reference contract: every "future task" claim is grounded
 
 If an ADR — in any section, including riders — states "task X will do Y", task X must be either:
 
@@ -57,7 +49,7 @@ If an ADR — in any section, including riders — states "task X will do Y", ta
 
 When a future task genuinely cannot be opened yet (because its scope depends on something the maintainer has not decided), state that explicitly: *"see Open questions §X — task TBD pending decision Y"* — and the corresponding *Open questions* section must list the unresolved input. This is the only permitted form of un-grounded forward-reference, and it is paired with a visible "we know we don't know yet" marker.
 
-### Rule 3 — Riders are not failures; their *frequency* is a signal
+### Rule 2 — Riders are not failures; their *frequency* is a signal
 
 ADR riders — *Revision notes* entries appended after the original Accept, and Amendment blocks in the audit log — are valid records of learning. They are not failures of the ADR process; they are how implementation feedback enters the design history. Trying to eliminate them is overcorrection.
 
@@ -67,26 +59,28 @@ Riders themselves are append-only by the same logic that makes the unsafe-log ap
 
 ### Dependency chain
 
-For the three rules above to be fully in effect:
+For the two rules above to be fully in effect:
 
-1. **`write-adr` skill update** — already shipped in commit `56fd9eb` (the part that wasn't reverted). Procedure step 5 covers the dependency-chain requirement; step 10 covers cool-down; acceptance criteria gain the corresponding boxes; anti-patterns gain the corresponding entries.
-2. **`docs/decisions/template.md` update** — already shipped in commit `56fd9eb`. Decision outcome gains a "Dependency chain" subsection.
-3. **ADR-0024** (EL drop policy, currently `Proposed` per commit `0f970ea`) — first real test of the cool-down rule. Accept happens 2026-04-28 at earliest. If ADR-0024 lands clean (no riders within its first week), that is positive evidence that the rules work; if it picks up riders quickly, the rules need refining.
-4. **No new task slot** — this ADR is normative-only; it does not require an implementation task. ADR-0024's Accept commit is the first observable event under the new rules.
+1. **`write-adr` skill update** — shipped in commit `56fd9eb` (Dependency-chain procedure step) with a follow-up edit removing the cool-down step (see §Revision notes). The careful-review step replaces the cool-down's behavioural intent without imposing a calendar delay.
+2. **`docs/decisions/template.md` update** — shipped in commit `56fd9eb`. Decision outcome gains a "Dependency chain" subsection.
+3. **ADR-0024** (EL drop policy) — first ADR to use the dependency-chain section in production. Its `Proposed → Accepted` arc on 2026-04-27 is the first observable event under the new rules.
+4. **No new task slot** — this ADR is normative-only; it does not require an implementation task.
 
 ## Consequences
 
 ### Positive
 
 - **ADR-0013 stays Accepted with its original body intact.** The append-only invariant is preserved as the rule itself codifies.
-- **The three rules are first-class and citable.** Future ADRs reference "ADR-0025 §Rule 1 (cool-down)" rather than "ADR-0013 §X" for content that wasn't in ADR-0013's accepted body.
-- **The next ADR's Accept (ADR-0024) is the validation event.** If it lands clean, codified rules > rediscovered lessons.
-- **The skill and template updates already shipped** in commit `56fd9eb`. Mechanically, the rules are already in force; this ADR is the missing rationale layer.
+- **The two rules are first-class and citable.** Future ADRs reference "ADR-0025 §Rule 1 (forward-reference contract)" rather than "ADR-0013 §X" for content that wasn't in ADR-0013's accepted body.
+- **ADR-0024 is the first validation event.** It uses the dependency-chain section in production; if it lands without riders within a week, codified rules > rediscovered lessons.
+- **The skill and template updates already shipped** in commit `56fd9eb` (with the cool-down step removed in the follow-up). Mechanically, the rules are in force.
+- **Substance over ceremony.** The withdrawn cool-down rule was the heaviest of the three drafts; dropping it before Accept means the surviving rules are all mechanical and self-checkable, not calendar-gated.
 
 ### Negative
 
 - **One more ADR to read for the meta-process.** A returning maintainer needs to read both ADR-0013 and ADR-0025 to understand the planning-and-decision process. *Mitigation:* ADR-0013's pointer rider names ADR-0025 explicitly; the cross-reference is one click away.
-- **Rules need maintenance over time.** If "3+ riders in a week" turns out to be the wrong threshold, this ADR needs a rider of its own (or a successor). *Mitigation:* per Rule 3, a rider on this ADR is normal; the rules are not pretending to be permanent.
+- **Rules need maintenance over time.** If "3+ riders in a week" turns out to be the wrong threshold, this ADR needs a rider of its own (or a successor). *Mitigation:* per Rule 2, a rider on this ADR is normal; the rules are not pretending to be permanent.
+- **Carefulness becomes a soft commitment, not a calendar gate.** Without the cool-down, the careful-re-read step in write-adr depends on the maintainer (or agent) actually being deliberate. *Mitigation:* the dependency-chain section forces upfront thinking before Accept; the rider-frequency signal in Rule 2 catches the case where carefulness slipped.
 
 ### Neutral
 
@@ -95,11 +89,11 @@ For the three rules above to be fully in effect:
 
 ## Pros and cons of the options
 
-### Option A — Three rules in their own ADR (chosen)
+### Option A — Two rules in their own ADR (chosen)
 
 - Pro: ADR-0013's body stays intact (append-only invariant honoured).
 - Pro: Rules are first-class, citable, supersedable.
-- Pro: ADR-0025 itself follows its own rules (cool-down active; dependency chain provided).
+- Pro: ADR-0025 itself follows its own rules (dependency chain provided; forward-references grounded).
 - Con: One more ADR to read. Mitigated by ADR-0013's pointer rider.
 
 ### Option B — Edit ADR-0013 in place
@@ -121,12 +115,24 @@ For the three rules above to be fully in effect:
 - Con: Skills are *how*, not *why*. Without an ADR to cite, future readers cannot find the rationale for why the skill says what it says.
 - Con: Skill updates are not append-only; they evolve continuously. The rationale needs a stabler home.
 
+## Revision notes
+
+- **2026-04-27 — Pre-Accept revision: cool-down rule withdrawn.** The first draft of this ADR included a third rule, "ADR cool-down: no same-day Accept", which would have required ≥ 1 calendar day between `Proposed` and `Accepted` for every ADR. After re-reading the draft alongside ADR-0024 (the first ADR slated to use the rule), the maintainer judged the cool-down disproportionate to its benefit in the project's single-author + AI-agent context: the substance the cool-down enforced (a careful, deliberate re-read before Accept) is achievable through the existing review surface (the write-adr skill's careful-review step, independent agent reviews, the dependency-chain section's forced upfront thinking), without imposing a calendar delay that doubles the wall-clock cost of every decision.
+  
+  Effects of the withdrawal, applied in the same commit that lands this revision:
+  - The Decision-outcome §Rule 1 (cool-down) section is removed; what was §Rule 2 becomes §Rule 1, what was §Rule 3 becomes §Rule 2.
+  - The write-adr skill's cool-down step (step 10 in the post-`56fd9eb` form) is removed; its acceptance-criterion box for "Status lands at Proposed, not Accepted" and its anti-pattern entry "Same-day Proposed → Accepted" are removed.
+  - All cross-references in T-009 / T-012 / T-013 / ADR-0024 / ADR-0022 / phase-b.md / current.md / mini-retro that pointed at "ADR-0025 §Rule 2" are renumbered to "§Rule 1"; references to "§Rule 3" become "§Rule 2"; references to "§Rule 1 (cool-down)" are removed (along with the "Accepted ≥ 2026-04-28" wording the cool-down imposed on ADR-0024).
+  - ADR-0024 and ADR-0025 are accepted on the same day (2026-04-27) in separate commits, no longer gated on a 24-hour delay.
+  
+  This withdrawal is logged here rather than in a §"Revision notes" rider on a future commit because the rule is being removed *before* Accept — the historical record of the rule's existence + reason for withdrawal is the value, not the rule itself. Per the project's rider conventions ([ADR-0021](0021-raw-pointer-scheduler-ipc-bridge.md) §Revision notes uses the same pattern), pre-Accept revisions are recorded inline in the §Revision notes section of the same ADR.
+
 ## References
 
 - [ADR-0013 — Roadmap and planning process](0013-roadmap-and-planning.md) — the parent ADR these rules amend.
 - [`docs/standards/unsafe-policy.md §3`](../standards/unsafe-policy.md) — the audit-log append-only policy whose pattern the ADR rider rule mirrors.
-- [`.claude/skills/write-adr/SKILL.md`](../../.claude/skills/write-adr/SKILL.md) — already updated in commit `56fd9eb` to encode the cool-down + dependency-chain procedure.
-- [`docs/decisions/template.md`](template.md) — already updated in commit `56fd9eb` to include the "Dependency chain" subsection.
+- [`.claude/skills/write-adr/SKILL.md`](../../.claude/skills/write-adr/SKILL.md) — updated in commit `56fd9eb` to encode the dependency-chain procedure; cool-down step removed in the follow-up.
+- [`docs/decisions/template.md`](template.md) — updated in commit `56fd9eb` to include the "Dependency chain" subsection.
 - [T-009 mini-retro](../analysis/reviews/business-reviews/2026-04-27-T-009-mini-retro.md) — the retrospective that produced the rules.
-- [ADR-0021](0021-raw-pointer-scheduler-ipc-bridge.md) and [ADR-0022](0022-idle-task-and-typed-scheduler-deadlock.md) — the four-rider data points the cool-down rule was learned from.
-- [ADR-0024](0024-el-drop-policy.md) — the first ADR to use the cool-down rule; its Accept (2026-04-28+) is the first validation event.
+- [ADR-0021](0021-raw-pointer-scheduler-ipc-bridge.md) and [ADR-0022](0022-idle-task-and-typed-scheduler-deadlock.md) — the four-rider data points that motivated all three drafts (including the withdrawn cool-down).
+- [ADR-0024](0024-el-drop-policy.md) — the first ADR to use the dependency-chain section in production; its Accept event is the first observable validation under the new rules.
