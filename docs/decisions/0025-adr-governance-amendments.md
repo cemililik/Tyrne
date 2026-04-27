@@ -1,7 +1,7 @@
 # 0025 — ADR governance amendments: cool-down, forward-reference contract, rider hygiene
 
 - **Status:** Proposed
-- **Date:** 2026-04-28
+- **Date:** 2026-04-27
 - **Deciders:** @cemililik
 
 ## Context
@@ -14,7 +14,7 @@ The Phase A → B0 implementation arc — six days of work spanning T-006 / T-00
 2. **Forward-references that don't ground at a real T-NNN drift into purgatory.** ADR-0022's first rider claimed "T-009 wires a timer IRQ" without T-009 having a task file constraining its scope. The implementation discovered the conflation; a sub-rider was needed to disambiguate.
 3. **Riders themselves get treated as failures.** When a third rider appears, the temptation is to rush the next ADR to "get it right this time" — which produces *more* riders, not fewer. The signal is the *rate* of riders, not their presence.
 
-ADR-0013 was edited in-place on 2026-04-27 (commit `56fd9eb`) to add three subsections codifying these rules. That edit was itself an append-only-policy violation: ADR-0013 was already `Accepted`, and the new content rewrote its body rather than appending. The second-read review surfaced the contradiction (ADR-0013 was the document defining the append-only rule it was being edited in violation of). This ADR-0025 is the correction: extract the three rules into a new ADR that stands on its own, leave ADR-0013's body intact except for a single rider/pointer, and follow ADR-0025's own rules in landing it (Proposed today; Accepted ≥ 2026-04-29 per the cool-down rule this ADR codifies).
+ADR-0013 was edited in-place on 2026-04-27 (commit `56fd9eb`) to add three subsections codifying these rules. That edit was itself an append-only-policy violation: ADR-0013 was already `Accepted`, and the new content rewrote its body rather than appending. The second-read review surfaced the contradiction (ADR-0013 was the document defining the append-only rule it was being edited in violation of). This ADR-0025 is the correction: extract the three rules into a new ADR that stands on its own, leave ADR-0013's body intact except for a single rider/pointer, and follow ADR-0025's own rules in landing it (Proposed today; Accepted ≥ 2026-04-28 per the cool-down rule this ADR codifies).
 
 ## Decision drivers
 
@@ -44,7 +44,7 @@ This rule exists because four ADRs in the A → B0 arc (ADR-0021 mid-proposal re
 
 The cool-down does **not** apply to status flips that don't change content (e.g. fixing a typo, reformatting). It applies to "the decision the ADR records is final" transitions.
 
-The cool-down also applies to **this** ADR. ADR-0025 is `Proposed` 2026-04-28; Accept happens 2026-04-29 at earliest, in a separate commit, after re-reading. ADR-0024 (proposed 2026-04-27, scheduled for Accept 2026-04-28) is the first ADR to use this rule; ADR-0025 itself is the second.
+The cool-down also applies to **this** ADR. ADR-0025 is `Proposed` 2026-04-27; Accept happens 2026-04-28 at earliest, in a separate commit, after re-reading. ADR-0024 (proposed 2026-04-27, scheduled for Accept 2026-04-28) is the first ADR to use this rule; ADR-0025 itself is paired with it on the same Date — both Accept commits land on the same day in separate commits.
 
 ### Rule 2 — Forward-reference contract: every "future task" claim is grounded
 

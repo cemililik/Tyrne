@@ -2,7 +2,7 @@
 
 - **Phase:** B
 - **Milestone:** B0 — Phase A exit hygiene
-- **Status:** In Review
+- **Status:** Done
 - **Created:** 2026-04-23
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** none — independent of T-006/T-007/T-008/T-011 within B0; only touches `QemuVirtCpu` and the BSP demo flow.

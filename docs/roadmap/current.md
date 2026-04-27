@@ -5,15 +5,12 @@ A short pointer file updated as work progresses. For the full plan see [`phases/
 ---
 
 - **Active phase:** B — opened 2026-04-21. First milestone B0 in progress.
-- **Active milestone:** B0 — Phase A exit hygiene (T-006, T-007, T-009 In Review; T-011 Draft; T-008 remains to open). B1 — Drop to EL1 + exception infrastructure (T-012 Draft, opened 2026-04-27 to ground ADR-0022 first rider's previously-handwaved IRQ-wiring forward-reference per ADR-0025 §Rule 2 (forward-reference contract)).
-- **Active task:** None. Next: T-008 (architecture docs) when opened, T-011 (missing tests) once dependent tasks reach `Done`, or T-012 (exception infrastructure) once ADR-0024 is `Accepted`.
-- **In review:**
-  - [T-006 — Raw-pointer scheduler API refactor](../analysis/tasks/phase-b/T-006-raw-pointer-scheduler-api.md) — `In Review` since 2026-04-22.
-  - [T-007 — Idle task + typed `SchedError::Deadlock` + resume-path hardening](../analysis/tasks/phase-b/T-007-idle-task-typed-deadlock.md) — `In Review` since 2026-04-22; implements ADR-0022.
-  - [T-009 — Timer init + `CNTVCT_EL0` measurement](../analysis/tasks/phase-b/T-009-timer-init-cntvct.md) — `In Review` since 2026-04-23; implements ADR-0010 (BSP side).
+- **Active milestone:** B0 — Phase A exit hygiene (T-006, T-007, T-009 **Done** 2026-04-27 per independent-agent approval review; T-011 Draft → ready to start; T-008 remains to open). B1 — Drop to EL1 + exception infrastructure (T-012 Draft, T-013 Draft; both gated on ADR-0024 Accept ≥ 2026-04-28).
+- **Active task:** None — three tasks just promoted to Done. Next: T-008 (architecture docs) opening, OR T-011 (missing tests) flipping to In Progress now that dependencies clear.
+- **In review:** none.
 - **Working branch:** `development`.
-- **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.**
-- **Last completed task:** [T-005 — Two-task IPC demo](../analysis/tasks/phase-a/T-005-two-task-ipc-demo.md) — `Done` 2026-04-21.
+- **Last completed milestone:** A6 — Two-task IPC demo, 2026-04-21. **Phase A exit bar met.** B0 closure pending T-008 and T-011.
+- **Last completed tasks:** T-006 / T-007 / T-009 — all `Done` 2026-04-27. Approval review at [docs/analysis/reviews/business-reviews/2026-04-27-T-009-mini-retro.md](../analysis/reviews/business-reviews/2026-04-27-T-009-mini-retro.md) and the close-out approval-review pass commit.
 - **Last reviews:**
   - [T-009 mini-retro (2026-04-27)](../analysis/reviews/business-reviews/2026-04-27-T-009-mini-retro.md)
   - [T-006 mini-retro (2026-04-22)](../analysis/reviews/business-reviews/2026-04-22-T-006-mini-retro.md)

@@ -25,7 +25,7 @@ This ADR settles the policy: **what EL does the kernel run at, and how does it g
 
 ## Considered options
 
-1. **Option A — Always drop to EL1.** `boot.s` reads `CurrentEL`. If EL1, no-op. If EL2, configure `HCR_EL2` (E2H=0, TGE=0), `SPSR_EL2` (mode=EL1h, DAIF mask), `ELR_EL2` (the address of the next instruction post-`ERET`), and issue `ERET`. If EL3, halt with a clear failure (out of scope for v1; future task).
+1. **Option A — Always drop to EL1.** `boot.s` reads `CurrentEL`. If EL1, no-op. If EL2, configure `HCR_EL2` (E2H=0, TGE=0), `SPSR_EL2` (mode=EL1h, DAIF mask), `ELR_EL2` (the address of the next instruction post-`ERET`), and issue `ERET`. If EL3, halt with a clear failure (see §Open questions — EL3 boot behaviour).
 2. **Option B — Adapt to whichever EL we got.** The kernel detects its EL at boot and selects between EL1- and EL2-specific code paths throughout the codebase (HAL impls, syscall path, MMU activation). EL2 becomes a first-class target.
 3. **Option C — Hard-fail on non-EL1.** `boot.s` checks `CurrentEL`; if not EL1, halts. The expectation is that all supported boot environments deliver at EL1 (existing QEMU virt default; Trusted Firmware setups that explicitly drop). T-009's UNSAFE-2026-0016 assertion already provides this at the Rust level; Option C just moves the check to asm.
 
