@@ -132,18 +132,34 @@ impl QemuVirtCpu {
         let frequency_hz: u64;
         // SAFETY: `MRS x, CNTFRQ_EL0` is a non-privileged read of a read-only
         // system register. Tyrne enters `kernel_entry` at EL1 per
-        // [ADR-0012] (QEMU virt drops the kernel to EL1 before execution;
-        // `boot.s` performs no EL transition) — and the assertion above
-        // confirms this at runtime, so the EL-precondition reasoning that
-        // follows is not just documentation but a checked invariant.
-        // At EL1 in the non-VHE configuration the kernel runs in
-        // (HCR_EL2.{E2H, TGE} = {0, 0}), CNTFRQ_EL0 is unconditionally
-        // readable — the CNTHCTL_EL2.EL1PCTEN gating that exists in VHE
-        // mode does not apply here. The instruction does not modify any
-        // state; `options(nostack, nomem)` is correct (no stack pointer
-        // touch, no memory access). Rejected alternatives: there is no
-        // safe-Rust way to read a system register; the HAL `Timer` trait
-        // is the safe abstraction wrapping this access.
+        // [ADR-0012] / [ADR-0024] — `boot.s` performs an EL2 → EL1
+        // transition when the firmware/emulator delivers at EL2, falls
+        // through when delivered at EL1, and halts on EL3. The
+        // `tyrne_hal::cpu::current_el()` assertion above (audited under
+        // UNSAFE-2026-0018, with UNSAFE-2026-0016's T-013 Amendment
+        // describing the load-bearing-post-condition shift) is the
+        // checked invariant that pins `CurrentEL == 1` here, so the
+        // EL-precondition reasoning that follows is not documentation
+        // alone. At EL1 in the non-VHE configuration the kernel runs in
+        // (`HCR_EL2.{E2H, TGE} = {0, 0}`, established by `boot.s`'s
+        // explicit `HCR_EL2 = (1 << 31)` write per UNSAFE-2026-0017),
+        // CNTFRQ_EL0 is unconditionally readable — the
+        // `CNTHCTL_EL2.EL1PCTEN` gating that exists in VHE mode does
+        // not apply here. The instruction does not modify any state;
+        // `options(nostack, nomem)` is correct (no stack pointer
+        // touch, no memory access).
+        //
+        // Rejected alternatives:
+        // (a) There is no safe-Rust way to read a system register; the
+        //     HAL `Timer` trait is the safe abstraction wrapping this
+        //     access.
+        // (b) A higher-level crate (`cortex-a` / `aarch64-cpu`) would
+        //     pull a dependency for one MRS — disproportionate per the
+        //     dependency policy.
+        // (c) Reading `CNTPCT_EL0` (physical counter) instead of
+        //     `CNTFRQ_EL0` was rejected during T-009's second-read
+        //     review; ADR-0010 mandates the virtual family for the
+        //     read side.
         // Audit: UNSAFE-2026-0015.
         //
         // [ADR-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
@@ -421,18 +437,30 @@ impl Timer for QemuVirtCpu {
         // coincide; using CNTVCT preserves correctness when a future boot
         // path leaves a non-zero offset.
         //
-        // EL access: at EL1 in the non-VHE configuration Tyrne runs in
-        // (per ADR-0012 the kernel enters at EL1 and boot.s performs no EL
-        // transition), CNTVCT_EL0 is unconditionally readable — the
-        // CNTHCTL_EL2.EL1VCTEN gating that exists in VHE mode does not
-        // apply here. The instruction does not modify any state;
-        // `options(nostack, nomem)` is correct.
+        // EL access: per ADR-0012 / ADR-0024, `boot.s` drives the kernel
+        // to EL1 (transitioning from EL2 if the firmware/emulator
+        // delivered there). The runtime assertion in `QemuVirtCpu::new`
+        // (`tyrne_hal::cpu::current_el() == 1`, audited under
+        // UNSAFE-2026-0018 / UNSAFE-2026-0016 Amendment) guarantees we
+        // are at EL1 by the time this method ever runs. At EL1 in the
+        // non-VHE configuration the kernel runs in
+        // (`HCR_EL2.{E2H, TGE} = {0, 0}`, written explicitly in `boot.s`
+        // per UNSAFE-2026-0017), CNTVCT_EL0 is unconditionally readable
+        // — the `CNTHCTL_EL2.EL1VCTEN` gating that exists in VHE mode
+        // does not apply here. The instruction does not modify any
+        // state; `options(nostack, nomem)` is correct.
         //
-        // Rejected alternatives: there is no safe-Rust way to read a
-        // system register; the `Timer` trait is the safe abstraction
-        // wrapping this MRS. The `cortex-a` / `aarch64-cpu` crates would
-        // wrap a single MRS in a dependency, disproportionate per the
-        // dependency policy. Audit: UNSAFE-2026-0015.
+        // Rejected alternatives:
+        // (a) Read `CNTPCT_EL0` (physical) instead — rejected during
+        //     T-009's second-read review per ADR-0010's register-family
+        //     mandate; would silently mismatch the deferred deadline-
+        //     arming side once `CNTVOFF_EL2 ≠ 0`.
+        // (b) No safe-Rust way to read a system register; the `Timer`
+        //     trait is the safe abstraction wrapping this MRS.
+        // (c) A higher-level crate (`cortex-a` / `aarch64-cpu`) would
+        //     pull a dependency for one MRS — disproportionate per the
+        //     dependency policy.
+        // Audit: UNSAFE-2026-0015.
         unsafe {
             asm!("mrs {}, cntvct_el0", out(reg) count, options(nostack, nomem));
         }

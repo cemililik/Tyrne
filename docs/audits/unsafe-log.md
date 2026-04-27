@@ -292,6 +292,12 @@ Both forms are time-stamped so a reader can reconstruct the entry's state at any
 - **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
 - **Status:** Active.
 
+  **Amendment (2026-04-27, PR #9 review-round): GAS halt-loop syntax correction.** Two body fields used non-existent / malformed aarch64 GAS comments referring to the EL3-halt loop:
+  - **§Operation** said *"halt via `wfe; b -1b`"* — `-1b` is not valid GAS syntax (`1b` is the back-reference to local label `1:`, but a leading `-` is meaningless there); the actual asm uses a named label loop (`halt_unsupported_el: wfe ; b halt_unsupported_el`).
+  - **§Rejected alternatives → "Halt on EL3 with a panic frame"** said *"`wfe; b .-` is the visible silence"* — `b .-` is a similar malformed token (`.` is the current address, but `b .-` with no offset is not a valid branch target); the visible silence is the same named-label loop above.
+
+  Both occurrences are corrected to *"halt via `halt_unsupported_el: wfe ; b halt_unsupported_el`"* / *"`wfe ; b halt_unsupported_el` is the visible silence"*. The behaviour the audit describes is unchanged; only the prose's asm rendering was wrong. The original body is left intact above per `unsafe-policy.md §3`; this rider is the canonical correction. The actual `boot.s` source has always used the named-label form.
+
 ### UNSAFE-2026-0018 — `tyrne_hal::cpu::current_el` safe wrapper around `MRS CurrentEL`
 
 - **Introduced:** 2026-04-27, T-013. Provides a safe-Rust entry point for code that needs to read the Exception Level — formalises the inline-asm pattern UNSAFE-2026-0016 introduced inside `QemuVirtCpu::new`.
@@ -308,3 +314,5 @@ Both forms are time-stamped so a reader can reconstruct the entry's state at any
   - **Make the function `unsafe fn`.** The MRS upholds every invariant required for a safe abstraction (read-only, side-effect-free, available at every EL ≥ 0); requiring callers to write `unsafe { current_el() }` would push noise upward without adding safety. The `unsafe` block in the body is the correctly-narrow scope.
 - **Reviewed by:** @cemililik (+ Claude Opus 4.7 agent).
 - **Status:** Active.
+
+  **Amendment (2026-04-27, PR #9 review-round): cfg-gating prose tightened.** §Invariants relied on → "Cfg-gating" originally read *"user code reading `CurrentEL` would trap or yield `EL0` with no useful information"*. The "or yield `EL0`" alternative is wrong: per ARM ARM §D11.2 / §C5.2, `MRS x, CurrentEL` at EL0 is **undefined** — the system register is not accessible at EL0 and the read raises an Undefined Instruction exception (which becomes `SIGILL` on hosted Unix-like targets such as `aarch64-apple-darwin`). There is no fallback EL0 read. The corrected reading: *"user code reading `CurrentEL` is undefined at EL0 and traps with an Undefined Instruction exception (`SIGILL` on hosted Unix-like targets) — the cfg-gate prevents the helper from being reachable on those targets."* The original body is left intact above per `unsafe-policy.md §3`; this rider is the canonical correction. The cfg-gate's behaviour and the rationale for it are unchanged.
