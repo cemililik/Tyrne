@@ -420,6 +420,22 @@ mod tests {
     }
 
     #[test]
+    fn ns_to_ticks_rounds_up_on_subtick() {
+        // Locks the ceiling-rounding policy documented in the
+        // `# Rounding` doc-section: any sub-tick remainder must round
+        // *up* so the comparator's tick-equivalent is ≥ deadline_ns.
+        // freq = 3 Hz means one tick = NANOS_PER_SECOND / 3 =
+        // 333_333_333.333… ns; ns = 333_333_333 sits exactly on tick 1
+        // (down) and ns = 333_333_334 is 1 ns past it, so the ceiling
+        // tick count is 2. A floor-division regression would return 1
+        // here and silently violate the "reaches or exceeds
+        // deadline_ns" half of ADR-0010's contract.
+        assert_eq!(ns_to_ticks(333_333_334, 3), 2);
+        // Boundary check: exactly on the first tick stays at 1 tick.
+        assert_eq!(ns_to_ticks(333_333_333, 3), 1);
+    }
+
+    #[test]
     fn ns_to_ticks_round_trips_against_ticks_to_ns_at_qemu_frequency() {
         // QEMU virt is 62.5 MHz; pick a tick count that is exactly
         // representable in ns (the inverse uses integer truncation,

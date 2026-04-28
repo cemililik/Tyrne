@@ -69,6 +69,13 @@ pub struct TrapFrame {
     pub _reserved: [u64; 2],
 }
 
+// The trampoline in `vectors.s` reserves exactly 192 bytes of stack
+// for the frame and writes through fixed offsets that mirror the
+// field order above. A drift between the asm and the Rust `repr(C)`
+// would corrupt saved registers on every IRQ; this compile-time guard
+// fails the build before that can ship.
+const _: () = assert!(core::mem::size_of::<TrapFrame>() == 192);
+
 /// Class encoding passed by the unhandled-trampoline to [`panic_entry`].
 ///
 /// The asm trampolines pass a small integer constant rather than
@@ -136,10 +143,25 @@ impl PanicClass {
 /// Audit: UNSAFE-2026-0020.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn irq_entry(_frame: *mut TrapFrame) {
-    // SAFETY: `GIC` is initialised once in `kernel_entry` before
-    // `DAIF.I` is unmasked; an IRQ cannot arrive before the static is
-    // populated. `assume_init_ref` produces a `&QemuVirtGic` that is
-    // immutable for the duration of the ISR. Audit: UNSAFE-2026-0020.
+    // SAFETY: producing a stable `&QemuVirtGic` from the static
+    // `MaybeUninit<QemuVirtGic>` in `GIC` requires `unsafe` because Rust
+    // cannot statically prove the cell is initialised in IRQ context.
+    // Invariants relied on: (a) `kernel_entry` writes the
+    // `MaybeUninit` cell *before* unmasking `DAIF.I`, so an IRQ cannot
+    // arrive while it is uninit; (b) `GIC` is never moved or
+    // reinitialised after that point — the `StaticCell` wrapper in
+    // `main.rs` is set-once; (c) no kernel path takes a `&mut
+    // QemuVirtGic` aliasing this `&` for the lifetime of the ISR, so
+    // `assume_init_ref` produces a reference that is valid and
+    // exclusive-of-`&mut` for the duration of `irq_entry`. Rejected
+    // alternatives: a `Mutex<QemuVirtGic>` would block the ISR on a
+    // contention path that v1 cannot tolerate (single-CPU, IRQ taken
+    // with `DAIF.I` masked, no sleep primitive); a `RefCell` is
+    // `!Sync` and unusable from a static; an `Option<QemuVirtGic>`
+    // wrapped in a `OnceCell`-style guard would still need `unsafe`
+    // for the static-mut access pattern Tyrne uses (heap-free, no
+    // global allocator), giving identical safety surface for more
+    // boilerplate. Audit: UNSAFE-2026-0020.
     let gic: &QemuVirtGic = unsafe { (*GIC.0.get()).assume_init_ref() };
 
     // Acknowledge the top-pending IRQ. The GIC marks it active and
@@ -160,12 +182,25 @@ pub unsafe extern "C" fn irq_entry(_frame: *mut TrapFrame) {
         // re-fire before the next `arm_deadline` re-arm. We write
         // `CNTV_CTL_EL0 = 0b10` (ENABLE = 0, IMASK = 1).
         //
-        // SAFETY: `MSR x, CNTV_CTL_EL0` is the architected write to
-        // the EL1 virtual timer control register, available
-        // unconditionally at EL1 in the non-VHE configuration Tyrne
-        // runs in (per ADR-0024 + UNSAFE-2026-0017). The write does
-        // not touch memory; `options(nostack, nomem)` is correct.
-        // Audit: UNSAFE-2026-0021.
+        // SAFETY: writing a system register via `msr` is `unsafe`
+        // because the compiler cannot reason about its side effects on
+        // CPU state. Invariants relied on: (a) `CNTV_CTL_EL0` is the
+        // architected EL1 virtual timer control register and is
+        // accessible unconditionally at EL1 in the non-VHE
+        // configuration Tyrne runs in (per ADR-0024 + UNSAFE-2026-0017
+        // — the EL drop runs to completion before any IRQ is unmasked,
+        // so we are guaranteed to be at EL1 here); (b) the literal
+        // `2u64` is `IMASK = 1, ENABLE = 0`, which is the architected
+        // "mask the source" encoding for the timer; (c) the write
+        // touches no memory and clobbers no general-purpose register
+        // outside the AAPCS64 caller-saved set, so `options(nostack,
+        // nomem)` is correct. Rejected alternatives: a typed crate
+        // wrapper such as `cortex_a`'s `CNTV_CTL_EL0::set` would still
+        // expand to the same `msr` and would still require `unsafe` at
+        // the call site (system-register writes are intrinsically
+        // unsafe under any wrapper); pulling in another HAL crate for
+        // a single ISR-hot register write costs build-graph footprint
+        // for no safety gain. Audit: UNSAFE-2026-0021.
         unsafe {
             asm!(
                 "msr cntv_ctl_el0, {}",

@@ -12,7 +12,7 @@ The constituent decisions are all already settled by Accepted ADRs:
 
 - [ADR-0011 — `IrqController` HAL trait](../decisions/0011-irq-controller-trait.md) — four-method trait surface (`enable` / `disable` / `acknowledge` / `end_of_interrupt`) with `IrqNumber` newtype. The QEMU virt BSP gains a `QemuVirtGic` impl.
 - [ADR-0010 — `Timer` HAL trait](../decisions/0010-timer-trait.md) — defines `arm_deadline(deadline_ns)` / `cancel_deadline()` whose IRQ-armed half is `unimplemented!()` until T-012 wires the generic-timer IRQ.
-- [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — the no-`&mut`-across-context-switch discipline. IRQ delivery while `ipc_send_and_yield` is mid-flight needs to extend this discipline to the handler frame; ADR-0021 will likely gain an Amendment when the handler is wired.
+- [ADR-0021 — Raw-pointer scheduler IPC-bridge API](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md) — the no-`&mut`-across-context-switch discipline. IRQ delivery while `ipc_send_and_yield` is mid-flight extends this discipline to the handler frame; ADR-0021 carries the [2026-04-28 Amendment](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md#revision-notes) recording the extension.
 - [ADR-0022 — Idle task and typed `SchedError::Deadlock`](../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) — first rider's *Sub-rider* gates idle's `wfi` activation on T-012's IRQ infrastructure being live.
 - [ADR-0024 — EL drop to EL1 policy](../decisions/0024-el-drop-policy.md) — establishes the EL1 + non-VHE invariant the vector table relies on. `VBAR_EL1` is the EL1 vector base; if the kernel were running at EL2 (which it cannot, post-T-013), it would write `VBAR_EL2` instead.
 
@@ -161,8 +161,10 @@ The handler at `irq_entry` recognises IRQ 27 specifically:
 
 1. `gic.acknowledge()` returns `Some(IrqNumber(27))`.
 2. The handler writes `0b10` to `CNTV_CTL_EL0` to mask further timer IRQs until the next `arm_deadline` re-arms.
-3. Calls `sched::on_timer_irq(...)` — a new scheduler hook that wakes whatever the kernel was timing-out (idle, sleeping task, etc.).
-4. `gic.end_of_interrupt(IrqNumber(27))` to signal completion.
+3. `gic.end_of_interrupt(IrqNumber(27))` to signal completion.
+4. Returns to the trampoline, which `eret`s back to the interrupted code.
+
+v1's body is *ack-and-ignore*: no `sched::on_timer_irq` hook is invoked and no scheduler state is read or mutated. This preserves the v1 guarantee — restated in the ADR-0021 [2026-04-28 Amendment](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md#revision-notes) — that IRQ entry does not borrow scheduler state. The wake / scheduling hook (preemption, `time_sleep_until` wake-on-deadline, etc.) is a future arc and will land outside the IRQ entry path under the momentary-`&mut` discipline the same Amendment lays out.
 
 ### Idle's `wfi` activation
 
@@ -202,7 +204,7 @@ The same momentary-`&mut` discipline applies. The handler:
 2. Drops the `&mut` before any `eret` could land in user code that re-borrows.
 3. Uses `*mut Scheduler<C>` (via `StaticCell::as_mut_ptr`) for storage between calls.
 
-This is structurally identical to the cooperative-bridge discipline; the difference is that ISR re-entry is preemption-shaped, not yield-shaped. T-012 ships an **[ADR-0021 §Revision notes Amendment (2026-04-27)](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md#revision-notes)** (not a new ADR — same shared-state aliasing concern, same chosen solution shape) recording that the discipline extends to the IRQ-handler frame. UNSAFE-2026-0014 gains a corresponding Amendment naming `irq_entry` as a future site of the same pattern; v1's `irq_entry` body is *ack-and-ignore* and vacuously satisfies the discipline.
+This is structurally identical to the cooperative-bridge discipline; the difference is that ISR re-entry is preemption-shaped, not yield-shaped. T-012 ships an **[ADR-0021 §Revision notes Amendment (2026-04-28)](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md#revision-notes)** (not a new ADR — same shared-state aliasing concern, same chosen solution shape) recording that the discipline extends to the IRQ-handler frame. UNSAFE-2026-0014 gains a corresponding Amendment naming `irq_entry` as a future site of the same pattern; v1's `irq_entry` body is *ack-and-ignore* and vacuously satisfies the discipline.
 
 ## Implementation map
 
@@ -241,7 +243,7 @@ T-012 lands `In Review` 2026-04-28 across three commits. Maintainer-side QEMU sm
 
 Each is a future ADR or task.
 
-- **ADR-0021 Amendment shape for IRQ-handler aliasing discipline.** The ISR's interaction with momentary-`&mut Scheduler<C>` blocks — confirmed analogous to the cooperative-bridge case in §Design above — needs a recorded extension to ADR-0021's discipline. T-012 ships the Amendment.
+- **ADR-0021 Amendment shape for IRQ-handler aliasing discipline.** The ISR's interaction with momentary-`&mut Scheduler<C>` blocks — confirmed analogous to the cooperative-bridge case in §Design above — needs a recorded extension to ADR-0021's discipline. T-012 shipped the [2026-04-28 Amendment](../decisions/0021-raw-pointer-scheduler-ipc-bridge.md#revision-notes); the open question is now whether the *first scheduler-touching* IRQ handler (preemption, `time_sleep_until`, IPI-driven wake) should add a follow-up Amendment recording the activation site, per the discipline note in the existing Amendment body.
 - **Generic-timer IRQ ID.** PPI 27 is the EL1 virtual timer's IRQ on the standard ARM Generic Timer architecture; QEMU virt follows the architecture default. Confirm against `qemu-system-aarch64`'s device-tree dump as part of T-012 step 4.
 - **SError handler shape.** Pure `panic!("SError taken")` vs. printing the syndrome register (`ESR_EL1`) before halting. SErrors are rare but pinpointing the source is valuable; a small dispatcher that reads `ESR_EL1` and writes the decoded fields to the console before halting is probably worth the ~30 lines of asm + Rust.
 - **Vector-table assembly idiom.** Hand-written `naked_asm!` block per entry vs. a `repeat`-style macro that generates 16 entries with a category-and-mode parameter. Hand-written is more explicit; macro reduces line count. T-012 picks one during implementation.
