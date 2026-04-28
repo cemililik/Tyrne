@@ -164,15 +164,26 @@ pub const fn resolution_ns_for_freq(frequency_hz: u64) -> u64 {
 /// equivalent on other targets) is in counter ticks; this function
 /// is the conversion at the BSP boundary.
 ///
+/// # Rounding
+///
+/// Uses **ceiling division** so that any sub-tick remainder rounds up
+/// to the next tick. This is the rounding direction required by
+/// ADR-0010 §Decision outcome's "When `now_ns()` reaches or exceeds
+/// `deadline_ns`, the hardware timer IRQ fires" — flooring would arm
+/// the comparator at the largest tick whose `ticks_to_ns` is ≤
+/// `deadline_ns`, which can fire the IRQ up to one sub-tick *before*
+/// `deadline_ns`, violating the "reaches or exceeds" contract. With
+/// ceiling, the comparator's tick-equivalent is always ≥
+/// `deadline_ns`, so the IRQ fires at-or-after the requested time.
+///
 /// # Saturation
 ///
 /// Uses 128-bit intermediate arithmetic and a saturating cast back
-/// to `u64`. For pathological inputs where `ns * frequency_hz`
-/// overflows `u64` even after the divide (~584 years × 1 GHz), the
-/// returned tick count saturates at `u64::MAX`. Matches
-/// [`ticks_to_ns`]'s saturation discipline so that round-tripping
-/// `now_ns -> ns_to_ticks -> ticks_to_ns` is monotonic at the
-/// extreme.
+/// to `u64`. For pathological inputs where `ceil(ns * frequency_hz /
+/// 1e9)` exceeds `u64::MAX` (~584 years × 1 GHz, or any frequency
+/// above 1e9 Hz with `ns ≈ u64::MAX`), the returned tick count
+/// saturates at `u64::MAX`. Matches [`ticks_to_ns`]'s saturation
+/// discipline.
 ///
 /// # Panics
 ///
@@ -190,7 +201,10 @@ pub const fn ns_to_ticks(ns: u64, frequency_hz: u64) -> u64 {
         "ns_to_ticks: frequency_hz must be > 0 (BSP must validate CNTFRQ_EL0 / equivalent at boot)",
     );
     let intermediate = (ns as u128) * (frequency_hz as u128);
-    let ticks = intermediate / (NANOS_PER_SECOND as u128);
+    let nanos = NANOS_PER_SECOND as u128;
+    // Ceiling division so any sub-tick remainder rounds up to the
+    // next tick (see § Rounding above).
+    let ticks = intermediate.div_ceil(nanos);
     if ticks > u64::MAX as u128 {
         u64::MAX
     } else {
@@ -435,6 +449,15 @@ mod tests {
         let huge_ns = u64::MAX;
         let high_freq = 1_000_000_000;
         assert_eq!(ns_to_ticks(huge_ns, high_freq), u64::MAX);
+
+        // Exercise the saturation *branch* (not just the boundary):
+        // pick a frequency strictly greater than NANOS_PER_SECOND so
+        // the u128 quotient `ceil(ns * freq / 1e9)` exceeds u64::MAX
+        // and the `if ticks > u64::MAX as u128` branch executes.
+        let over_boundary_freq = 1_000_000_001;
+        assert_eq!(ns_to_ticks(huge_ns, over_boundary_freq), u64::MAX);
+        // Also verify the maximum possible frequency saturates.
+        assert_eq!(ns_to_ticks(huge_ns, u64::MAX), u64::MAX);
     }
 
     #[test]

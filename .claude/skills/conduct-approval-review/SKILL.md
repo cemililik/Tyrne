@@ -27,7 +27,7 @@ This skill **is not**:
 - A *retrospective* (what landed, what we learned, adjustments). That is [`conduct-review`](../conduct-review/SKILL.md) with `business-review` as the type.
 - A duplicate of any of the above. An approval review may *cite* their findings — for example, "the consolidated security review at `<path>` returned clean; this approval review accepts that as the security-axis verdict" — but it does not redo their work.
 
-The independent-verification pass is necessary because authors are systematically blind to their own claims. T-009's review-fix arc surfaced this: the agent self-reported "all accepted findings fixed"; the maintainer's question ("kabul edilen bulguların tamamı düzeltildi mi?") caught a silently-skipped runtime EL check. That exact failure mode — "we say it's done; nobody else checked" — is what this skill closes.
+The independent-verification pass is necessary because authors are systematically blind to their own claims. T-009's review-fix arc surfaced this: the agent self-reported "all accepted findings fixed"; the maintainer's question ("Have all accepted findings been fixed?") caught a silently-skipped runtime EL check. That exact failure mode — "we say it's done; nobody else checked" — is what this skill closes.
 
 ## Procedure
 
@@ -50,7 +50,7 @@ The independent-verification pass is necessary because authors are systematicall
    cargo llvm-cov --workspace --exclude tyrne-bsp-qemu-virt --summary-only
    ```
 
-   If any number drifts from what the artefacts claim, that is a Yüksek finding. (T-011's commit body's per-file pre-state test counts were off by 1–2 in two of three files; the headline was correct. This kind of small drift is normal but worth recording.)
+   If any number drifts from what the artefacts claim, that is a High finding. (T-011's commit body's per-file pre-state test counts were off by 1–2 in two of three files; the headline was correct. This kind of small drift is normal but worth recording.)
 
 4. **Spot-check the audit-log discipline.** For each `unsafe`-touching artefact, verify:
    - Every new `unsafe` block has a `// SAFETY:` comment with (a) why-unsafe-is-required, (b) invariants, (c) rejected alternatives.
@@ -90,7 +90,7 @@ The settled-decisions context (input #1) names things that should not be re-liti
 
 Structure the review as:
 
-```
+```markdown
 ## Verdict (one paragraph)
 Overall + per-artefact promotion verdicts.
 
@@ -98,9 +98,9 @@ Overall + per-artefact promotion verdicts.
 Table: each item ✅ delivered / 🟡 partial / ❌ missing, with file:line cite.
 
 ## New findings
-### Yüksek (blocking)
-### Orta (should fix this round)
-### Düşük (informational)
+### High (blocking)
+### Medium (should fix this round)
+### Low (informational)
 ### Open questions
 
 ## Per-artefact AC audit

@@ -5,7 +5,7 @@
 - **Status:** In Review
 - **Created:** 2026-04-27
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
-- **Dependencies:** [T-009](T-009-timer-init-cntvct.md) (`In Review`, time-source half of `Timer` impl) — T-012 builds on it for the deadline-arming half. ADR-0024 (EL drop policy, B1 sub-item 1) must be `Accepted` before T-012 lands its boot-side `VBAR_EL1` install.
+- **Dependencies:** [T-009](T-009-timer-init-cntvct.md) (`Done` 2026-04-27, time-source half of `Timer` impl) — T-012 builds on it for the deadline-arming half. [ADR-0024](../../../decisions/0024-el-drop-policy.md) (EL drop policy, B1 sub-item 1) — `Accepted` 2026-04-27, prerequisite for T-012's boot-side `VBAR_EL1` install (the kernel's vector-base register is the EL1 one; the EL drop must have landed first).
 - **Informs:** Closes the deferred halves of [ADR-0010](../../../decisions/0010-timer-trait.md) (`arm_deadline` / `cancel_deadline`) and [ADR-0022](../../../decisions/0022-idle-task-and-typed-scheduler-deadlock.md) first rider (idle's WFI activation). Unblocks every later milestone that needs preemption, periodic ticks, or any IRQ-driven work.
 - **ADRs required:** No new ADR for the GIC driver pattern (covered by [ADR-0011](../../../decisions/0011-irq-controller-trait.md), already `Accepted`). A small ADR — likely **ADR-0026** — may be needed for the exception-vector-table / handler-dispatch shape if non-obvious choices arise during implementation; that ADR is in scope of T-012 if it becomes necessary.
 

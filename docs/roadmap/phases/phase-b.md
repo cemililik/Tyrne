@@ -91,7 +91,7 @@ The scope of this milestone was extended on 2026-04-27 (after T-009 — the time
 - Smoke test boots both QEMU variants and asserts the greeting still appears.
 - `boot.s` starts with explicit IRQ masking.
 - BSP boot checklist updated with the "mask DAIF before anything else" rule.
-- **T-012 closed:** `arm_deadline` fires real IRQs through the GIC; `idle_entry`'s body is `wait_for_interrupt` + `yield_now` (closing ADR-0022's first rider in full). *(2026-04-28 — T-012 promoted to `In Review`; this AC is met as kernel-build + host-test gates; full closure pending maintainer-side QEMU verification of the deliberate-deadline path.)*
+- **T-012 delivered (pending verification):** `arm_deadline` fires real IRQs through the GIC; `idle_entry`'s body is `wait_for_interrupt` + `yield_now` (closing ADR-0022's first rider in full). *(2026-04-28 — T-012 promoted to `In Review`; the implementation half is met as kernel-build + host-test gates; full closure to `Done` waits on maintainer-side QEMU verification of the deliberate-deadline path.)*
 
 ---
 

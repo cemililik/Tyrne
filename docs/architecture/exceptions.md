@@ -69,26 +69,29 @@ sequenceDiagram
     participant Vec as Vector +0x280
     participant Tramp as IRQ trampoline (asm)
     participant Frame as Saved-register frame
-    participant Handler as Rust handler
+    participant Handler as Rust irq_entry
     participant GIC as QemuVirtGic
-    participant Sched as Scheduler hook
     HW->>Vec: IRQ taken; PC = VBAR_EL1 + 0x280
     Vec->>Tramp: branch
-    Tramp->>Frame: stp x0..x29; mrs ELR_EL1, SPSR_EL1
-    Tramp->>Handler: call irq_entry(&mut Frame)
-    Handler->>GIC: gic.acknowledge() → Some(IrqNumber)
-    alt timer IRQ (id 27)
-        Handler->>Sched: sched::on_timer_irq(&Frame)
+    Tramp->>Frame: stp x0..x18, x30; mrs ELR_EL1, SPSR_EL1
+    Tramp->>Handler: bl irq_entry(*mut TrapFrame)
+    Handler->>GIC: gic.acknowledge() → Option<IrqNumber>
+    alt spurious (INTID 1023)
+        Handler-->>Tramp: return (no EOI per spec)
+    else timer IRQ (PPI 27, v1)
+        Handler->>Handler: msr CNTV_CTL_EL0, #IMASK (mask at source)
+        Handler->>GIC: gic.end_of_interrupt(irq)
+        Note over Handler: ack-and-ignore — no scheduler-state mutation in v1<br/>(future arc adds sched::on_timer_irq hook<br/>per ADR-0021 Amendment)
     else other IRQ
-        Handler->>Handler: panic!("unhandled IRQ {n}") (v1)
+        Handler->>GIC: gic.end_of_interrupt(irq)
+        Handler->>Handler: panic!("unhandled IRQ {n}")
     end
-    Handler->>GIC: gic.end_of_interrupt(irq)
     Handler-->>Tramp: returns
-    Tramp->>Frame: ldp x0..x29; msr ELR_EL1, SPSR_EL1
+    Tramp->>Frame: ldp x0..x18, x30; msr ELR_EL1, SPSR_EL1
     Tramp-->>HW: eret
 ```
 
-The trampoline saves the AAPCS64-caller-saved registers (`x0..x18`) plus enough of `x19..x29` that the Rust handler can use callee-saved registers freely; `ELR_EL1` and `SPSR_EL1` are saved so the eret restores the interrupted PSTATE exactly. The exact saved set is fixed by the trampoline's asm and exposed to Rust as a `#[repr(C)]` struct passed by `&mut`.
+The trampoline saves the AAPCS64-caller-saved general-purpose registers — `x0..x18` plus the link register `x30` — into a 192-byte `#[repr(C)] TrapFrame` struct, plus `ELR_EL1` and `SPSR_EL1` so `eret` restores the interrupted PSTATE exactly. The callee-saved set (`x19..x29`) is **not** pushed by the trampoline; AAPCS64 makes the Rust callee (`irq_entry`) responsible for preserving any of those registers it touches, so saving them in the trampoline would be redundant work on every IRQ entry. The exact saved set is fixed by the asm `stp` sequence in `vectors.s` and mirrored by the `TrapFrame` field order in `exceptions.rs`; mismatches between asm and `repr(C)` are caught at first IRQ fire (saved values would land in the wrong slots), not at compile time.
 
 The non-IRQ entries (sync exception, FIQ, SError, every Lower-EL entry) all route to a dispatcher that prints `"unhandled exception <class>"` and halts. Sync exceptions become useful in Phase B5 when SVC syscalls land; FIQ remains unused unless a future BSP routes a high-priority interrupt to FIQ specifically; SError is the architecture's "things have gone wrong at the system level" signal and is treated as fatal in v1.
 

@@ -135,7 +135,7 @@ impl PanicClass {
 ///
 /// Audit: UNSAFE-2026-0020.
 #[unsafe(no_mangle)]
-pub extern "C" fn irq_entry(_frame: *mut TrapFrame) {
+pub unsafe extern "C" fn irq_entry(_frame: *mut TrapFrame) {
     // SAFETY: `GIC` is initialised once in `kernel_entry` before
     // `DAIF.I` is unmasked; an IRQ cannot arrive before the static is
     // populated. `assume_init_ref` produces a `&QemuVirtGic` that is
@@ -219,7 +219,7 @@ pub extern "C" fn irq_entry(_frame: *mut TrapFrame) {
 ///
 /// Audit: UNSAFE-2026-0020.
 #[unsafe(no_mangle)]
-pub extern "C" fn panic_entry(class: u64, esr: u64) -> ! {
+pub unsafe extern "C" fn panic_entry(class: u64, esr: u64) -> ! {
     let class_str = PanicClass::from_u64(class).as_str();
     panic!("tyrne: {class_str}; ESR_EL1 = {esr:#018x}; class id = {class}",);
 }

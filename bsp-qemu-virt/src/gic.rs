@@ -69,6 +69,14 @@ const DEFAULT_PRIORITY_BYTE: u32 = 0xA0;
 /// fill a 32-bit word.
 const TARGET_CPU0_BYTE: u32 = 0x01;
 
+/// `GICv2` architectural maximum INTID. The architecture supports up to
+/// 1020 real interrupts (IDs 0..=1019); 1020..=1023 are reserved
+/// (1023 = the spurious-INTID sentinel returned by `GICC_IAR`). Any
+/// `enable` / `disable` call with `irq.0 >= GIC_MAX_IRQ` is a kernel
+/// bug — the offset math would index into reserved or out-of-window
+/// MMIO. Per ARM IHI 0048B §4.3.2.
+const GIC_MAX_IRQ: u32 = 1020;
+
 // ─── QemuVirtGic ──────────────────────────────────────────────────────────────
 
 /// QEMU virt `GICv2` controller.
@@ -306,6 +314,12 @@ unsafe impl Sync for QemuVirtGic {}
 
 impl IrqController for QemuVirtGic {
     fn enable(&self, irq: IrqNumber) {
+        assert!(
+            irq.0 < GIC_MAX_IRQ,
+            "QemuVirtGic::enable: irq.0 = {} exceeds GICv2 architectural max {}",
+            irq.0,
+            GIC_MAX_IRQ,
+        );
         let n = irq.0 as usize;
         let reg_offset = GICD_ISENABLER_BASE.saturating_add((n / 32).saturating_mul(4));
         #[allow(
@@ -313,17 +327,25 @@ impl IrqController for QemuVirtGic {
             reason = "n % 32 is in 0..32; fits trivially in u32"
         )]
         let bit = 1u32 << ((n % 32) as u32);
-        // SAFETY: `GICD_ISENABLER<n / 32>` is within the distributor
-        // window. Writing a 1 bit to ISENABLER is a per-bit *set*
-        // operation (writing 0 to other bits has no effect), so the
-        // call is idempotent against already-enabled lines. Rejected
-        // alternative: read-modify-write — unnecessary because the
-        // semantics of ISENABLER are write-only-bit-set.
-        // Audit: UNSAFE-2026-0019.
+        // SAFETY: `irq.0 < GIC_MAX_IRQ` (1020) is enforced by the
+        // assertion above; therefore `n / 32 < 32` and
+        // `reg_offset = 0x100 + 4 * (n / 32)` lies in `[0x100, 0x180)`
+        // — well within the distributor window. Writing a 1 bit to
+        // ISENABLER is a per-bit *set* operation (writing 0 to other
+        // bits has no effect), so the call is idempotent against
+        // already-enabled lines. Rejected alternative: read-modify-
+        // write — unnecessary because the semantics of ISENABLER are
+        // write-only-bit-set. Audit: UNSAFE-2026-0019.
         unsafe { self.write_distributor(reg_offset, bit) };
     }
 
     fn disable(&self, irq: IrqNumber) {
+        assert!(
+            irq.0 < GIC_MAX_IRQ,
+            "QemuVirtGic::disable: irq.0 = {} exceeds GICv2 architectural max {}",
+            irq.0,
+            GIC_MAX_IRQ,
+        );
         let n = irq.0 as usize;
         let reg_offset = GICD_ICENABLER_BASE.saturating_add((n / 32).saturating_mul(4));
         #[allow(
@@ -331,10 +353,11 @@ impl IrqController for QemuVirtGic {
             reason = "n % 32 is in 0..32; fits trivially in u32"
         )]
         let bit = 1u32 << ((n % 32) as u32);
-        // SAFETY: `GICD_ICENABLER<n / 32>` is within the distributor
-        // window. Writing a 1 bit to ICENABLER is a per-bit *clear*
-        // operation; idempotent against already-disabled lines.
-        // Audit: UNSAFE-2026-0019.
+        // SAFETY: range invariant established by the assertion above,
+        // same as `enable`. `reg_offset` lies in `[0x180, 0x200)` —
+        // within the distributor window. Writing a 1 bit to
+        // ICENABLER is a per-bit *clear* operation; idempotent
+        // against already-disabled lines. Audit: UNSAFE-2026-0019.
         unsafe { self.write_distributor(reg_offset, bit) };
     }
 
