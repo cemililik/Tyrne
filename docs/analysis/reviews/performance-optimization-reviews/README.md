@@ -23,5 +23,6 @@ A dated file `YYYY-MM-DD-<context>.md` in this folder, following the shape in [`
 | Date | Scope | File |
 |------|-------|------|
 | 2026-04-21 | A6 baseline — v0.0.1 kernel footprint after Phase A exit (no hypothesis; baseline exploration per master-plan §Pre-flight) | [2026-04-21-A6-baseline.md](2026-04-21-A6-baseline.md) |
+| 2026-04-28 | B1 closure baseline — post-T-013 + T-012 footprint (kernel image, .bss, instruction counts; new Metric 6 — IRQ delivery cost) | [2026-04-28-B1-closure.md](2026-04-28-B1-closure.md) |
 
-> First full hypothesis-driven cycle is blocked on Phase B's timer initialisation — IPC round-trip latency cannot be measured without a free-running counter. The baseline above records size / section / instruction-count metrics that can be measured statically.
+> First full hypothesis-driven cycle is now infrastructure-unblocked — T-009 + T-012 lit up `now_ns()` at EL1 and provide the measurement primitive IPC round-trip latency needs. The B1 closure baseline above records the static-only metrics; future hypothesis-driven cycles will add IPC round-trip wall-clock measurement, stack high-water-mark probes, and `TrapFrame` slimming for ack-and-ignore IRQ handlers.
