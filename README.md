@@ -2,7 +2,7 @@
 
 > A capability-based microkernel for high-assurance devices, written in Rust.
 
-**Status:** Pre-alpha. Phase A complete (2026-04-21) — the kernel boots on QEMU `virt` aarch64 and runs a two-task IPC demo end-to-end with capability-gated message transfer. Phase B underway: scheduler hardening, idle task, monotonic time source via the ARM Generic Timer, and the path toward EL drop / MMU / userspace. See [`docs/roadmap/current.md`](docs/roadmap/current.md) for the active task.
+**Status:** Pre-alpha. Phase A complete (2026-04-21) — the kernel boots on QEMU `virt` aarch64 and runs a two-task IPC demo end-to-end with capability-gated message transfer. Phase B B0 (Phase-A exit hygiene — scheduler hardening, idle task, monotonic time source via the ARM Generic Timer) closed 2026-04-27. Phase B B1 (drop to EL1 + exception infrastructure) implementation complete 2026-04-28: kernel runs at EL1 unconditionally with a 16-entry vector table at `VBAR_EL1`, a GIC v2 driver, generic-timer IRQ wiring, and idle's `wfi` activation. Path forward: B2 MMU activation, then per-task address spaces, task loader, syscall boundary, first userspace "hello". See [`docs/roadmap/current.md`](docs/roadmap/current.md) for the active task.
 
 ---
 

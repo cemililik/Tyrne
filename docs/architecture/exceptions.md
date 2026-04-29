@@ -2,7 +2,7 @@
 
 Tyrne's exception path is a 16-entry aarch64 vector table installed at `VBAR_EL1`, dispatching to one of four behaviours depending on the source class — synchronous exceptions (SVC, abort), IRQs (timer, GIC-routed device lines), FIQs (panic in v1), or SErrors (panic in v1). The IRQ path drives the GIC v2 controller on QEMU virt's `0x0800_0000` distributor + `0x0801_0000` CPU interface, acknowledging at entry, dispatching to a kernel handler, and signalling end-of-interrupt at exit. This document is the *how* for the design [T-012](../analysis/tasks/phase-b/T-012-exception-and-irq-infrastructure.md) implements; the *why* for each constituent ADR (HAL trait shape, EL drop policy, raw-pointer bridge interaction) lives in their respective ADRs.
 
-> **Status (2026-04-28).** T-012 is `In Review` — this design doc was drafted first, ahead of the code, to satisfy the [B0 closure security review §8 recommendation](../analysis/reviews/security-reviews/2026-04-27-B0-closure.md) that architecture docs land *with* the code rather than as a follow-up. The implementation followed in three commits (`a043079` GIC + vector table, `b4ed68c` timer arm/cancel + irq_entry + idle WFI, `28c5ce9` documentation sweep). The implementation map below names which step landed in which commit. Maintainer-side QEMU smoke + Miri pass remain pending per the same disclaimer T-013 used.
+> **Status (2026-04-28).** T-012 is `Done` — promoted via PR #10 merge to `main`. This design doc was drafted first, ahead of the code, to satisfy the [B0 closure security review §8 recommendation](../analysis/reviews/security-reviews/2026-04-27-B0-closure.md) that architecture docs land *with* the code rather than as a follow-up. The implementation followed in three commits (`a043079` GIC + vector table, `b4ed68c` timer arm/cancel + irq_entry + idle WFI, `28c5ce9` documentation sweep) plus two PR #10 review-fix sweeps (`d820a88` round-1, `5c9cf06` round-2). The implementation map below names which step landed in which commit. Maintainer-side QEMU smoke + Miri pass remain pre-B1-closure work-items per the same disclaimer T-013 used.
 
 ## Context
 
@@ -220,7 +220,7 @@ T-012's seven Approach steps, mapped to file changes. The first column is the st
 | 6 | Audit-log entries + SAFETY comments | ✅ done (per-commit) | `docs/audits/unsafe-log.md` — UNSAFE-2026-0019 (commit `a043079`), UNSAFE-2026-0020 (commit `a043079`), UNSAFE-2026-0021 (commit `b4ed68c`); UNSAFE-2026-0014 Amendment naming `irq_entry` as a future site of the same momentary-`&mut` pattern (commit `28c5ce9`) |
 | 7 | Documentation sweep | ✅ done (commit `28c5ce9`) | This doc; ADR-0010 §Revision notes (deferred halves now live); ADR-0021 §Revision notes Amendment (IRQ-handler aliasing discipline); ADR-0022 first rider's *Sub-rider* closure paragraph |
 
-T-012 lands `In Review` 2026-04-28 across three commits. Maintainer-side QEMU smoke + Miri pass remain pending per the same disclaimer T-013 used.
+T-012 lands `Done` 2026-04-28 across three implementation commits + one documentation sweep + two PR #10 review-fix sweeps; promoted via PR #10 merge to `main`. Maintainer-side QEMU smoke + Miri pass remain pre-B1-closure work-items per the same disclaimer T-013 used.
 
 ## Invariants
 
