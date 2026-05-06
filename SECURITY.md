@@ -10,7 +10,7 @@ Tyrne is **pre-alpha**. The kernel boots end-to-end on QEMU virt aarch64 (Phase 
 
 Until a dedicated disclosure channel is set up, please report security-relevant observations by opening a **private security advisory** on GitHub:
 
-https://github.com/cemililik/TyrneOS/security/advisories/new
+https://github.com/cemililik/Tyrne/security/advisories/new
 
 Do not open a public issue for anything that looks like it might be security-sensitive, even in this early phase.
 

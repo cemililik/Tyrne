@@ -6,7 +6,7 @@
 //! state and the context-save frame arrive in Milestone A5 as layered
 //! additions.
 //!
-//! [adr-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+//! [adr-0016]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0016-kernel-object-storage.md
 
 use super::arena::{Arena, SlotId};
 use super::{ObjError, TASK_ARENA_CAPACITY};

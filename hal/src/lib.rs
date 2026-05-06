@@ -9,8 +9,8 @@
 //! full responsibilities of each trait and [ADR-0006][adr-0006] for the
 //! crate-boundary rationale.
 //!
-//! [hal-doc]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/hal.md
-//! [adr-0006]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0006-workspace-layout.md
+//! [hal-doc]: https://github.com/cemililik/Tyrne/blob/main/docs/architecture/hal.md
+//! [adr-0006]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0006-workspace-layout.md
 //!
 //! ## Status
 //!
@@ -57,5 +57,5 @@ pub use timer::Timer;
 /// [`docs/architecture/security-model.md`][sec-doc] for the trust-boundary
 /// implications.
 ///
-/// [sec-doc]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/security-model.md
+/// [sec-doc]: https://github.com/cemililik/Tyrne/blob/main/docs/architecture/security-model.md
 pub trait Iommu {}

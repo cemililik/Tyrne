@@ -6,7 +6,7 @@
 //! `notify` / `wait` operations will OR bits into and read back; the
 //! waiter list arrives in A4.
 //!
-//! [adr-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+//! [adr-0016]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0016-kernel-object-storage.md
 
 use super::arena::{Arena, SlotId};
 use super::{ObjError, NOTIFICATION_ARENA_CAPACITY};

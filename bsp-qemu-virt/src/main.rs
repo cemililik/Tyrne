@@ -15,9 +15,9 @@
 //! The boot flow is documented in [`docs/architecture/boot.md`][boot-doc]
 //! and the memory-layout decisions in [ADR-0012][adr-0012].
 //!
-//! [adr-0004]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0004-target-platforms.md
-//! [adr-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
-//! [boot-doc]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/boot.md
+//! [adr-0004]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0004-target-platforms.md
+//! [adr-0012]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+//! [boot-doc]: https://github.com/cemililik/Tyrne/blob/main/docs/architecture/boot.md
 
 #![no_std]
 #![no_main]
@@ -55,7 +55,7 @@ use gic::{QemuVirtGic, QEMU_VIRT_GIC_CPU_INTERFACE_BASE, QEMU_VIRT_GIC_DISTRIBUT
 /// peripheral addresses. QEMU `virt` has exposed this address across
 /// all versions the project targets.
 ///
-/// [adr-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+/// [adr-0012]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
 const PL011_UART_BASE: usize = 0x0900_0000;
 
 // ─── StaticCell ───────────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ impl<T> StaticCell<T> {
     /// and must not use the pointer to create a `&mut T` that outlives a
     /// cooperative context switch (ADR-0021). Audit: UNSAFE-2026-0013.
     ///
-    /// [ADR-0021]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
+    /// [ADR-0021]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
     #[inline]
     #[allow(
         clippy::mut_from_ref,
@@ -224,7 +224,7 @@ static EP_CAP_B: StaticCell<CapHandle> = StaticCell::new();
 /// not on `kernel_entry`'s stack) avoids a second BSP static-cell churn
 /// when task destruction / status-query APIs arrive in later Phase B work.
 ///
-/// [ADR-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+/// [ADR-0016]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0016-kernel-object-storage.md
 static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 
 // ─── Idle task ────────────────────────────────────────────────────────────────
@@ -256,7 +256,7 @@ static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 /// the BSP did not register idle at all (i.e. `register_idle` was not
 /// called before `start`).
 ///
-/// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+/// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
 fn idle_entry() -> ! {
     // SAFETY: CPU is fully initialised in `kernel_entry` before `start()`;

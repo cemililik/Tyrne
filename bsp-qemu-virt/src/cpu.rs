@@ -30,8 +30,8 @@
 //! audited under `UNSAFE-2026-0018` — rather than duplicated as an inline-asm
 //! block in this file.
 //!
-//! [ADR-0010]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0010-timer-trait.md
-//! [ADR-0020]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
+//! [ADR-0010]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0010-timer-trait.md
+//! [ADR-0020]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
 
 use core::arch::{asm, naked_asm};
 
@@ -114,8 +114,8 @@ impl QemuVirtCpu {
     ///   set this register; a zero value would make `now_ns` divide by
     ///   zero and `resolution_ns_for_freq` overflow. Audit: UNSAFE-2026-0015.
     ///
-    /// [ADR-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
-    /// [ADR-0024]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0024-el-drop-policy.md
+    /// [ADR-0012]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+    /// [ADR-0024]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0024-el-drop-policy.md
     #[must_use]
     pub unsafe fn new() -> Self {
         // Runtime assertion of the ADR-0012 + ADR-0024 boot-time
@@ -171,7 +171,7 @@ impl QemuVirtCpu {
         //     read side.
         // Audit: UNSAFE-2026-0015.
         //
-        // [ADR-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+        // [ADR-0012]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
         unsafe {
             asm!("mrs {}, cntfrq_el0", out(reg) frequency_hz, options(nostack, nomem));
         }

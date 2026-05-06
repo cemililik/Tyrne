@@ -38,13 +38,13 @@
 //! [`docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md`]
 //! for the incident report and ADR-0026 for the structural fix.
 //!
-//! [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+//! [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 //! [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
 //! [`docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md`]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md
 //!
-//! [T-004]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
-//! [ADR-0019]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0019-scheduler-shape.md
-//! [ADR-0020]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
+//! [T-004]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
+//! [ADR-0019]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0019-scheduler-shape.md
+//! [ADR-0020]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0020-cpu-trait-v2-context-switch.md
 
 use tyrne_hal::{ContextSwitch, Cpu, IrqGuard};
 
@@ -192,7 +192,7 @@ pub enum SchedError {
     /// revisited if preemption / SMP ever exercises the path. Callers
     /// that want the endpoint reset must destroy and re-create it.
     ///
-    /// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+    /// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
     /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
     Deadlock,
 }
@@ -424,8 +424,8 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 // shared rationale for the "why not safer Rust" half of its justification,
 // alongside the block-local invariants it states inline.
 //
-// [ADR-0021]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
-// [UNSAFE-2026-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/audits/unsafe-log.md
+// [ADR-0021]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
+// [UNSAFE-2026-0012]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
 
 /// Register the BSP-owned idle task in the dispatcher's fallback slot.
 ///
@@ -870,7 +870,7 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
 /// *Pointer validity*. The four pointers must not alias each other or any
 /// live `&mut` in the caller's scope.
 ///
-/// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+/// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     sched: *mut Scheduler<C>,
     cpu: &C,

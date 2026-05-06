@@ -18,7 +18,7 @@
 //! trampolines; the Rust functions here run with the GIC's CPU
 //! interface in "active" state for the duration of `irq_entry`.
 //!
-//! [`docs/architecture/exceptions.md`]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/exceptions.md
+//! [`docs/architecture/exceptions.md`]: https://github.com/cemililik/Tyrne/blob/main/docs/architecture/exceptions.md
 
 use core::arch::asm;
 use core::sync::atomic::{compiler_fence, Ordering};

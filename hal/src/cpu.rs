@@ -2,7 +2,7 @@
 //!
 //! See [ADR-0008] for the trait-signature rationale.
 //!
-//! [ADR-0008]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0008-cpu-trait.md
+//! [ADR-0008]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0008-cpu-trait.md
 
 /// Identifier for a CPU core.
 ///
