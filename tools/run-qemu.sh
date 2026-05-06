@@ -64,5 +64,5 @@ exec qemu-system-aarch64 \
     -smp 1 \
     -nographic \
     -serial mon:stdio \
-    "${INT_LOG_FLAGS[@]}" \
+    ${INT_LOG_FLAGS[@]+"${INT_LOG_FLAGS[@]}"} \
     -kernel "$KERNEL"

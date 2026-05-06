@@ -36,7 +36,9 @@ use tyrne_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityT
 use tyrne_kernel::ipc::{IpcQueues, Message, RecvOutcome};
 use tyrne_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
 use tyrne_kernel::obj::task::{create_task, Task, TaskArena};
-use tyrne_kernel::sched::{ipc_recv_and_yield, ipc_send_and_yield, start, yield_now, Scheduler};
+use tyrne_kernel::sched::{
+    ipc_recv_and_yield, ipc_send_and_yield, register_idle, start, yield_now, Scheduler,
+};
 
 mod console;
 mod cpu;
@@ -229,29 +231,33 @@ static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 
 /// Kernel idle task — runs when no application task is ready.
 ///
-/// Per [ADR-0022], the BSP owns the idle entry. The loop body is
+/// Per [ADR-0022] (idle-task ownership) + [ADR-0026] (idle dispatch via
+/// fallback slot, supersedes ADR-0022's *idle-task-location* axis), the
+/// BSP owns the idle entry function and registers it via [`register_idle`]
+/// rather than [`Scheduler::add_task`]. The loop body is
 /// `cpu.wait_for_interrupt()` + `yield_now`: `WFI` suspends the core
 /// until any unmasked IRQ raises a wake, then the cooperative `yield_now`
-/// returns control to the FIFO scheduler. T-012 closed [ADR-0022]'s
-/// first-rider *Sub-rider* by landing both halves of the wake-source
-/// precondition — T-009's `CNTVCT_EL0` time source and T-012's GIC v2 +
-/// `VBAR_EL1` IRQ delivery — so this is now the form ADR-0022's
-/// *Decision outcome* originally specified. The interim `spin_loop` shape
-/// the first rider introduced is retired.
+/// returns control to the dispatcher. The dispatcher consults the idle
+/// fallback slot only when [`Scheduler::ready`] is empty, so idle never
+/// displaces a real Ready task — the structural fix for the 2026-05-06
+/// QEMU smoke regression where round-robin FIFO had selected idle ahead
+/// of a just-unblocked receiver.
 ///
-/// In v1's cooperative IPC demo, both application tasks are permanently
-/// `Ready` (each holds a tail-`spin_loop`-yield pattern), so the FIFO
-/// never reaches `idle_entry` — `WFI` here is structurally unreachable
-/// in the demo path. The change is observable only when a future caller
-/// arms a deadline via `arm_deadline` and idle is the head of the ready
-/// queue at that moment.
+/// In v1's cooperative IPC demo, idle's loop body executes only when both
+/// application tasks are simultaneously blocked on IPC. The demo's flow
+/// keeps at least one of `task_a` / `task_b` Ready at every step, so idle
+/// is structurally unreachable in the demo path — but if a future caller
+/// arms a deadline via `arm_deadline` and both application tasks happen
+/// to block at the same moment, idle's `WFI` becomes observable.
 ///
 /// Full IPC-graph deadlock (every task blocked + no wake source ever
 /// fires) is visible today as "idle waiting forever", not a panic — the
 /// kernel stays live; typed `SchedError::Deadlock` is reachable only if
-/// the BSP did not register idle at all.
+/// the BSP did not register idle at all (i.e. `register_idle` was not
+/// called before `start`).
 ///
 /// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+/// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
 fn idle_entry() -> ! {
     // SAFETY: CPU is fully initialised in `kernel_entry` before `start()`;
     // single-core cooperative scheduling prevents concurrent access.
@@ -266,13 +272,12 @@ fn idle_entry() -> ! {
         // half landed with T-009; the IRQ-delivery half landed with
         // T-012's GIC + vector-table install (commit `a043079`).
         //
-        // In v1, the cooperative IPC demo has both application tasks
-        // permanently `Ready` (each holds a tail-`spin_loop`-yield
-        // pattern), so the FIFO never reaches `idle_entry` — `WFI`
-        // here is structurally unreachable in the demo path. The
-        // change is observable only when a future caller arms a
-        // deadline via `arm_deadline` and idle is the head of the
-        // ready queue at that moment.
+        // T-014: idle is now in the dispatcher's fallback slot per
+        // ADR-0026, not the FIFO. The dispatcher routes here only when
+        // both `task_a` and `task_b` are Blocked simultaneously and no
+        // other task is Ready; the v1 cooperative IPC demo's flow
+        // keeps at least one of them Ready at every step, so this
+        // `WFI` remains structurally unreachable in the demo path.
         cpu.wait_for_interrupt();
         // SAFETY: per ADR-0021 — `SCHED.as_mut_ptr()` is a pure pointer
         // cast (UNSAFE-2026-0013); idle's stack frame holds no `&mut` to
@@ -684,12 +689,20 @@ pub extern "C" fn kernel_entry() -> ! {
     // Task B is added FIRST so the scheduler runs B before A. B calls
     // ipc_recv_and_yield and enters RecvWaiting; only then does A call
     // ipc_send_and_yield, ensuring Delivered (not Enqueued) on the first send.
-    // The idle task (ADR-0022) is added LAST so it sits behind B and A in
-    // the FIFO — it only ever runs when both application tasks are blocked.
+    // The idle task is registered via `register_idle` (NOT `add_task`) per
+    // [ADR-0026]: idle lives in the dispatcher's fallback slot
+    // (`Scheduler::idle`) and is dispatched only when the ready queue is
+    // empty. This is the structural fix for the 2026-05-06 smoke regression
+    // — idle is no longer a FIFO resident that round-robin can dispatch
+    // ahead of a just-unblocked receiver.
     //
-    // SAFETY: add_task calls init_context; stack tops are 16-byte aligned
-    // (guaranteed by TaskStack's repr) and remain valid for the process
-    // lifetime. Entry functions are `fn() -> !`. Audit: UNSAFE-2026-0009.
+    // SAFETY: add_task / register_idle call init_context; stack tops are
+    // 16-byte aligned (guaranteed by TaskStack's repr) and remain valid
+    // for the process lifetime. Entry functions are `fn() -> !`. Audit:
+    // UNSAFE-2026-0009 (init_context site) + UNSAFE-2026-0014
+    // (register_idle's momentary `&mut Scheduler<C>` discipline).
+    //
+    // [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
     unsafe {
         sched
             .add_task(cpu, handle_b, task_b, TASK_B_STACK.top())
@@ -697,9 +710,13 @@ pub extern "C" fn kernel_entry() -> ! {
         sched
             .add_task(cpu, handle_a, task_a, TASK_A_STACK.top())
             .expect("add_task A failed: queue full or arena exhausted");
-        sched
-            .add_task(cpu, handle_idle, idle_entry, TASK_IDLE_STACK.top())
-            .expect("add_task idle failed: queue full or arena exhausted");
+        register_idle(
+            core::ptr::from_mut(&mut sched),
+            cpu,
+            handle_idle,
+            idle_entry,
+            TASK_IDLE_STACK.top(),
+        );
     }
 
     // Publish the scheduler before transferring control.

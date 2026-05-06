@@ -17,16 +17,30 @@
 //!
 //! # Idle task
 //!
-//! Per [ADR-0022], the BSP is responsible for registering a kernel idle
-//! task via [`add_task`] during boot. The idle task's entry function loops
-//! `Cpu::wait_for_interrupt` + `yield_now`; it is a regular ready-queue
-//! resident and never leaves it. With idle registered, the ready queue is
-//! structurally never empty, so [`SchedError::Deadlock`] is a defensive
-//! return rather than an everyday path. Without idle, every `ipc_recv_and_yield`
-//! that would have otherwise panicked now returns `Err(SchedError::Deadlock)`
-//! with the scheduler state restored to its pre-call shape.
+//! Per [ADR-0026] (which supersedes [ADR-0022]'s *idle-task-location* axis;
+//! the typed-error axis stands), the BSP registers a kernel idle task via
+//! [`register_idle`] during boot. Idle lives in [`Scheduler::idle`] — a
+//! dedicated `Option<TaskHandle>` slot — and is **never enqueued in the
+//! ready queue**. The dispatcher consults `idle` only when
+//! `ready.dequeue()` returns `None`, so idle never displaces a real Ready
+//! task. With idle registered, [`SchedError::Deadlock`] is a defensive
+//! return for "BSP forgot to call `register_idle`" / future preemption /
+//! SMP edge cases — the v1 cooperative workload cannot reach it. The idle
+//! task's entry function still loops `Cpu::wait_for_interrupt` +
+//! `yield_now`; idle's `yield_now` becomes a no-op when nothing else is
+//! Ready (the dispatcher falls back to `idle` again, which equals
+//! `current` → fast-path return).
+//!
+//! ADR-0022's earlier shape (idle as a regular ready-queue resident via
+//! [`add_task`]) was superseded after the 2026-05-06 QEMU smoke surfaced an
+//! idle-dispatch regression: round-robin FIFO selected idle ahead of a
+//! just-unblocked receiver and the kernel hung in `WFI`. See
+//! [`docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md`]
+//! for the incident report and ADR-0026 for the structural fix.
 //!
 //! [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+//! [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+//! [`docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md`]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md
 //!
 //! [T-004]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
 //! [ADR-0019]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0019-scheduler-shape.md
@@ -149,13 +163,15 @@ pub enum SchedError {
     QueueFull,
     /// IPC operation failed.
     Ipc(IpcError),
-    /// The ready queue is empty while the current task has just blocked —
-    /// every task in the system is waiting on IPC and no idle task is
-    /// registered. Per [ADR-0022], registering a BSP idle task at boot
-    /// makes this variant structurally unreachable in the v1 cooperative
-    /// workload; it is preserved as a defensive return for preemption /
-    /// SMP / "BSP forgot to register idle" so the kernel never panics on
-    /// a userspace-reachable condition.
+    /// The ready queue is empty AND no idle task is registered while the
+    /// current task has just blocked — every task in the system is waiting
+    /// on IPC and the dispatcher's fallback slot ([`Scheduler::idle`]) is
+    /// `None`. Per [ADR-0022] + [ADR-0026], registering a BSP idle task at
+    /// boot via [`register_idle`] makes this variant structurally
+    /// unreachable in the v1 cooperative workload; it is preserved as a
+    /// defensive return for preemption / SMP / "BSP forgot to call
+    /// `register_idle`" so the kernel never panics on a userspace-reachable
+    /// condition.
     ///
     /// # Rollback scope
     ///
@@ -177,6 +193,7 @@ pub enum SchedError {
     /// that want the endpoint reset must destroy and re-create it.
     ///
     /// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+    /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
     Deadlock,
 }
 
@@ -200,6 +217,19 @@ pub struct Scheduler<C: ContextSwitch + Cpu> {
     /// a `TaskHandle` when unblocking without re-querying the arena.
     task_handles: [Option<TaskHandle>; TASK_ARENA_CAPACITY],
     current: Option<TaskHandle>,
+    /// Idle-task fallback slot per [ADR-0026]. Written exclusively by
+    /// [`register_idle`]; read by the dispatch sites
+    /// ([`start_prelude`], [`yield_now`], [`ipc_recv_and_yield`]) when
+    /// `ready.dequeue()` returns `None`. Idle's [`TaskHandle`] is **not**
+    /// stored in [`Self::ready`] — that is the structural property
+    /// ADR-0026 added to prevent idle from displacing real Ready tasks.
+    /// Idle's saved [`ContextSwitch::TaskContext`] still lives in
+    /// [`Self::contexts`] at the slot index `idle.slot().index()`, so
+    /// dispatching idle is mechanically identical to dispatching any
+    /// other task once the handle is selected.
+    ///
+    /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+    idle: Option<TaskHandle>,
     /// Saved register contexts, one per task arena slot.
     ///
     /// Invariant: `contexts[i]` is valid for every slot `i` that has
@@ -223,6 +253,7 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
             task_states: [TaskState::Idle; TASK_ARENA_CAPACITY],
             task_handles: [None; TASK_ARENA_CAPACITY],
             current: None,
+            idle: None,
             contexts: core::array::from_fn(|_| C::TaskContext::default()),
         }
     }
@@ -396,6 +427,90 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 // [ADR-0021]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0021-raw-pointer-scheduler-ipc-bridge.md
 // [UNSAFE-2026-0012]: https://github.com/cemililik/TyrneOS/blob/main/docs/audits/unsafe-log.md
 
+/// Register the BSP-owned idle task in the dispatcher's fallback slot.
+///
+/// Per [ADR-0026], idle lives in [`Scheduler::idle`] and is dispatched
+/// **only** when [`Scheduler::ready`] is empty. The handle is *not*
+/// enqueued — that is the structural property ADR-0026 introduced to
+/// prevent idle from displacing real Ready tasks (the regression the
+/// 2026-05-06 QEMU smoke surfaced).
+///
+/// Like [`Scheduler::add_task`], this initialises the task's saved
+/// [`ContextSwitch::TaskContext`] so the first restore begins executing
+/// `entry` with `stack_top` as the initial stack pointer. The slot's
+/// [`TaskState`] is set to [`TaskState::Ready`] — when idle is the
+/// dispatched task, `current` references it like any other; when idle
+/// sits in the fallback slot waiting, the `Ready` state simply means
+/// "available for dispatch" (idle is never `Blocked`, never goes back to
+/// `Idle` once registered).
+///
+/// # Panics
+///
+/// Panics unconditionally (in **both** debug and release builds) if
+/// [`Scheduler::idle`] was already set. Calling `register_idle` more than
+/// once is a kernel programming error — silently overwriting the slot
+/// would break the single-idle invariant ADR-0026 relies on (the
+/// previously-registered idle's `TaskContext` is still in
+/// [`Scheduler::contexts`] and could be re-entered if the dispatcher
+/// happened to pick its slot index again). The `assert!` is unconditional
+/// rather than `debug_assert!` so the violation surfaces loudly even in
+/// production builds.
+///
+/// # Safety
+///
+/// `sched` must satisfy the Shared safety contract above (Pointer
+/// validity, exclusive ownership, no aliased `&mut Scheduler<C>`). The
+/// `&mut Scheduler<C>` materialised inside this function lives only for
+/// the body and is dropped before return, so the caller can take a fresh
+/// momentary `&mut` afterwards without violating the non-aliasing rule.
+/// `stack_top` must satisfy [`ContextSwitch::init_context`]'s contract:
+/// 16-byte aligned, at least 512 bytes of backing memory, valid for the
+/// idle task's entire lifetime.
+///
+/// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+pub unsafe fn register_idle<C: ContextSwitch + Cpu>(
+    sched: *mut Scheduler<C>,
+    cpu: &C,
+    handle: TaskHandle,
+    entry: fn() -> !,
+    stack_top: *mut u8,
+) {
+    // SAFETY: caller satisfies the Shared safety contract for `sched`; the
+    // `&mut` is contained to this block and dropped before return.
+    // Rejected alternatives match `add_task`'s shape (`&mut self` on the
+    // bridge reintroduces UNSAFE-2026-0012; ADR-0021 Option B is a strict
+    // superset). Audit: UNSAFE-2026-0014.
+    let s = unsafe { &mut *sched };
+
+    // Unconditional `assert!` (not `debug_assert!`) so a duplicate
+    // registration cannot silently overwrite `s.idle` in release builds —
+    // ADR-0026's single-idle invariant is load-bearing.
+    #[allow(
+        clippy::panic,
+        reason = "duplicate register_idle is a kernel programming error \
+                  (boot-time discipline; never recoverable at runtime)"
+    )]
+    {
+        assert!(
+            s.idle.is_none(),
+            "register_idle called twice — idle slot is set-once by boot-time discipline"
+        );
+    }
+
+    let idx = handle.slot().index() as usize;
+
+    // SAFETY: caller guarantees `stack_top` validity per the # Safety doc.
+    // Forwarding to the BSP's `init_context` which writes lr and sp into
+    // the context slot at `idx`. Audit: UNSAFE-2026-0009.
+    unsafe {
+        cpu.init_context(&mut s.contexts[idx], entry, stack_top);
+    }
+
+    s.task_states[idx] = TaskState::Ready;
+    s.task_handles[idx] = Some(handle);
+    s.idle = Some(handle);
+}
+
 /// Pre-switch dequeue + state-mutation half of [`start`].
 ///
 /// Extracted from `start`'s inner block so the dequeue/state half can be
@@ -413,8 +528,13 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 ///
 /// # Panics
 ///
-/// Panics if the ready queue is empty — calling `start` (and therefore
-/// `start_prelude`) before adding any task is a kernel programming error.
+/// Panics if the ready queue is empty **and** [`Scheduler::idle`] is `None` —
+/// i.e. the BSP called `start` without registering any task (via `add_task`)
+/// or any idle (via [`register_idle`]). Per ADR-0026, the dispatch chain is
+/// `s.ready.dequeue().or(s.idle)`; the panic fires only when both halves
+/// resolve to `None`. Registering only an idle task is sufficient to avoid
+/// the panic, and is the post-T-014 "minimum viable boot" shape for any
+/// future BSP that wants to come up without an application task.
 ///
 /// # Safety
 ///
@@ -432,12 +552,22 @@ unsafe fn start_prelude<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>) -> usi
     // Audit: UNSAFE-2026-0014.
     let s = unsafe { &mut *sched };
 
+    // Per ADR-0026: dispatch the head of the ready queue, or fall back to
+    // the idle slot when ready is empty. Panicking on "neither half has a
+    // task" preserves ADR-0022's "boot-time programming error → panic"
+    // semantics — the only way to reach this branch is for the BSP to call
+    // `start` without registering any task and without registering idle.
     #[allow(
         clippy::panic,
-        reason = "empty ready queue is a kernel programming error"
+        reason = "empty ready queue and no idle task is a kernel programming error \
+                  (BSP failed to register any task at boot)"
     )]
-    let Some(next_handle) = s.ready.dequeue() else {
-        panic!("scheduler start called with empty ready queue");
+    let next_handle = match s.ready.dequeue() {
+        Some(h) => h,
+        None => match s.idle {
+            Some(idle_h) => idle_h,
+            None => panic!("scheduler start called with empty ready queue and no idle task"),
+        },
     };
     let next_idx = next_handle.slot().index() as usize;
     s.task_states[next_idx] = TaskState::Ready;
@@ -463,7 +593,11 @@ unsafe fn start_prelude<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>) -> usi
 ///
 /// # Panics
 ///
-/// Panics if no tasks have been added (the ready queue is empty).
+/// Panics if no task **and** no idle has been registered — see
+/// [`start_prelude`]'s `# Panics` for the exact contract. Per ADR-0026 the
+/// dispatcher's `s.ready.dequeue().or(s.idle)` chain falls back to idle when
+/// the ready queue is empty, so registering only [`register_idle`] (and no
+/// `add_task`) is enough to avoid the panic.
 ///
 /// # Safety
 ///
@@ -545,29 +679,57 @@ pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
 
         let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
         let current_idx = current_handle.slot().index() as usize;
+        let current_is_idle = s.idle == Some(current_handle);
 
-        // Re-enqueue current as ready. Cannot be full: the running task was
+        // Mark current Ready (idempotent: idle and any regular running task
+        // are already Ready by invariant; the assignment matches what
+        // `add_task` and `register_idle` initialise to).
+        s.task_states[current_idx] = TaskState::Ready;
+
+        // Re-enqueue current ONLY if it is a regular task. Idle is never
+        // in the ready queue per ADR-0026 — when idle is currently
+        // running, it returns to the fallback slot via `s.idle`, not
+        // through `ready.enqueue`. Cannot be full: the running task was
         // not in the ready queue (it was dequeued when it started running),
         // so at most TASK_ARENA_CAPACITY-1 other tasks are queued.
-        s.task_states[current_idx] = TaskState::Ready;
-        #[allow(
-            clippy::panic,
-            reason = "the running task is not in the ready queue, so at most \
-                      TASK_ARENA_CAPACITY-1 tasks are enqueued; enqueue cannot fail"
-        )]
-        let Ok(()) = s.ready.enqueue(current_handle) else {
-            panic!("scheduler invariant: ready queue full on yield re-enqueue");
-        };
+        if !current_is_idle {
+            #[allow(
+                clippy::panic,
+                reason = "the running task is not in the ready queue, so at most \
+                          TASK_ARENA_CAPACITY-1 tasks are enqueued; enqueue cannot fail"
+            )]
+            let Ok(()) = s.ready.enqueue(current_handle) else {
+                panic!("scheduler invariant: ready queue full on yield re-enqueue");
+            };
+        }
 
-        // Dequeue the next task.
+        // Pick next: head of ready queue, or fall back to idle when empty.
+        // Per ADR-0026, idle is the dispatcher's fallback — never a queue
+        // resident. The fast-path early-return covers two cases:
+        //   (a) current was a regular task and was just re-enqueued as the
+        //       sole queue entry (single-task self-yield, no idle): dequeue
+        //       returns current; no switch.
+        //   (b) current is idle and queue is empty (idle yields to itself
+        //       when no real task is ready): fallback resolves to current;
+        //       no switch.
         let next_handle = match s.ready.dequeue() {
             Some(h) if h != current_handle => h,
-            _ => {
-                // Only one ready task exists. The queue is transiently empty
-                // and `s.current` is unchanged. The next yield will re-enqueue
-                // the current task; no switch is performed here.
+            Some(_) => {
+                // Dequeue returned current itself (case a). No other ready
+                // task. Stay on current — nothing to switch to. Idle is
+                // not a useful fallback here because there is no event
+                // pending that idle's WFI could service.
                 return Ok(());
             }
+            None => match s.idle {
+                Some(idle_h) if idle_h != current_handle => idle_h,
+                _ => {
+                    // Either: queue empty and idle is None (no fallback
+                    // exists; nothing to switch to); or idle is current
+                    // (case b). Either way, no switch.
+                    return Ok(());
+                }
+            },
         };
 
         let next_idx = next_handle.slot().index() as usize;
@@ -743,16 +905,18 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     // Phase 2 — block current, dequeue next, switch. Momentary &mut to
     // scheduler only, dropped before the switch.
     //
-    // If the ready queue is empty after blocking the current task, every
-    // task in the system is blocked on IPC and no idle task is registered
-    // (ADR-0022). The pre-block **scheduler** state is restored before
+    // Per ADR-0026, the dispatch chain is `ready.dequeue().or_else(|| idle)`
+    // — idle is consulted only when the ready queue is empty. If both
+    // halves are `None` (no other Ready task AND no idle registered),
+    // every task in the system is blocked on IPC and the kernel cannot
+    // make progress. The pre-block **scheduler** state is restored before
     // returning `Err(SchedError::Deadlock)` so the caller observes the
     // same scheduler state it had before the bridge was called. Note that
     // the **endpoint** state was already transitioned from Idle to
     // RecvWaiting by the Phase 1 ipc_recv call above; that transition is
     // NOT rolled back here (see SchedError::Deadlock's doc-comment for
-    // the rollback-scope rationale). In the v1 workload Deadlock is
-    // structurally unreachable, so the endpoint-rollback gap is benign.
+    // the rollback-scope rationale). With idle registered (the v1
+    // expected configuration), Deadlock is structurally unreachable.
     let (current_idx, next_idx) = {
         // SAFETY: caller contract — `sched` valid and exclusive for this
         // block; `&mut` does not cross the switch below. Rejected
@@ -770,7 +934,7 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         s.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
         s.current = None;
 
-        let Some(next_handle) = s.ready.dequeue() else {
+        let Some(next_handle) = s.ready.dequeue().or(s.idle) else {
             // Restore so Err(Deadlock) leaves the scheduler unchanged.
             s.task_states[current_idx] = prior_state;
             s.current = Some(current_handle);
@@ -1315,12 +1479,255 @@ mod tests {
     #[test]
     #[should_panic(expected = "empty ready queue")]
     fn start_prelude_panics_on_empty_ready_queue() {
-        // No tasks added — `start_prelude` must fire the named panic
-        // (a kernel programming error: `start` cannot be called before
-        // tasks exist).
+        // No tasks added AND no idle registered — `start_prelude` must fire
+        // the named panic (a kernel programming error: `start` cannot be
+        // called before any task is registered, with or without idle).
+        // ADR-0026 / T-014 tightened the panic message to mention idle, but
+        // the substring "empty ready queue" remains for `should_panic`'s
+        // expected-message matcher.
         let mut sched: Scheduler<FakeCpu> = Scheduler::new();
         // SAFETY: stack-local scheduler; the panic is the assertion.
         let _ = unsafe { start_prelude(core::ptr::from_mut(&mut sched)) };
+    }
+
+    // ── ADR-0026 / T-014 idle-dispatch tests ─────────────────────────────────
+    //
+    // Three tests cover the structural fix that ADR-0026 introduced for the
+    // 2026-05-06 B1 smoke regression. The first asserts `register_idle`'s
+    // shape (handle in `Scheduler::idle`, not in `ready`); the second asserts
+    // the dispatcher consults `idle` only when `ready` is empty; the third
+    // reproduces the exact demo flow that hung the kernel under ADR-0022's
+    // Option A and verifies the post-fix dispatcher routes correctly.
+    // Refs: ADR-0026, T-014, [B1 smoke regression mini-retro].
+    //
+    // [B1 smoke regression mini-retro]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md
+
+    #[test]
+    fn register_idle_stores_handle_in_idle_slot_and_not_in_ready_queue() {
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let h_idle = task_handle(7);
+        let mut s_idle = AlignedStack::<512>::new();
+
+        // Pre-call shape: empty queue, idle slot None.
+        assert!(sched.ready.is_empty());
+        assert_eq!(sched.idle, None);
+
+        // SAFETY: stack-local scheduler; FakeCpu::init_context is a no-op so
+        // the stack memory is never actually read.
+        unsafe {
+            register_idle(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                h_idle,
+                spin_entry(),
+                s_idle.top(),
+            );
+        }
+
+        // Post-call shape: idle slot set, ready queue still empty (idle is
+        // *never* enqueued).
+        assert_eq!(sched.idle, Some(h_idle));
+        assert!(
+            sched.ready.is_empty(),
+            "idle must not be enqueued — it lives in the fallback slot per ADR-0026"
+        );
+        // Idle's TaskState slot is Ready (available for dispatch); its
+        // task_handles slot is set (so unblock_receiver_on's scan can find
+        // the handle if it ever needs to — though idle is never Blocked).
+        assert_eq!(sched.task_states[7], TaskState::Ready);
+        assert_eq!(sched.task_handles[7], Some(h_idle));
+    }
+
+    #[test]
+    fn dispatcher_picks_idle_only_when_ready_queue_empty() {
+        // Setup: one regular task A (slot 0) registered + idle (slot 1)
+        // registered. start_prelude must select A first; after A blocks,
+        // the dispatcher (via ipc_recv_and_yield's fallback chain) must
+        // select idle.
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let mut table = CapabilityTable::new();
+        let mut s_a = AlignedStack::<512>::new();
+        let mut s_idle = AlignedStack::<512>::new();
+        let h_a = task_handle(0);
+        let h_idle = task_handle(1);
+
+        // SAFETY: stack-local scheduler + 16-byte-aligned stacks; FakeCpu's
+        // init_context / context_switch are no-ops.
+        unsafe {
+            sched.add_task(&cpu, h_a, spin_entry(), s_a.top()).unwrap();
+            register_idle(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                h_idle,
+                spin_entry(),
+                s_idle.top(),
+            );
+        }
+
+        // start_prelude must pick A (head of ready queue), not idle.
+        // SAFETY: stack-local scheduler.
+        let next_idx = unsafe { start_prelude(core::ptr::from_mut(&mut sched)) };
+        assert_eq!(next_idx, 0, "start_prelude picked idle ahead of regular A");
+        assert_eq!(sched.current, Some(h_a));
+
+        // Now block A on a freshly-created endpoint and call
+        // ipc_recv_and_yield — the dispatcher's `ready.or(idle)` chain must
+        // fall back to idle (queue is empty since A is the sole regular
+        // task and is now blocking).
+        let ep = create_endpoint(&mut ep_arena, Endpoint::new(0)).unwrap();
+        let cap = Capability::new(CapRights::RECV, CapObject::Endpoint(ep));
+        let ep_cap = table.insert_root(cap).unwrap();
+
+        // SAFETY: pointer-derivation discipline as elsewhere; FakeCpu's
+        // context_switch is a no-op marker. The path of interest is the
+        // pre-switch dispatcher: select idle as fallback.
+        let result = unsafe {
+            ipc_recv_and_yield(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                core::ptr::from_mut(&mut ep_arena),
+                core::ptr::from_mut(&mut queues),
+                core::ptr::from_mut(&mut table),
+                ep_cap,
+            )
+        };
+
+        // The bridge's Phase 3 re-runs ipc_recv after the (no-op) switch.
+        // Because no sender has delivered, ipc_recv returns Pending again,
+        // which the bridge maps to PendingAfterResume. We don't care about
+        // the terminal Result here — the assertion of interest is that the
+        // dispatcher *did* select idle as the next task during Phase 2.
+        let _ = result;
+        assert_eq!(
+            sched.current,
+            Some(h_idle),
+            "dispatcher should fall back to idle when ready queue is empty"
+        );
+    }
+
+    #[test]
+    fn unblock_after_yield_dispatches_unblocked_receiver_not_idle() {
+        // Reproduce the exact demo flow that hung under ADR-0022 Option A:
+        //   1. B is Blocked on ep (waiting for IPC).
+        //   2. A is current, queue is empty (B was the queue's only entry
+        //      before it blocked; it was dequeued and removed when blocking).
+        //   3. A calls ipc_send_and_yield: ipc_send delivers to B,
+        //      unblock_receiver_on enqueues B → queue [B].
+        //   4. yield_now re-enqueues A → queue [B, A] and dequeues head → B.
+        //   5. The dispatcher MUST switch to B (not idle).
+        //
+        // Under ADR-0022 Option A, idle was at the FIFO head (added third by
+        // kernel_entry's `add_task(B, A, idle)` ordering and rotated through
+        // the ready queue), so step 5 selected idle and the kernel hung.
+        // ADR-0026's fix removes idle from the FIFO entirely, so even with
+        // idle registered, step 5 picks the just-unblocked B.
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let mut table = CapabilityTable::new();
+        let mut s_a = AlignedStack::<512>::new();
+        let mut s_b = AlignedStack::<512>::new();
+        let mut s_idle = AlignedStack::<512>::new();
+        let h_a = task_handle(0);
+        let h_b = task_handle(1);
+        let h_idle = task_handle(2);
+
+        // Endpoint with full SEND+RECV rights (simulating cap_a / cap_b
+        // installed in distinct tables in the BSP would be more realistic;
+        // a single shared table is fine for this dispatch-flow test).
+        let ep = create_endpoint(&mut ep_arena, Endpoint::new(0)).unwrap();
+        let cap = Capability::new(CapRights::SEND | CapRights::RECV, CapObject::Endpoint(ep));
+        let ep_cap = table.insert_root(cap).unwrap();
+
+        // Move endpoint into RecvWaiting via a real ipc_recv call — this
+        // models B having already executed `ipc_recv_and_yield`'s Phase 1.
+        let recv_outcome = ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(matches!(recv_outcome, RecvOutcome::Pending));
+
+        // SAFETY: stack-local scheduler + 16-byte-aligned stacks.
+        unsafe {
+            sched.add_task(&cpu, h_b, spin_entry(), s_b.top()).unwrap();
+            sched.add_task(&cpu, h_a, spin_entry(), s_a.top()).unwrap();
+            register_idle(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                h_idle,
+                spin_entry(),
+                s_idle.top(),
+            );
+        }
+
+        // Wire up the running shape: A is current; B is blocked on ep;
+        // queue is empty (B was dequeued + blocked; A was dequeued).
+        sched.ready.dequeue(); // h_b head → would have started running
+        sched.ready.dequeue(); // h_a → about to be current
+        sched.current = Some(h_a);
+        sched.task_states[h_b.slot().index() as usize] = TaskState::Blocked { on: ep };
+        assert!(
+            sched.ready.is_empty(),
+            "demo-flow precondition: queue is empty before A's send"
+        );
+        assert_eq!(
+            sched.idle,
+            Some(h_idle),
+            "demo-flow precondition: idle is registered as fallback"
+        );
+
+        // A sends to B → ipc_send delivers (B was RecvWaiting); the bridge
+        // unblocks B (queue becomes [B]); yield_now re-enqueues A (queue
+        // becomes [B, A]); dispatcher dequeues B.
+        // SAFETY: all four pointers refer to stack-local test state owned
+        // exclusively by this single-threaded test. Each pointer is derived
+        // exactly once from `core::ptr::from_mut`; no aliasing re-borrow.
+        // FakeCpu's context_switch is a no-op marker; the path of interest
+        // is the pre-switch dispatcher selecting B (not idle).
+        let result = unsafe {
+            ipc_send_and_yield(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                core::ptr::from_mut(&mut ep_arena),
+                core::ptr::from_mut(&mut queues),
+                core::ptr::from_mut(&mut table),
+                ep_cap,
+                send_msg(0xAAAA),
+                None,
+            )
+        };
+
+        assert_eq!(result.unwrap(), SendOutcome::Delivered);
+        assert_eq!(
+            sched.current,
+            Some(h_b),
+            "REGRESSION GUARD: dispatcher selected idle instead of just-unblocked B \
+             — this is the exact 2026-05-06 smoke-regression failure mode"
+        );
+        assert_ne!(
+            sched.current,
+            Some(h_idle),
+            "idle must not be dispatched while a real Ready task exists (ADR-0026)"
+        );
+        assert_eq!(
+            sched.task_states[h_a.slot().index() as usize],
+            TaskState::Ready,
+            "A re-enqueued as Ready by yield_now"
+        );
+        assert_eq!(
+            sched.task_states[h_b.slot().index() as usize],
+            TaskState::Ready,
+            "B unblocked"
+        );
+        assert_eq!(
+            sched.ready.len(),
+            1,
+            "queue holds A after the switch (idle is in the fallback slot, not the queue)"
+        );
+        // Idle's slot was never touched by the dispatch chain.
+        assert_eq!(sched.idle, Some(h_idle));
     }
 
     // ── ipc_send_and_yield three-case bundle (T-011) ──────────────────────────
