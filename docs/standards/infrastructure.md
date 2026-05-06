@@ -68,9 +68,9 @@ CI is expected to be set up early in Phase 4 (Rust toolchain + workspace skeleto
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace` — host-runnable unit and integration tests.
 - `cargo build --workspace --target aarch64-unknown-none` — kernel builds clean.
-- QEMU smoke — kernel boots under `qemu-system-aarch64 -machine virt` and reaches the success marker.
-- `cargo audit` — fails on known advisories. `cargo-audit` database is updated weekly in CI.
-- `cargo vet check` — fails if any dependency is not audited.
+- QEMU smoke — kernel boots under `qemu-system-aarch64 -machine virt` and reaches the success marker. *(As of 2026-05: maintainer-launched only; no `qemu-smoke` CI job yet — tracked as a B2-or-later roadmap follow-up.)*
+- `cargo audit` — fails on known advisories. `cargo-audit` database is updated weekly in CI. *(Conditional — currently dormant: `Cargo.lock` carries zero external dependencies, so the gate would be a no-op. The job is wired in once the first extern dep lands per [add-dependency](../../.claude/skills/add-dependency/SKILL.md).)*
+- `cargo vet check` — fails if any dependency is not audited. *(Same conditional — see `cargo audit` above.)*
 
 ### Advisory gates (warn, do not block)
 
@@ -141,16 +141,27 @@ When the project moves out of solo phase:
 
 ## Configuration files
 
+The lint set is canonical at [`code-style.md` §Lints](code-style.md#lints); every entry below either references that policy directly or layers narrowly on top of it. Keep both standards in sync when either changes.
+
+### Present at HEAD
+
 | File | Purpose |
 |------|---------|
-| `rust-toolchain.toml` | Pinned toolchain + required components. |
+| `rust-toolchain.toml` | Pinned toolchain + required components. **Note:** `miri` is not listed in the components array; the Miri CI job adds it on-demand (`rustup toolchain install $NIGHTLY_PIN --component miri`), and a workspace-local `cargo +nightly miri test` invocation requires `rustup component add miri` once. |
 | `rustfmt.toml` | Formatter config. |
 | `clippy.toml` | Linter thresholds and allowed lints. |
 | `.cargo/config.toml` | Target triples, linker flags per target. |
+| `.github/workflows/*.yml` | CI pipelines. Active jobs at HEAD: `lint-and-host-test`, `kernel-build`, `miri`, `coverage`. |
+
+### Planned (when first extern dep lands)
+
+| File | Purpose |
+|------|---------|
 | `supply-chain/config.toml` | `cargo-vet` trust imports and thresholds. |
 | `supply-chain/audits.toml` | Local audits. |
-| `.github/workflows/*.yml` | CI pipelines. |
 | `.github/dependabot.yml` | Dependency PR automation (to be enabled once standards are enforced in CI). |
+
+The `supply-chain/` directory does not exist at HEAD — see [add-dependency](../../.claude/skills/add-dependency/SKILL.md) for the trigger that creates it.
 
 ## Anti-patterns to reject
 

@@ -18,6 +18,7 @@ Standards are narrow and enforceable. They are not where we discuss philosophy (
 | [commit-style.md](commit-style.md) | Conventional Commits format, scopes, trailers (`Refs: ADR-NNNN`, `Audit:`, `Security-Review:`), granularity. | Accepted |
 | [logging-and-observability.md](logging-and-observability.md) | Structured records, five levels, secret redaction, ISR-safe ring path, spans, metrics. | Accepted |
 | [infrastructure.md](infrastructure.md) | Toolchain pinning, dependency policy, CI gates, supply-chain (`cargo-vet`, `cargo-audit`, SBOM), reproducibility, branch protection, secrets. | Accepted |
+| [bsp-boot-checklist.md](bsp-boot-checklist.md) | The reset-vector and early-boot discipline every BSP must observe (DAIF mask, EL drop to EL1, SP / BSS, FP/SIMD enable, vector-table install, GIC init, IRQ unmask order). | Accepted |
 | [release.md](release.md) | Semver convention, changelog, release gates (process / content / security), signing, rollback, security releases. | Accepted |
 | [localization.md](localization.md) | UTF-8 internal, English kernel output, no locale in the kernel, localization is a userspace concern. | Accepted |
 | [documentation-style.md](documentation-style.md) | English-only docs, Mermaid-only diagrams, file structure, linking, file naming, change policy. | Accepted |
