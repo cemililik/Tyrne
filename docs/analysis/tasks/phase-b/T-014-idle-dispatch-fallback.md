@@ -2,7 +2,7 @@
 
 - **Phase:** B
 - **Milestone:** B1 — Drop to EL1 in boot, install exception infrastructure (reopened 2026-05-06 by [B1 smoke-regression mini-retro](../../reviews/business-reviews/2026-05-06-B1-smoke-regression.md))
-- **Status:** Draft
+- **Status:** In Progress
 - **Created:** 2026-05-06
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** [ADR-0026 — Idle dispatch via separate fallback slot](../../../decisions/0026-idle-dispatch-fallback.md) — must be `Accepted` before the kernel scheduler refactor lands.
@@ -111,3 +111,4 @@ The simulation table in [ADR-0026 §Decision outcome](../../../decisions/0026-id
 | Date | Reviewer | Note |
 |------|----------|------|
 | 2026-05-06 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft`, paired with ADR-0026 (`Proposed`) per [ADR-0025 §Rule 1](../../../decisions/0025-adr-governance-amendments.md) (forward-reference contract) — ADR-0026's *Dependency chain* requires a real T-NNN file for the implementation step; this task is that file. Will move to `In Progress` only after ADR-0026 is `Accepted`. |
+| 2026-05-06 | @cemililik (+ Claude Opus 4.7 agent) | Promoted `Draft → In Progress`. ADR-0026 was Accepted same-day after careful re-read per [ADR-0025 §Revision notes](../../../decisions/0025-adr-governance-amendments.md) (substance-of-the-step gate replaces calendar cool-down). Implementation: `kernel/src/sched/mod.rs` adds `Scheduler::idle: Option<TaskHandle>` field + `register_idle` raw-pointer free function + dispatch-chain updates in `start_prelude` / `yield_now` / `ipc_recv_and_yield` (each consults `s.idle` only when `s.ready.dequeue()` returns `None`); `bsp-qemu-virt/src/main.rs` switches the third `add_task(idle_entry, ...)` call to `register_idle(...)`; `idle_entry` doc-comment + inline comments updated for ADR-0026. Three new host tests added: `register_idle_stores_handle_in_idle_slot_and_not_in_ready_queue`, `dispatcher_picks_idle_only_when_ready_queue_empty`, `unblock_after_yield_dispatches_unblocked_receiver_not_idle` (the third is the regression guard). Module-level docstring §"Idle task" rewritten for the supersession; `SchedError::Deadlock` doc-comment updated. |
