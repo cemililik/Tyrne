@@ -23,3 +23,4 @@ For security-sensitive changes, a code review is **not** sufficient — a securi
 | Date | Scope | File |
 |------|-------|------|
 | 2026-04-21 | Tyrne project → Phase A exit (Phase 1–4c bootstrap + A1–A6 kernel core) | [2026-04-21-tyrne-to-phase-a.md](2026-04-21-tyrne-to-phase-a.md) |
+| 2026-05-06 | Full-tree comprehensive (Phase A + B0 + B1, multi-agent) at `214052d` — Verdict: Request changes (7 blocker-class doc drift items; all other tracks Approve/Comment/Iterate) | [2026-05-06-full-tree-comprehensive.md](2026-05-06-full-tree-comprehensive.md) (with sub-artefacts under [`2026-05-06-full-tree/`](2026-05-06-full-tree/)) |
