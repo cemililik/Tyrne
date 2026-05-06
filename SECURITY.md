@@ -22,7 +22,7 @@ Where possible, include:
 
 ## Scope
 
-Everything in the `TyrneOS` repository is in scope. Third-party dependencies are reviewed upstream; reporters are encouraged to also notify the upstream project when the root cause lives there.
+Everything in the `Tyrne` repository is in scope. Third-party dependencies are reviewed upstream; reporters are encouraged to also notify the upstream project when the root cause lives there.
 
 ## Disclosure
 
