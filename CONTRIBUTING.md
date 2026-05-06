@@ -11,7 +11,7 @@ Thank you for your interest. Tyrne is currently in the **architecture phase** â€
 
 ## What is not useful yet
 
-- Pull requests against source code. There is no source code to extend or refactor meaningfully yet. Adding code before the architecture settles would force premature rewrites.
+- Pull requests against source code outside the active milestone scope. The Rust workspace exists and the kernel boots end-to-end on QEMU virt (Phase A + B0/B1 closed), but each subsystem is being grown along the phased roadmap in [`docs/roadmap/`](docs/roadmap/); changes outside the current milestone's scope force premature rewrites and are usually not merged. Check [`docs/roadmap/current.md`](docs/roadmap/current.md) before opening a non-trivial PR.
 - Feature requests for subsystems that have not yet been designed. File those as discussion issues if you want to influence the design, not as feature requests.
 
 ## When the project enters the implementation phase

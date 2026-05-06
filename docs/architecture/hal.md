@@ -47,7 +47,7 @@ flowchart TB
     subgraph BSP["BSP (per-board, selected at build time)"]
         BCpu["aarch64 Cpu impl"]
         BMmu["VMSAv8 Mmu impl"]
-        BIrq["GICv3 / GIC-400 impl"]
+        BIrq["GICv2 / GIC-400 impl"]
         BTimer["ARM generic timer impl"]
         BConsole["PL011 / mini-UART impl"]
         BIommu["SMMUv3 impl (bsp-qemu-virt)"]
@@ -123,9 +123,9 @@ On aarch64 the BSP reads the **virtual** counter family — `CNTVCT_EL0` for the
 
 Helper conversions live in `tyrne_hal::timer` — `ticks_to_ns(count, frequency_hz)` uses 128-bit intermediate arithmetic and a saturating cast back to `u64` so monotonicity holds at the wrap edge; `resolution_ns_for_freq(frequency_hz)` returns the round-to-nearest period in nanoseconds, clamped to a floor of 1 ns to keep callers from dividing by zero on >2 GHz counters. Both functions are pure, host-testable, and sit at 100 % region coverage per the [2026-04-27 coverage rerun](../analysis/reports/2026-04-27-coverage-rerun.md).
 
-The IRQ-armed half of the trait — `arm_deadline` / `cancel_deadline` — is `unimplemented!()` in QEMU virt's BSP today: it depends on the GIC + EL1 exception-vector-table install that [T-012](../analysis/tasks/phase-b/T-012-exception-and-irq-infrastructure.md) (B1) will land. The time-source half is fully wired and used by performance reviews and the boot-to-end timing instrumentation.
+The IRQ-armed half of the trait — `arm_deadline` / `cancel_deadline` — is fully implemented in QEMU virt's BSP as of T-012 (Done 2026-04-28); the bodies write `CNTV_CVAL_EL0` / `CNTV_CTL_EL0` and route through `gic.enable(TIMER_IRQ)` / `gic.disable(TIMER_IRQ)`, audited under [UNSAFE-2026-0021](../audits/unsafe-log.md) (timer compare-register writes). [ADR-0010 §Revision notes 2026-04-28](../decisions/0010-timer-trait.md) records the closure: the time-source half landed with T-009 and the IRQ-delivery half with T-012, so both deferred halves of ADR-0010 are now live.
 
-The kernel will use this trait for scheduler tick, deadline-based wakeups, and the `time_now` / `time_sleep_until` syscalls. In v1 the read side is exercised by the BSP's boot-to-end measurement; the IRQ side is dormant until T-012.
+The kernel will use this trait for scheduler tick, deadline-based wakeups, and the `time_now` / `time_sleep_until` syscalls. In v1 the read side is exercised by the BSP's boot-to-end measurement; the IRQ-armed bodies are kernel-build clean but not exercised by the cooperative IPC demo (no caller arms a deadline). Their `Pending QEMU smoke verification` notation in [UNSAFE-2026-0021](../audits/unsafe-log.md) records this — the deadline-fire path lights up only when a future preemption-using task arrives.
 
 #### `Console`
 
@@ -178,7 +178,7 @@ Runtime multi-board support (one kernel binary that detects its host and selects
 | Architecture | aarch64 |
 | CPU | generic ARMv8-A (whatever QEMU exposes for `-cpu max` / `-cpu cortex-a72`) |
 | RAM base | `0x4000_0000` |
-| Interrupt controller | GICv3 |
+| Interrupt controller | GICv2 |
 | Console | PL011 UART at `0x0900_0000` |
 | Timer | ARM generic timer |
 | IOMMU | SMMUv3 (optional, enabled with `-device smmuv3`; CI uses it) |

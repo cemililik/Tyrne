@@ -36,19 +36,21 @@ grep "Taking exception" /tmp/qemu_int.log
 
 ```text
 tyrne: hello from kernel_main
+tyrne: timer ready (62500000 Hz, resolution 16 ns)
 tyrne: starting cooperative scheduler
 tyrne: task B — waiting for IPC
 tyrne: task A -- sending IPC
 tyrne: task B — received IPC (label=0xaaaa); replying
 tyrne: task A — received reply (label=0xbbbb); done
 tyrne: all tasks complete
+tyrne: boot-to-end elapsed = <NNN> ns
 ```
 
-After printing "all tasks complete", Task A enters a `core::hint::spin_loop()`. The kernel halts in this state; QEMU continues running but produces no further output. The specific instruction the hint lowers to is up to the compiler and is not load-bearing — a dedicated `wfe`-based idle path is Phase B work (see ADR-0019 open questions). Terminate with **Ctrl-A x** (QEMU monitor quit).
+The frequency in `timer ready` (`62500000 Hz`) and the elapsed-time figure on the last line are QEMU-default values; on real hardware the frequency varies (see [ADR-0010 §References](../decisions/0010-timer-trait.md)) and the elapsed time depends on the host's QEMU performance — single-digit-millisecond order is typical on modern laptops. After printing "all tasks complete" and the boot-to-end timing line, Task A enters `loop { core::hint::spin_loop() }`. The cooperative scheduler does not preempt; Task A never yields out of this loop, so the CPU stays parked there indefinitely and QEMU continues running but produces no further serial output. Idle is registered separately via [`register_idle`](../../kernel/src/sched/mod.rs) per [ADR-0026](../decisions/0026-idle-dispatch-fallback.md) and is reachable in principle through the dispatcher's `ready.dequeue().or(s.idle)` fallback — but in this demo the application tasks never yield from their tails, so idle is structurally unreached and the WFI path stays cold. Terminate with **Ctrl-A x** (QEMU monitor quit).
 
 ## Execution trace
 
-The scheduler adds **Task B first**, then Task A, so B runs first:
+The scheduler adds **Task B first**, then Task A, then registers idle in a separate fallback slot per ADR-0026, so B runs first; idle is consulted only when the ready queue is empty:
 
 1. **Task B** starts, prints "waiting for IPC", calls `ipc_recv_and_yield`. No sender is ready → endpoint transitions to `RecvWaiting` → B is marked `Blocked`, B's context is saved, Task A is dequeued and restored.
 
@@ -63,12 +65,14 @@ The scheduler adds **Task B first**, then Task A, so B runs first:
 | Line | What it confirms |
 |------|-----------------|
 | `hello from kernel_main` | Boot succeeded; PL011 console is operational. |
-| `starting cooperative scheduler` | Capability tables, endpoint arena, IPC queues, and scheduler are all initialised. |
+| `timer ready (62500000 Hz, resolution 16 ns)` | T-009: `Timer::now_ns` reads `CNTVCT_EL0` cleanly; cached frequency / resolution computation went through. |
+| `starting cooperative scheduler` | Capability tables, endpoint arena, IPC queues, scheduler, GIC v2, EL1 vector table, and DAIF unmask all initialised. |
 | `task B — waiting for IPC` | Task B's entry function ran; `ipc_recv_and_yield` was invoked. |
 | `task A -- sending IPC` | Context switch from B to A worked; A's stack is intact. |
 | `task B — received IPC (label=0xaaaa); replying` | Context switch back to B worked; B received A's message with correct label. |
 | `task A — received reply (label=0xbbbb); done` | Context switch from B to A worked a second time; IPC reply delivered with correct label. |
 | `all tasks complete` | Phase A exit bar met. |
+| `boot-to-end elapsed = <NNN> ns` | T-009 measurement scaffold: the difference between a `now_ns` snapshot taken in `kernel_entry` and a `now_ns` call after Task A's tail. Order-of-magnitude only; not a benchmark. |
 
 ## Capability setup
 

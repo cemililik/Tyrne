@@ -4,6 +4,16 @@
 - **Date:** YYYY-MM-DD
 - **Deciders:** @cemililik
 
+<!--
+Status enum (use one):
+  - Proposed                — drafted, awaiting Accept after careful re-read.
+  - Accepted                — settled; the project follows this decision.
+  - Deferred                — recognised as needed but explicitly postponed; no file body required if filed-but-deferred (see ADR-0018, ADR-0023).
+  - Deprecated              — historical; followed for a time but no longer.
+  - Superseded by NNNN      — overridden by a later ADR; old body preserved for the historical record (per supersede-adr skill).
+-->
+
+
 ## Context
 
 <What is the situation, the problem, or the question? What constraints apply? What are the stakes of getting this wrong?>

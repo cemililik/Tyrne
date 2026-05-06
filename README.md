@@ -40,11 +40,19 @@ Tiers describe the level of support committed to a target, not the quality of th
 
 ```
 .
+├── kernel/           # tyrne-kernel: capability tables, IPC, scheduler
+├── hal/              # tyrne-hal: portable Console/Cpu/ContextSwitch/Mmu/Timer/IrqController traits
+├── test-hal/         # tyrne-test-hal: in-tree fakes for the HAL traits (host tests only)
+├── bsp-qemu-virt/    # tyrne-bsp-qemu-virt: QEMU virt aarch64 BSP (boot.s, vectors.s, GIC v2, PL011)
+├── tools/            # run-qemu.sh and other developer-side helpers
 ├── docs/             # All project documentation
 │   ├── architecture/ # System design, components, data flow
 │   ├── decisions/    # Architecture Decision Records (ADRs)
 │   ├── guides/       # How-to guides for contributors and porters
 │   ├── standards/    # Coding, documentation, review standards
+│   ├── audits/       # `unsafe`-block audit log
+│   ├── analysis/     # Tasks, reviews, reports
+│   ├── roadmap/      # Phase plans + current focus
 │   └── glossary.md
 ├── CLAUDE.md         # Entry point for Claude-based AI agents
 ├── AGENTS.md         # Entry point for all AI agents
@@ -54,7 +62,7 @@ Tiers describe the level of support committed to a target, not the quality of th
 └── NOTICE
 ```
 
-Source code layout — the Rust workspace, HAL crates, userspace services — will be added after the architecture phase.
+The Rust workspace contains four crates (`kernel`, `hal`, `test-hal`, `bsp-qemu-virt`) per [ADR-0006](docs/decisions/0006-workspace-layout.md). The kernel boots end-to-end on QEMU virt today (Phase A + B0/B1 closed); see [`docs/guides/two-task-demo.md`](docs/guides/two-task-demo.md) for the boot trace and [`docs/roadmap/current.md`](docs/roadmap/current.md) for active work.
 
 ## Where to start reading
 

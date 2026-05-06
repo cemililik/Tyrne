@@ -4,7 +4,7 @@ Tyrne is a security-oriented operating system project. Even while it is in pre-a
 
 ## Project status and guarantees
 
-Tyrne is **pre-alpha**. There is no runnable kernel yet. No production use is supported, and no security guarantees are made for the current tree. The formal threat model is a work in progress and will be documented in `docs/architecture/security-model.md` (planned, Phase 2).
+Tyrne is **pre-alpha**. The kernel boots end-to-end on QEMU virt aarch64 (Phase A + B0/B1 closed) and runs a two-task IPC demo through to completion, but it is not yet a userspace-bearing OS — no production use is supported, and no security guarantees are made for the current tree. The formal threat model is documented in [`docs/architecture/security-model.md`](docs/architecture/security-model.md) (Accepted) and refined as Phase B progresses; both the model and the codebase will continue to evolve until the project reaches a stable release.
 
 ## Reporting a security issue
 

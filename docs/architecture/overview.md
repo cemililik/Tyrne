@@ -64,7 +64,7 @@ The kernel is **not** responsible for: drivers (every driver is a userspace task
 
 The HAL is the trait boundary between the kernel's portable core and any one board's concrete hardware. It is not a driver layer; drivers live in userspace. It is the narrow interface the kernel needs to manipulate the CPU, the [MMU](../glossary.md), the interrupt controller, and a minimal boot-time console.
 
-Expected HAL trait surface (final form documented in `hal.md`, planned):
+HAL trait surface (final form documented in [`hal.md`](hal.md), Accepted):
 
 - `Cpu` — disable / enable interrupts at the CPU level, halt / wait-for-interrupt, context-switch primitives.
 - `Mmu` — translation-table layout, entry installation, TLB invalidation.
@@ -74,7 +74,7 @@ Expected HAL trait surface (final form documented in `hal.md`, planned):
 
 A BSP is a crate that implements these traits for a specific target. Initial BSPs:
 
-- `bsp-qemu-virt` — QEMU `virt` aarch64 (GICv3, PL011 UART, generic timer).
+- `bsp-qemu-virt` — QEMU `virt` aarch64 (GICv2, PL011 UART, generic timer). The QEMU `virt` machine defaults to GICv2; `bsp-qemu-virt` ships a v2-only driver in [`gic.rs`](../../bsp-qemu-virt/src/gic.rs) per [ADR-0011](../decisions/0011-irq-controller-trait.md), audited under [UNSAFE-2026-0019](../audits/unsafe-log.md). GICv3 requires `-machine gic-version=3` and is out of scope for v1.
 - `bsp-pi4` — Raspberry Pi 4 (BCM2711, legacy + GIC-400, mini-UART or PL011).
 
 The kernel depends on HAL traits. It does not `use` a BSP directly; the BSP is selected at build time.
