@@ -94,7 +94,7 @@ The honest reading: **six retro/review artefacts approved a code path that does 
 
 ## Follow-up note (added 2026-05-06 — Phase 3 closure)
 
-Phase 3 of the fix arc landed the same day as the mini-retro body above. Adjustments item 3 (kernel scheduler refactor per T-014), 4 (re-run smoke), and 6 (final Amendments to UNSAFE-2026-0019 / 0020) are now ✅. T-014 is `In Review` awaiting maintainer `Done` flip. Captured here append-only; original body unchanged.
+Phase 3 of the fix arc landed the same day as the mini-retro body above. Adjustments item 3 (kernel scheduler refactor per T-014) and 4 (re-run smoke) are now ✅. Item 6 (final Amendments lifting `Pending QEMU smoke verification`) is **partially complete**: UNSAFE-2026-0019 / 0020 received post-T-014 Amendments confirming partial verification under sustained execution; UNSAFE-2026-0021 stayed in its 2026-05-06 morning "no-verification possible" state because the v1 demo never arms a deadline. All three retain the `Pending QEMU smoke verification` status — full clearance is gated on a future task that arms a real `arm_deadline` (consistent with the *What stays open* section below). T-014 is `In Review` awaiting maintainer `Done` flip. Captured here append-only; original body unchanged.
 
 ### Verification snapshot
 

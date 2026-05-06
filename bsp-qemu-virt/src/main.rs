@@ -257,7 +257,7 @@ static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 /// called before `start`).
 ///
 /// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
-/// [ADR-0026]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+/// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
 fn idle_entry() -> ! {
     // SAFETY: CPU is fully initialised in `kernel_entry` before `start()`;
     // single-core cooperative scheduling prevents concurrent access.
@@ -702,7 +702,7 @@ pub extern "C" fn kernel_entry() -> ! {
     // UNSAFE-2026-0009 (init_context site) + UNSAFE-2026-0014
     // (register_idle's momentary `&mut Scheduler<C>` discipline).
     //
-    // [ADR-0026]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+    // [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
     unsafe {
         sched
             .add_task(cpu, handle_b, task_b, TASK_B_STACK.top())

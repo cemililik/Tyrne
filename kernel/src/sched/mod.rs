@@ -39,8 +39,8 @@
 //! for the incident report and ADR-0026 for the structural fix.
 //!
 //! [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
-//! [ADR-0026]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
-//! [`docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md`]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md
+//! [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+//! [`docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md`]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md
 //!
 //! [T-004]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
 //! [ADR-0019]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0019-scheduler-shape.md
@@ -193,7 +193,7 @@ pub enum SchedError {
     /// that want the endpoint reset must destroy and re-create it.
     ///
     /// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
-    /// [ADR-0026]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+    /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
     Deadlock,
 }
 
@@ -228,7 +228,7 @@ pub struct Scheduler<C: ContextSwitch + Cpu> {
     /// dispatching idle is mechanically identical to dispatching any
     /// other task once the handle is selected.
     ///
-    /// [ADR-0026]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+    /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
     idle: Option<TaskHandle>,
     /// Saved register contexts, one per task arena slot.
     ///
@@ -446,10 +446,15 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 ///
 /// # Panics
 ///
-/// Panics in debug builds if [`Scheduler::idle`] was already set (calling
-/// `register_idle` twice is a kernel programming error). Release builds
-/// silently overwrite, which is consistent with `add_task`'s "register at
-/// boot, never re-call" usage discipline.
+/// Panics unconditionally (in **both** debug and release builds) if
+/// [`Scheduler::idle`] was already set. Calling `register_idle` more than
+/// once is a kernel programming error — silently overwriting the slot
+/// would break the single-idle invariant ADR-0026 relies on (the
+/// previously-registered idle's `TaskContext` is still in
+/// [`Scheduler::contexts`] and could be re-entered if the dispatcher
+/// happened to pick its slot index again). The `assert!` is unconditional
+/// rather than `debug_assert!` so the violation surfaces loudly even in
+/// production builds.
 ///
 /// # Safety
 ///
@@ -462,7 +467,7 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
 /// 16-byte aligned, at least 512 bytes of backing memory, valid for the
 /// idle task's entire lifetime.
 ///
-/// [ADR-0026]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+/// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
 pub unsafe fn register_idle<C: ContextSwitch + Cpu>(
     sched: *mut Scheduler<C>,
     cpu: &C,
@@ -477,10 +482,20 @@ pub unsafe fn register_idle<C: ContextSwitch + Cpu>(
     // superset). Audit: UNSAFE-2026-0014.
     let s = unsafe { &mut *sched };
 
-    debug_assert!(
-        s.idle.is_none(),
-        "register_idle called twice — idle slot is set-once by boot-time discipline"
-    );
+    // Unconditional `assert!` (not `debug_assert!`) so a duplicate
+    // registration cannot silently overwrite `s.idle` in release builds —
+    // ADR-0026's single-idle invariant is load-bearing.
+    #[allow(
+        clippy::panic,
+        reason = "duplicate register_idle is a kernel programming error \
+                  (boot-time discipline; never recoverable at runtime)"
+    )]
+    {
+        assert!(
+            s.idle.is_none(),
+            "register_idle called twice — idle slot is set-once by boot-time discipline"
+        );
+    }
 
     let idx = handle.slot().index() as usize;
 
@@ -513,8 +528,13 @@ pub unsafe fn register_idle<C: ContextSwitch + Cpu>(
 ///
 /// # Panics
 ///
-/// Panics if the ready queue is empty — calling `start` (and therefore
-/// `start_prelude`) before adding any task is a kernel programming error.
+/// Panics if the ready queue is empty **and** [`Scheduler::idle`] is `None` —
+/// i.e. the BSP called `start` without registering any task (via `add_task`)
+/// or any idle (via [`register_idle`]). Per ADR-0026, the dispatch chain is
+/// `s.ready.dequeue().or(s.idle)`; the panic fires only when both halves
+/// resolve to `None`. Registering only an idle task is sufficient to avoid
+/// the panic, and is the post-T-014 "minimum viable boot" shape for any
+/// future BSP that wants to come up without an application task.
 ///
 /// # Safety
 ///
@@ -573,7 +593,11 @@ unsafe fn start_prelude<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>) -> usi
 ///
 /// # Panics
 ///
-/// Panics if no tasks have been added (the ready queue is empty).
+/// Panics if no task **and** no idle has been registered — see
+/// [`start_prelude`]'s `# Panics` for the exact contract. Per ADR-0026 the
+/// dispatcher's `s.ready.dequeue().or(s.idle)` chain falls back to idle when
+/// the ready queue is empty, so registering only [`register_idle`] (and no
+/// `add_task`) is enough to avoid the panic.
 ///
 /// # Safety
 ///
@@ -1476,7 +1500,7 @@ mod tests {
     // Option A and verifies the post-fix dispatcher routes correctly.
     // Refs: ADR-0026, T-014, [B1 smoke regression mini-retro].
     //
-    // [B1 smoke regression mini-retro]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md
+    // [B1 smoke regression mini-retro]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md
 
     #[test]
     fn register_idle_stores_handle_in_idle_slot_and_not_in_ready_queue() {

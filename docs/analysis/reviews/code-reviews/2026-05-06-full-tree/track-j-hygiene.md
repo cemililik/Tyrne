@@ -8,7 +8,7 @@
 
 Commands run:
 
-```
+```sh
 git grep -i 'umbrix' -- ':!docs/analysis/technical-analysis/'
 grep -ri 'umbrix' /Users/dev/Documents/Projects/OS-Project/ \
   --exclude-dir=target --exclude-dir=.git --exclude-dir=technical-analysis
@@ -41,7 +41,7 @@ Not in scope to fix here (Auto-mode rules + CLAUDE.md non-negotiable rule #1 "re
 
 Workspace-level lint policy in `Cargo.toml:36–39` already addresses phantom `pub` items:
 
-```
+```toml
 unreachable_pub = "warn"
 unused_must_use = "deny"
 missing_docs = "warn"
@@ -55,7 +55,7 @@ Track A's verdict (kernel-build, kernel-clippy, host-clippy, fmt all clean at HE
 
 Command run:
 
-```
+```sh
 grep -rn -E '// (TODO|FIXME|HACK|XXX)' \
   kernel/src hal/src test-hal/src bsp-qemu-virt/src
 grep -rn -i -E '(TODO|FIXME|HACK|XXX)' \
