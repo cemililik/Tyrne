@@ -1,8 +1,14 @@
 # 0022 — Idle task and typed scheduler deadlock error
 
-- **Status:** Accepted
+- **Status:** Superseded by 0026 (idle-task-location axis only; typed-error axis stands)
 - **Date:** 2026-04-22
 - **Deciders:** @cemililik
+
+> **Partially superseded by [ADR-0026 — Idle dispatch via separate fallback slot](0026-idle-dispatch-fallback.md) (2026-05-06).** ADR-0026 supersedes this ADR's *idle-task-location* axis (Option A — idle in the FIFO ready queue) with Option B (dedicated `idle: Option<TaskHandle>` slot, dispatched as fallback only). The supersession is motivated by a smoke-regression at HEAD `214052d` — Option A's "yield_now's one-ready fast path collapses solo-idle to inline WFI" claim turned out to be true only when idle is the sole Ready task; in the demo's three-task moment (B unblocked, A yielding, idle in FIFO) idle competes with real tasks for dispatch and the kernel hangs in `WFI`. See [`2026-05-06-B1-smoke-regression.md`](../analysis/reviews/business-reviews/2026-05-06-B1-smoke-regression.md) for the full incident report.
+>
+> **The *typed-error* axis is unchanged.** ADR-0022 chose Option G (`SchedError::Deadlock` + `IpcError::PendingAfterResume` + `start`'s panic preserved) on a separate axis from idle-task location. ADR-0026 explicitly does not touch the typed-error surface; the `SchedError::Deadlock` defensive return, the `IpcError::PendingAfterResume` typed Err, and `start`'s panic-on-empty-queue all stand.
+>
+> The body below is preserved unmodified for the historical record (ADR append-only convention, [ADR-0025 §Rule 2](0025-adr-governance-amendments.md)). The 2026-04-22 first rider, 2026-04-27 architecture-doc pointer rider, and 2026-04-28 Sub-rider-closure rider in §Revision notes also stand intact — they describe the spin-yield → WFI implementation arc Option A went through, which is historical narrative and remains accurate as such.
 
 ## Context
 
