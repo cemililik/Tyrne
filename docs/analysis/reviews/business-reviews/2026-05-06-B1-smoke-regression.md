@@ -89,3 +89,41 @@ The honest reading: **six retro/review artefacts approved a code path that does 
 - **Active milestone:** **B1 — reopened.** B0 stays `closed` (T-007's design choice was the root cause but T-007 itself satisfies its task DoD; the supersession of ADR-0022 is the corrective action, not a B0 reopen).
 - **Active task:** **T-014 to open in Phase 2** (`Draft`); replaces "B2 prep (ADR-0027 drafting)" as the next implementation work. ADR-0027 drafting paused until B1 closes for real.
 - **Next review trigger:** **B1 closure (genuine).** Produces a full closure trio (business + consolidated security + performance baseline) once T-014 lands and the smoke passes through `tyrne: all tasks complete`. The 2026-04-28 closure trio remains the historical record of "what we believed on 2026-04-28"; the next closure trio records "what is actually true post-T-014".
+
+---
+
+## Follow-up note (added 2026-05-06 — Phase 3 closure)
+
+Phase 3 of the fix arc landed the same day as the mini-retro body above. Adjustments item 3 (kernel scheduler refactor per T-014), 4 (re-run smoke), and 6 (final Amendments to UNSAFE-2026-0019 / 0020) are now ✅. T-014 is `In Review` awaiting maintainer `Done` flip. Captured here append-only; original body unchanged.
+
+### Verification snapshot
+
+- **Host tests** — 25 hal + **93 kernel** (was 90; +3 new tests for the idle-dispatch shape) + 34 test-hal = **152 / 152 pass**.
+- **Miri** — 152 / 152 clean (Stacked-Borrows, no UB, no aliasing violation reported).
+- **`cargo fmt` / `cargo host-clippy` / `cargo kernel-clippy` / `cargo kernel-build`** — all clean.
+- **QEMU smoke** at the post-T-014 HEAD produced the full demo trace plus the boot-to-end timing line (~6.3 ms); `-d int,unimp,guest_errors` window stayed empty for the entire run. Full trace pasted into [T-014's review-history row](../../tasks/phase-b/T-014-idle-dispatch-fallback.md#review-history).
+
+### What the three new tests actually catch
+
+1. **`register_idle_stores_handle_in_idle_slot_and_not_in_ready_queue`** — asserts the structural invariant ADR-0026 introduced: idle's handle goes to `Scheduler::idle`, never to the FIFO. This is the test that would *immediately* fail if a future maintainer accidentally added an `add_task` call for idle alongside `register_idle`.
+2. **`dispatcher_picks_idle_only_when_ready_queue_empty`** — asserts the dispatch-chain fallback semantics: `start_prelude` selects regular A first; `ipc_recv_and_yield`'s Phase 2 falls back to idle only after A blocks.
+3. **`unblock_after_yield_dispatches_unblocked_receiver_not_idle`** — the regression guard. Reproduces the demo's failing flow in a host-testable form: with B Blocked on ep, A current, queue empty, idle registered, `ipc_send_and_yield` from A delivers → `unblock_receiver_on(ep)` enqueues B → `yield_now` switches to B (not idle). Under ADR-0022 Option A, this test would have failed at `assert_eq!(sched.current, Some(h_b))` because the post-yield dispatcher would have selected idle from the FIFO head.
+
+### Lessons revisited (from the body's *What we learned* section)
+
+- **"Smoke is the project's only liveness oracle"** (lesson 1) — confirmed by the asymmetry in this fix arc: 152 host tests + 152 miri tests passed without surfacing the bug; one 6-second QEMU smoke surfaces it instantly. Phase 1.3 of the fix arc (current.md update) recorded the structural-vs-symbolic gap; codification of "no Done without recorded smoke" stays deferred to the post-fix B1 closure retro per the original *Adjustments* checklist.
+- **"ADR analysis must simulate, not just argue"** (lesson 2) — ADR-0026 §Decision outcome includes the queue-state simulation table that ADR-0022 lacked. The third new test (`unblock_after_yield_dispatches_unblocked_receiver_not_idle`) is the *empirical* form of the same simulation table: it walks the queue-state machine through the failing demo step and asserts the post-fix behaviour. This is a useful pattern — pairing an ADR's simulation table with a host test that mechanically replays it. Worth codifying when (a) the next multi-step state-machine ADR comes up, and (b) the post-T-014 smoke pattern stabilises into more than one data point.
+- **"Comprehensive review's blind spot was 'did you actually run the program?'"** (lesson 3) — the comprehensive review at HEAD `214052d` cleared the dispatch path; the smoke surfaced the regression seconds after. Track F's §F-1 ("QEMU smoke is maintainer-only") was correctly identified but classified Non-blocking. The post-fix observation: a *Track K — Live execution* in any future full-tree review would have caught the bug. Codification deferred to the maintainer's call (the comprehensive-review plan is itself a per-event artifact, not a standing skill).
+
+### What ADR-0022 + ADR-0026 mean together
+
+Both ADRs are now Active. ADR-0022 owns the *typed-error* axis (Option G: `SchedError::Deadlock` defensive return + `IpcError::PendingAfterResume` + `start`'s panic kept). ADR-0026 owns the *idle-task-location* axis (Option B: dedicated `Scheduler::idle: Option<TaskHandle>` slot, dispatched as fallback). The body of ADR-0022 is preserved unmodified (per [ADR-0025 §Rule 2](../../../decisions/0025-adr-governance-amendments.md)) with a `> Superseded.` callout at the top pointing forward to ADR-0026 on the location axis only. Future readers should consult both — ADR-0022 for "why is `SchedError::Deadlock` shaped that way?", ADR-0026 for "where does idle live in the dispatcher's data model?".
+
+### What stays open
+
+- **Maintainer flip of T-014 to `Done`** + opening the post-fix B1 closure trio.
+- **UNSAFE-2026-0019 / 0020 / 0021 full clearance** is gated on a future B-phase task that introduces a real `arm_deadline` caller — the v1 cooperative IPC demo itself does not arm any deadline, so the IRQ-take/dispatch path remains unexercised at runtime regardless of the idle-dispatch fix.
+- **B2 prep (ADR-0027 kernel virtual memory layout)** stays paused until the post-fix B1 closure retro's *Pathfinder* output reactivates it.
+- **The seven Track-E doc-drift blockers** from the [2026-05-06 comprehensive code review](../code-reviews/2026-05-06-full-tree-comprehensive.md) remain open as a separate doc-fix sweep, orthogonal to the regression arc.
+
+This follow-up is append-only — same convention as the T-009 / T-006 retros' second-pass notes. The body above describes the state at smoke-discovery time; this section describes the state at fix-landed time.

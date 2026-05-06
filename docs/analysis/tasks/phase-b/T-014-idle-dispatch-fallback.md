@@ -2,7 +2,7 @@
 
 - **Phase:** B
 - **Milestone:** B1 — Drop to EL1 in boot, install exception infrastructure (reopened 2026-05-06 by [B1 smoke-regression mini-retro](../../reviews/business-reviews/2026-05-06-B1-smoke-regression.md))
-- **Status:** In Progress
+- **Status:** In Review
 - **Created:** 2026-05-06
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** [ADR-0026 — Idle dispatch via separate fallback slot](../../../decisions/0026-idle-dispatch-fallback.md) — must be `Accepted` before the kernel scheduler refactor lands.
@@ -112,3 +112,18 @@ The simulation table in [ADR-0026 §Decision outcome](../../../decisions/0026-id
 |------|----------|------|
 | 2026-05-06 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft`, paired with ADR-0026 (`Proposed`) per [ADR-0025 §Rule 1](../../../decisions/0025-adr-governance-amendments.md) (forward-reference contract) — ADR-0026's *Dependency chain* requires a real T-NNN file for the implementation step; this task is that file. Will move to `In Progress` only after ADR-0026 is `Accepted`. |
 | 2026-05-06 | @cemililik (+ Claude Opus 4.7 agent) | Promoted `Draft → In Progress`. ADR-0026 was Accepted same-day after careful re-read per [ADR-0025 §Revision notes](../../../decisions/0025-adr-governance-amendments.md) (substance-of-the-step gate replaces calendar cool-down). Implementation: `kernel/src/sched/mod.rs` adds `Scheduler::idle: Option<TaskHandle>` field + `register_idle` raw-pointer free function + dispatch-chain updates in `start_prelude` / `yield_now` / `ipc_recv_and_yield` (each consults `s.idle` only when `s.ready.dequeue()` returns `None`); `bsp-qemu-virt/src/main.rs` switches the third `add_task(idle_entry, ...)` call to `register_idle(...)`; `idle_entry` doc-comment + inline comments updated for ADR-0026. Three new host tests added: `register_idle_stores_handle_in_idle_slot_and_not_in_ready_queue`, `dispatcher_picks_idle_only_when_ready_queue_empty`, `unblock_after_yield_dispatches_unblocked_receiver_not_idle` (the third is the regression guard). Module-level docstring §"Idle task" rewritten for the supersession; `SchedError::Deadlock` doc-comment updated. |
+| 2026-05-06 | @cemililik (+ Claude Opus 4.7 agent) | Promoted `In Progress → In Review`. **Verification — all green:** `cargo fmt --check` clean; `cargo host-clippy` clean (`-D warnings`); `cargo kernel-clippy` clean; **`cargo host-test` 25 + 93 + 34 = 152 / 152 pass** (was 149; +3 from the new tests); **`cargo +nightly miri test` 152 / 152 clean**; `cargo kernel-build` clean. **QEMU smoke trace** (literal serial output at the post-T-014 HEAD; `-d int,unimp,guest_errors` empty, no exception, no PSCI, no panic; ~6.3 ms boot-to-end):
+
+```text
+tyrne: hello from kernel_main
+tyrne: timer ready (62500000 Hz, resolution 16 ns)
+tyrne: starting cooperative scheduler
+tyrne: task B — waiting for IPC
+tyrne: task A -- sending IPC
+tyrne: task B — received IPC (label=0xaaaa); replying
+tyrne: task A — received reply (label=0xbbbb); done
+tyrne: all tasks complete
+tyrne: boot-to-end elapsed = 6275008 ns
+```
+
+**Audit-log Amendments appended:** UNSAFE-2026-0019 / 0020 each gained a 2026-05-06 *post-T-014 smoke* Amendment confirming setup sites under sustained execution; `Pending QEMU smoke verification` status persists for both because the IRQ-take + dispatch path itself is not exercised by the v1 demo (no `arm_deadline` caller). UNSAFE-2026-0021's status persists unchanged — the demo continues to provide no deadline arm. UNSAFE-2026-0014 was *not* amended for `register_idle` here because the existing entry already names "scheduler free-function momentary `&mut Scheduler<C>` pattern" generally; the discipline is identical to `add_task` and `start_prelude` which are already covered. (If review-round feedback wants `register_idle` named explicitly in the *Location* field, that is a one-line Amendment in the same shape as the 2026-04-27 `start_prelude` one.) Maintainer flips to `Done` after independent verification of the smoke trace and the host-test deltas. |
