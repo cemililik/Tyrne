@@ -69,7 +69,7 @@ CI is expected to be set up early in Phase 4 (Rust toolchain + workspace skeleto
 - `cargo test --workspace` — host-runnable unit and integration tests.
 - `cargo build --workspace --target aarch64-unknown-none` — kernel builds clean.
 - QEMU smoke — kernel boots under `qemu-system-aarch64 -machine virt` and reaches the success marker. *(As of 2026-05: maintainer-launched only; no `qemu-smoke` CI job yet — tracked as a B2-or-later roadmap follow-up.)*
-- `cargo audit` — fails on known advisories. `cargo-audit` database is updated weekly in CI. *(Conditional — currently dormant: `Cargo.lock` carries zero external dependencies, so the gate would be a no-op. The job is wired in once the first extern dep lands per [add-dependency](../../.claude/skills/add-dependency/SKILL.md).)*
+- `cargo audit` — fails on known advisories. `cargo-audit` database is updated weekly in CI. *(Conditional — currently dormant: `Cargo.lock` carries zero external dependencies, so the gate would be a no-op. The job is wired in once the first external dependency lands per [add-dependency](../../.claude/skills/add-dependency/SKILL.md).)*
 - `cargo vet check` — fails if any dependency is not audited. *(Same conditional — see `cargo audit` above.)*
 
 ### Advisory gates (warn, do not block)
@@ -153,7 +153,7 @@ The lint set is canonical at [`code-style.md` §Lints](code-style.md#lints); eve
 | `.cargo/config.toml` | Target triples, linker flags per target. |
 | `.github/workflows/*.yml` | CI pipelines. Active jobs at HEAD: `lint-and-host-test`, `kernel-build`, `miri`, `coverage`. |
 
-### Planned (when first extern dep lands)
+### Planned (when first external dependency lands)
 
 | File | Purpose |
 |------|---------|
