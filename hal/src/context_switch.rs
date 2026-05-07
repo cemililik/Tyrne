@@ -22,7 +22,7 @@
 /// perspective of both call sites, `context_switch` appears to return
 /// normally — the saving side resumes here when it is later selected as
 /// `next`.
-pub trait ContextSwitch {
+pub trait ContextSwitch: Send + Sync {
     /// The saved register state for one cooperative task.
     ///
     /// Must be `Default` so the scheduler can zero-initialise a slot

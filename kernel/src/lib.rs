@@ -33,8 +33,14 @@
 //! [T-004]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-a/T-004-cooperative-scheduler.md
 
 #![cfg_attr(not(test), no_std)]
-// Kernel-specific stricter lints on top of the workspace set.
-// See docs/standards/error-handling.md and docs/standards/unsafe-policy.md.
+// Kernel-specific stricter lints — these layer onto `[workspace.lints]`
+// (Cargo.toml `unsafe_op_in_unsafe_fn` / `missing_docs` /
+// `undocumented_unsafe_blocks` / `missing_safety_doc` /
+// `alloc_instead_of_core` / `pedantic`). Do NOT re-state the workspace
+// denies here; only add kernel-tighter ones the workspace cannot enforce
+// (e.g. `clippy::panic` is too aggressive for `tyrne-test-hal` which
+// builds host-test fakes that legitimately panic). Per
+// docs/standards/error-handling.md + docs/standards/unsafe-policy.md.
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]

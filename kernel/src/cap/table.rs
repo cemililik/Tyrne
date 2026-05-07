@@ -102,7 +102,10 @@ impl CapabilityTable {
         //
         // Invariant: `CAP_TABLE_CAPACITY` is a small `const` well below
         // `Index::MAX`, so every `index.wrapping_add(1)` fits in `Index`.
-        const _: () = assert!(CAP_TABLE_CAPACITY <= Index::MAX as usize);
+        // Inline `const { assert!(...) }` matches the form used in
+        // `Arena::new` ([obj/arena.rs:90](../obj/arena.rs)); per Phase A
+        // code review §Style + comprehensive review 2026-05-06 Track A.
+        const { assert!(CAP_TABLE_CAPACITY <= Index::MAX as usize) };
         let slots: [Slot; CAP_TABLE_CAPACITY] = core::array::from_fn(|i| {
             let next_idx = i.wrapping_add(1);
             let next_free = if next_idx < CAP_TABLE_CAPACITY {
@@ -334,6 +337,16 @@ impl CapabilityTable {
         // The `debug_assert!` surfaces that bug in tests; in release
         // builds the extra entries are simply skipped so a bug cannot be
         // escalated to a revocation that silently fails to free memory.
+        //
+        // Size proof: every live capability slot has exactly one parent
+        // and appears in at most one parent's `first_child`/`next_sibling`
+        // chain (the in-tree linked-list invariants `cap_copy` /
+        // `cap_derive` / `free_slot` maintain). Therefore each live node
+        // is enqueued at most once, and the BFS visits at most
+        // `CAP_TABLE_CAPACITY` distinct indices total — which fits in
+        // the `descendants` array sized exactly at that capacity. Per
+        // Phase A code review §Correctness + comprehensive review
+        // 2026-05-06 Track A non-blocker.
         let mut descendants = [0 as Index; CAP_TABLE_CAPACITY];
         let mut desc_len: usize = 0;
 

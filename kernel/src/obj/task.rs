@@ -104,6 +104,8 @@ pub fn get_task(arena: &TaskArena, handle: TaskHandle) -> Option<&Task> {
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
     reason = "tests may use pragmas forbidden in production kernel code"
 )]
 mod tests {

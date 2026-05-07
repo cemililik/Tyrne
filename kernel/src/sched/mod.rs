@@ -73,8 +73,19 @@ impl<const N: usize> Default for SchedQueue<N> {
 
 impl<const N: usize> SchedQueue<N> {
     /// Construct an empty queue.
+    ///
+    /// # Panics (compile-time)
+    ///
+    /// Build fails if `N == 0`. A zero-capacity queue is not a meaningful
+    /// scheduler shape; the wrap arithmetic in [`Self::enqueue`] / [`Self::dequeue`]
+    /// is allowed because the inline `const { assert!(N > 0, ...) }` here
+    /// turns the violation into a hard build error rather than runtime
+    /// short-circuit. Mirrors the `N == 0` discipline applied in
+    /// [`Arena::new`](../obj/arena.rs); per Phase A code review + comprehensive
+    /// review 2026-05-06 Track A non-blocker.
     #[must_use]
     pub const fn new() -> Self {
+        const { assert!(N > 0, "SchedQueue requires N > 0") };
         Self {
             buf: [None; N],
             head: 0,
