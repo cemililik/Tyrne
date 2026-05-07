@@ -85,6 +85,7 @@ When roles are run in parallel, combine outputs by pasting each role's section i
 - [ ] Each role's output has been produced by the maintainer or an agent; notes are traceable.
 - [ ] The index in [`README.md`](README.md) has a new row for this review.
 - [ ] [`../../../roadmap/current.md`](../../../roadmap/current.md) is updated to match the Pathfinder's output.
+- [ ] **For *milestone-completion* and *phase-closure* triggers only:** the *What landed* section includes a verbatim copy of the most recent QEMU smoke trace (full serial output through the milestone's success marker, plus the `boot-to-end elapsed = ... ns` line if the BSP emits it) and an `-d int,unimp,guest_errors` event count. A milestone cannot promote past `In Review` to `Done` without this evidence; *narrative* claims of smoke-pass are insufficient. Codified after the [2026-05-06 B1 smoke-regression mini-retro](2026-05-06-B1-smoke-regression.md) and the [2026-05-07 B1 closure retrospective](2026-05-07-B1-closure.md) §"What we learned" — host tests + miri + paper-review can pass a kernel that hangs at runtime; the smoke is the project's only end-to-end liveness oracle. Maintainer-initiated mini-retros and adhoc reviews are exempt (no closure semantics).
 
 ## Output template
 
