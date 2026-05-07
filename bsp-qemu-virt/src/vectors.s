@@ -111,6 +111,13 @@ tyrne_vectors:
  * the trampoline doesn't need to save them. (If a future preemption
  * scheme needs the full register set, the trampoline grows.)
  */
+// The 192-byte stack carve-out and the per-`stp` byte offsets below mirror
+// the Rust-side `TrapFrame` `#[repr(C)]` definition; a size or layout drift
+// would corrupt every saved register on every IRQ. The compile-time guard
+// `const _: () = assert!(core::mem::size_of::<TrapFrame>() == 192)` next to
+// the `TrapFrame` definition in `bsp-qemu-virt/src/exceptions.rs` fails the
+// build before the drift can reach an IRQ. Update both sides together if
+// the frame ever grows.
 tyrne_irq_curr_el_trampoline:
     sub     sp, sp, #192
     stp     x0,  x1,  [sp, #0x00]

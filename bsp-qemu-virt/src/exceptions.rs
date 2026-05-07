@@ -141,6 +141,13 @@ impl PanicClass {
 /// is the safer default.
 ///
 /// Audit: UNSAFE-2026-0020.
+// `_frame` is unused in v1: the asm trampoline at `vectors.s+0x280`
+// constructs the `TrapFrame` and passes its pointer in `x0` for ABI
+// uniformity; future arcs (preemption, ESR/ELR-aware diagnostics, the
+// scheduler-wake hook this entry's UNSAFE-2026-0014 Amendment names)
+// will read or modify the frame. Kept named with a leading underscore
+// so the compiler does not warn while the parameter remains live in
+// the signature for the trampoline's calling-convention contract.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn irq_entry(_frame: *mut TrapFrame) {
     // SAFETY: producing a stable `&QemuVirtGic` from the static
@@ -169,7 +176,12 @@ pub unsafe extern "C" fn irq_entry(_frame: *mut TrapFrame) {
     let Some(irq) = gic.acknowledge() else {
         // Spurious — nothing to dispatch and nothing to EOI per the
         // GICv2 architecture spec (acknowledging a spurious read does
-        // not require a paired EOI write).
+        // not require a paired EOI write). Defence-in-depth: the
+        // `compiler_fence` is structurally redundant on this branch
+        // (no following memory access reorders ahead of the early
+        // return), but kept as a guard against a future refactor that
+        // adds shared-state writes between the spurious-detect and
+        // the return — drop only when that risk is closed by an ADR.
         compiler_fence(Ordering::SeqCst);
         return;
     };

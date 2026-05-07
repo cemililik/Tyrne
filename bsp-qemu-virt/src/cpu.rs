@@ -318,6 +318,13 @@ pub struct Aarch64TaskContext {
     pub d8_d15: [u64; 8],
 }
 
+// `naked_asm!` in `context_switch_asm` reads `Aarch64TaskContext` at fixed byte
+// offsets (0/80/88/96/104). A size or layout drift between the Rust `repr(C)`
+// definition and the asm offsets would corrupt every cooperative switch.
+// Mirror the discipline applied to `TrapFrame` so the drift fails the build
+// rather than the first IRQ.
+const _: () = assert!(core::mem::size_of::<Aarch64TaskContext>() == 168);
+
 // ─── context_switch_asm ──────────────────────────────────────────────────────
 
 /// Save all AAPCS64 callee-saved registers into `*current` and restore from `*next`.

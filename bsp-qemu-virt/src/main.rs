@@ -733,6 +733,14 @@ pub extern "C" fn kernel_entry() -> ! {
     // holds a `&mut Scheduler` at this point. `start` honours the raw-pointer
     // discipline: no `&mut` is live across the initial context switch.
     // Audit: UNSAFE-2026-0014.
+    //
+    // No defensive `loop {}` follows: `start` is `-> !`, so the type
+    // system proves nothing after this call is reachable. Adding a
+    // belt-and-braces parking loop would be flagged as
+    // `unreachable_code` — for the `-> !` case the type signature is
+    // already the belt-and-braces (any future refactor that drops
+    // `-> !` becomes a hard build error in every caller's return-type
+    // analysis).
     unsafe {
         start(SCHED.as_mut_ptr(), cpu);
     }

@@ -111,6 +111,8 @@ pub fn get_notification(
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
     reason = "tests may use pragmas forbidden in production kernel code"
 )]
 mod tests {
