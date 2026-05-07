@@ -39,8 +39,8 @@
 //! schedules tasks. `ipc_notify` sets bits on the notification word; waiter
 //! wakeup is wired in A5.
 //!
-//! [t003]: https://github.com/cemililik/TyrneOS/blob/main/docs/analysis/tasks/phase-a/T-003-ipc-primitives.md
-//! [adr-0017]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0017-ipc-primitive-set.md
+//! [t003]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-a/T-003-ipc-primitives.md
+//! [adr-0017]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0017-ipc-primitive-set.md
 
 use crate::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
 use crate::obj::endpoint::{EndpointArena, EndpointHandle};
@@ -58,7 +58,7 @@ use crate::obj::ENDPOINT_ARENA_CAPACITY;
 ///
 /// Shape and rationale: [ADR-0017][adr-0017].
 ///
-/// [adr-0017]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0017-ipc-primitive-set.md
+/// [adr-0017]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0017-ipc-primitive-set.md
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Message {
     /// Caller-defined discriminator. The kernel does not interpret this field.
@@ -92,7 +92,7 @@ pub enum IpcError {
     /// instead of silently decoding as `Ok(Pending)` which the caller would
     /// turn into a downstream panic.
     ///
-    /// [ADR-0022]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+    /// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
     PendingAfterResume,
 }
 

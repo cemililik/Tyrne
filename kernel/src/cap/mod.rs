@@ -10,10 +10,10 @@
 //! [ADR-0014][adr-0014]. The architectural role of capabilities lives in
 //! [`security-model.md`][sec] and [architectural principle P1][p1].
 //!
-//! [adr-0014]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0014-capability-representation.md
-//! [adr-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
-//! [sec]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/security-model.md
-//! [p1]: https://github.com/cemililik/TyrneOS/blob/main/docs/standards/architectural-principles.md#p1--no-ambient-authority
+//! [adr-0014]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0014-capability-representation.md
+//! [adr-0016]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0016-kernel-object-storage.md
+//! [sec]: https://github.com/cemililik/Tyrne/blob/main/docs/architecture/security-model.md
+//! [p1]: https://github.com/cemililik/Tyrne/blob/main/docs/standards/architectural-principles.md#p1--no-ambient-authority
 //!
 //! ## Status (T-001 + T-002)
 //!

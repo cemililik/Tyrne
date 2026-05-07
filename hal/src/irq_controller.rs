@@ -2,7 +2,7 @@
 //!
 //! See [ADR-0011] for the v1 scope and the list of deferred capabilities.
 //!
-//! [ADR-0011]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0011-irq-controller-trait.md
+//! [ADR-0011]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0011-irq-controller-trait.md
 
 /// A hardware interrupt line number.
 ///

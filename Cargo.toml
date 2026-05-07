@@ -26,7 +26,7 @@ version = "0.0.1"
 edition = "2021"
 authors = ["Cemil İlik"]
 license = "Apache-2.0"
-repository = "https://github.com/cemililik/TyrneOS"
+repository = "https://github.com/cemililik/Tyrne"
 
 # Lints applied to every workspace crate that opts in via `[lints] workspace = true`.
 # See docs/standards/code-style.md and docs/standards/unsafe-policy.md for the

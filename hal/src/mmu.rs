@@ -2,7 +2,7 @@
 //!
 //! See [ADR-0009] for the v1 scope and the list of deferred capabilities.
 //!
-//! [ADR-0009]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0009-mmu-trait.md
+//! [ADR-0009]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md
 
 use core::ops::{BitAnd, BitOr, BitOrAssign};
 
@@ -204,7 +204,7 @@ pub trait FrameProvider {
 /// `&dyn Mmu` via casting a concrete reference, but `map` / `unmap` require
 /// the concrete type.
 ///
-/// [ADR-0009]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0009-mmu-trait.md
+/// [ADR-0009]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md
 pub trait Mmu: Send + Sync {
     /// Per-BSP address-space structure.
     type AddressSpace: Send;

@@ -19,8 +19,8 @@
 //! full design rationale; `UNSAFE-2026-0019` for the audit-log entry
 //! covering this module's MMIO surface.
 //!
-//! [ADR-0011]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0011-irq-controller-trait.md
-//! [`docs/architecture/exceptions.md`]: https://github.com/cemililik/TyrneOS/blob/main/docs/architecture/exceptions.md
+//! [ADR-0011]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0011-irq-controller-trait.md
+//! [`docs/architecture/exceptions.md`]: https://github.com/cemililik/Tyrne/blob/main/docs/architecture/exceptions.md
 
 use core::ptr::{read_volatile, write_volatile};
 

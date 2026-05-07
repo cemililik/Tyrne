@@ -2,7 +2,7 @@
 //!
 //! See [ADR-0007] for the design rationale behind the trait shape.
 //!
-//! [ADR-0007]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0007-console-trait.md
+//! [ADR-0007]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0007-console-trait.md
 
 use core::fmt;
 

@@ -34,8 +34,8 @@ Build the Phase 4c kernel image and boot it under `qemu-system-aarch64` on the `
 1. **Clone the repository** if you have not already.
 
    ```sh
-   git clone https://github.com/cemililik/TyrneOS.git
-   cd TyrneOS
+   git clone https://github.com/cemililik/Tyrne.git
+   cd Tyrne
    ```
 
 2. **Let rustup install the pinned toolchain.** Any `cargo` command in the repo triggers it; `cargo --version` is the smallest such command.

@@ -265,7 +265,7 @@ Both forms are time-stamped so a reader can reconstruct the entry's state at any
 
 ### UNSAFE-2026-0016 — boot-time `CurrentEL` self-check in `QemuVirtCpu::new`
 
-- **Introduced:** 2026-04-27, T-009 second-read review follow-up. Closes the runtime-check half of Review 1's Yüksek #1 finding (the documentation half landed in commit `39fb66c`).
+- **Introduced:** 2026-04-27, T-009 second-read review follow-up. Closes the runtime-check half of Review 1's High #1 finding (the documentation half landed in commit `39fb66c`).
 - **Location:** [`bsp-qemu-virt/src/cpu.rs`](../../bsp-qemu-virt/src/cpu.rs) — `QemuVirtCpu::new`, prior to the generic-timer reads it audits.
 - **Operation:** One read-only inline-asm `MRS xN, CurrentEL` instruction. The two-bit Exception-Level field (bits [3:2] of `CurrentEL`) is shifted into the low bits and asserted equal to `1` (EL1). A mismatch panics with the observed EL — turning a future boot-flow regression into a loud, named boot-time error rather than letting subsequent `MRS CNTVCT_EL0` / `MRS CNTFRQ_EL0` calls trap or read undefined values at EL2 / EL3.
 - **Invariants relied on:**
@@ -273,7 +273,7 @@ Both forms are time-stamped so a reader can reconstruct the entry's state at any
   - The MRS does not modify any state; `options(nostack, nomem)` is correct (no stack pointer touch, no memory access from the asm itself).
   - The shift `(raw >> 2) & 0b11` extracts the EL field exactly; the implementation does not depend on RES0 bits being zero.
 - **Rejected alternatives:**
-  - **Skip the check, document only.** This is what commit `39fb66c` did; the second-read review's Yüksek #1 explicitly asked for the runtime check on top of documentation. Skipping leaves a boot-flow regression silently producing wrong timer values until much later behaviour falls out of spec.
+  - **Skip the check, document only.** This is what commit `39fb66c` did; the second-read review's High #1 explicitly asked for the runtime check on top of documentation. Skipping leaves a boot-flow regression silently producing wrong timer values until much later behaviour falls out of spec.
   - **Move the check into `boot.s`.** The boot stub's job is to set up the C-ABI environment, not to validate Exception Level (boot.s already presumes EL1 via `MSR cpacr_el1`). Putting the check at the head of `QemuVirtCpu::new` means it runs at the latest possible moment before the assumption is load-bearing — narrow scope, narrow audit.
   - **A higher-level crate** (`aarch64-cpu` or similar). Same dependency-policy argument as UNSAFE-2026-0015: pulling a crate for one MRS is disproportionate.
   - **Defer the check until preemption / SMP work lands.** v1 has no caller other than `kernel_entry`, but the cost of the check (one MRS + one compare) is negligible and the defensive value compounds the moment a second BSP or a future EL-drop sequence ships.

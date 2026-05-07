@@ -10,8 +10,8 @@
 //! [`docs/standards/testing.md`][testing-doc] for the test discipline this
 //! supports.
 //!
-//! [adr-0006]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0006-workspace-layout.md
-//! [testing-doc]: https://github.com/cemililik/TyrneOS/blob/main/docs/standards/testing.md
+//! [adr-0006]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0006-workspace-layout.md
+//! [testing-doc]: https://github.com/cemililik/Tyrne/blob/main/docs/standards/testing.md
 //!
 //! ## Status
 //!

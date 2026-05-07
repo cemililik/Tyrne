@@ -6,7 +6,7 @@
 //! Milestone A4 populates them with real waiter lists when `send` /
 //! `recv` / `reply_recv` arrive.
 //!
-//! [adr-0016]: https://github.com/cemililik/TyrneOS/blob/main/docs/decisions/0016-kernel-object-storage.md
+//! [adr-0016]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0016-kernel-object-storage.md
 
 use super::arena::{Arena, SlotId};
 use super::{ObjError, ENDPOINT_ARENA_CAPACITY};
