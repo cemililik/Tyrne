@@ -2,10 +2,10 @@
 
 - **Phase:** B
 - **Milestone:** B2 prep (lands before any B2 implementation task that touches userspace endpoint destroy; not gating B2's MMU work itself)
-- **Status:** Draft
+- **Status:** Done (2026-05-07)
 - **Created:** 2026-05-07
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
-- **Dependencies:** [ADR-0032](../../../decisions/0032-endpoint-rollback-and-cancel-recv.md) — must be `Accepted` before code lands.
+- **Dependencies:** [ADR-0032](../../../decisions/0032-endpoint-rollback-and-cancel-recv.md) — `Accepted` 2026-05-07 (commit `db24d6d` on branch `t-015-endpoint-rollback-cancel-recv`).
 - **Informs:** Unblocks the userspace-driven endpoint destroy path the B2+ MMU activation arc may surface; preconditions multi-waiter wake (ADR-0019 §Open questions) and preemption-rollback (B5+) by providing the cancel primitive both arcs need.
 - **ADRs required:** [ADR-0032](../../../decisions/0032-endpoint-rollback-and-cancel-recv.md). No supersession; ADR-0017 (IPC primitive set) gains a §Revision notes rider rather than a full supersede.
 
@@ -110,3 +110,5 @@ The implementation is roughly 30 LOC across two files plus tests.
 | Date | Reviewer | Note |
 |------|----------|------|
 | 2026-05-07 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft`, paired with ADR-0032 (`Proposed`) per [ADR-0025 §Rule 1](../../../decisions/0025-adr-governance-amendments.md) (forward-reference contract) — ADR-0032's *Dependency chain* requires a real T-NNN file for the implementation step; this task is that file. Will move to `In Progress` only after ADR-0032 is `Accepted`. |
+| 2026-05-07 | @cemililik (+ Claude Opus 4.7 agent) | ADR-0032 flipped `Proposed → Accepted` after careful re-read pass per [`write-adr` skill step 10](../../../../.claude/skills/write-adr/SKILL.md) (commit `db24d6d`). Implementation lands in subsequent commits on branch `t-015-endpoint-rollback-cancel-recv`: `ipc_cancel_recv` primitive in [`kernel/src/ipc/mod.rs`](../../../../kernel/src/ipc/mod.rs); Phase 2 Deadlock branch in [`kernel/src/sched/mod.rs::ipc_recv_and_yield`](../../../../kernel/src/sched/mod.rs) calls it before returning `Err(SchedError::Deadlock)`. 158/158 host tests + 158/158 miri clean (152 pre-T-015 baseline + 5 IPC unit tests + 1 scheduler-rollback regression test, plus the existing T-007 Deadlock test gained an endpoint-state assertion). `cargo fmt` / `host-clippy` / `kernel-clippy` / `kernel-build` all clean. Status `Draft → In Review` after gates pass; `Done` flip gates on QEMU smoke byte-for-byte unchanged from post-T-014 baseline (T-015 adds no v1-reachable code path — Deadlock is structurally unreachable with `register_idle` installed). |
+| 2026-05-07 | @cemililik (+ Claude Opus 4.7 agent) | QEMU smoke verified — full demo trace through `tyrne: all tasks complete` + `boot-to-end elapsed = 4088000 ns` (~4.1 ms; matches the post-T-014 baseline's ~5.5–6.5 ms typical envelope, byte-for-byte identical message sequence). T-015's "no v1-reachable code path" property holds — the new Deadlock-rollback block is exercised only by host tests. Status `In Review → Done`. UNSAFE-2026-0014 gained a 2026-05-07 Amendment naming the new Deadlock-branch momentary `&mut EndpointArena` + `&mut IpcQueues` site (covered under the existing umbrella; recorded for surface-matching discipline). |
