@@ -182,7 +182,6 @@ pub unsafe extern "C" fn irq_entry(_frame: *mut TrapFrame) {
         // return), but kept as a guard against a future refactor that
         // adds shared-state writes between the spurious-detect and
         // the return — drop only when that risk is closed by an ADR.
-        // Per comprehensive review 2026-05-06 Track G non-blocker.
         compiler_fence(Ordering::SeqCst);
         return;
     };

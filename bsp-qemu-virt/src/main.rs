@@ -737,13 +737,10 @@ pub extern "C" fn kernel_entry() -> ! {
     // No defensive `loop {}` follows: `start` is `-> !`, so the type
     // system proves nothing after this call is reachable. Adding a
     // belt-and-braces parking loop would be flagged as
-    // `unreachable_code` and `clippy::too_many_lines` — for the
-    // `-> !` case the type signature is already the belt-and-braces
-    // (any future refactor that drops `-> !` becomes a hard build
-    // error in callers' return-type analysis). Comprehensive review
-    // 2026-05-06 Track G's "defensive loop" suggestion is therefore
-    // declined for `kernel_entry` specifically; it remains valid for
-    // sites where the called function does not have `-> !`.
+    // `unreachable_code` — for the `-> !` case the type signature is
+    // already the belt-and-braces (any future refactor that drops
+    // `-> !` becomes a hard build error in every caller's return-type
+    // analysis).
     unsafe {
         start(SCHED.as_mut_ptr(), cpu);
     }
