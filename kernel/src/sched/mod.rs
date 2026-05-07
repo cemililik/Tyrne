@@ -76,7 +76,7 @@ impl<const N: usize> Default for SchedQueue<N> {
 impl<const N: usize> SchedQueue<N> {
     /// Construct an empty queue.
     ///
-    /// # Panics (compile-time)
+    /// # Compile-time errors
     ///
     /// Build fails if `N == 0`. A zero-capacity queue is not a meaningful
     /// scheduler shape; the wrap arithmetic in [`Self::enqueue`] /
@@ -977,9 +977,13 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         // cooperative invariant, so the result is asserted in debug
         // and discarded in release.
         // SAFETY: caller contract — `ep_arena`, `queues`, `caller_table`
-        // valid + distinct + exclusive for this momentary block. The
-        // scheduler `&mut` was dropped at the end of the dispatch block
-        // above; no cross-referent alias is alive here. Audit: UNSAFE-2026-0014.
+        // valid + distinct for this momentary block; `ep_arena` and
+        // `queues` are exclusively owned (`&mut` reborrows below),
+        // `caller_table` is shared (`&` reborrow — recovery does not
+        // mutate caller-table state, mirrored by UNSAFE-2026-0014's 4th
+        // Amendment). The scheduler `&mut` was dropped at the end of
+        // the dispatch block above; no cross-referent alias is alive
+        // here. Audit: UNSAFE-2026-0014.
         let cancel_result = unsafe {
             let arena_ref: &mut EndpointArena = &mut *ep_arena;
             let queues_ref: &mut IpcQueues = &mut *queues;

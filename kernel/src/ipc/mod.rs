@@ -437,12 +437,30 @@ pub fn ipc_notify(
 /// - **`RecvWaiting` → `Idle`**: the registered-receiver state is cleared.
 /// - **`Idle`**: no-op; returns `Ok(())`. Idempotent — a redundant cancel
 ///   call is harmless.
-/// - **`SendPending { .. }`** or **`RecvComplete { .. }`**: no-op; returns
-///   `Ok(())`. Phase 1 has already advanced past the recv-only state, so
-///   the cancel has nothing to undo. (In v1 this branch is unreachable
-///   from the Deadlock path because Phase 1's `ipc_recv` returned
-///   `Pending` only after observing `Idle`; the broader IPC surface may
-///   reach it once preemption / multi-waiter shapes land.)
+/// - **`SendPending { .. }`** or **`RecvComplete { .. }`**: *behavioural*
+///   no-op; returns `Ok(())`. Phase 1 has already advanced past the
+///   recv-only state, so the cancel has nothing to undo. (In v1 this
+///   branch is unreachable from the Deadlock path because Phase 1's
+///   `ipc_recv` returned `Pending` only after observing `Idle`; the
+///   broader IPC surface may reach it once preemption / multi-waiter
+///   shapes land.)
+///
+///   **Note for future destroy-drain callers (Phase B2+).** The no-op
+///   here is correct for *recovery* (the v1 Deadlock-rollback shape):
+///   parked sender messages and in-flight capabilities must survive a
+///   spurious cancel call. It is *not* the right semantic for an
+///   endpoint-destroy drain sweep, which has to *return* the parked
+///   `Some(cap)` to its origin or destroy it — the destroy path will
+///   need its own primitive (or an extended `ipc_cancel_recv` with a
+///   destroy-mode flag) for the cap-bearing branches. The
+///   `reset_if_stale_generation` `debug_assert!` against
+///   `SendPending { cap: Some(_) }` / `RecvComplete { cap: Some(_) }`
+///   with a stale generation already pins the silent-drop hazard for
+///   tests; it is benign in v1 but [ADR-0032] §Consequences §Positive's
+///   "Forward-cleanup primitive for endpoint destroy" wording should
+///   not be misread as "destroy is done" — the destroy-path ADR (Phase
+///   B2+) must reckon with the cap-bearing branches before the first
+///   userspace-driven destroy merges.
 ///
 /// # Single-waiter scope (v1)
 ///
@@ -461,6 +479,7 @@ pub fn ipc_notify(
 /// [adr-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
 /// [ADR-0017]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0017-ipc-primitive-set.md
 /// [ADR-0019]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0019-scheduler-shape.md
+/// [ADR-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
 pub fn ipc_cancel_recv(
     ep_arena: &mut EndpointArena,
     queues: &mut IpcQueues,
@@ -1229,6 +1248,70 @@ mod tests {
             panic!("expected Received(123) after cancel-on-SendPending; got {recv_outcome:?}");
         };
         assert_eq!(msg, test_msg(123));
+    }
+
+    #[test]
+    fn cancel_recv_on_recv_complete_does_not_drop_message_or_cap() {
+        // Pre-state: RecvComplete { msg, cap: Some(_) }. Cancel must be
+        // a no-op — the parked message + transferred capability must
+        // both survive so the receiver's next ipc_recv can collect them.
+        // The future-destroy-drain rider in ipc_cancel_recv's doc-comment
+        // calls out that this no-op is the recovery shape; the destroy
+        // path's eventual primitive will need different semantics for
+        // cap-bearing branches. This test pins today's recovery contract.
+        let mut recv_table = CapabilityTable::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let (ep_handle, recv_ep_cap) = setup_ep(&mut recv_table, &mut ep_arena, all_ep_rights());
+
+        // Receiver registers first → RecvWaiting.
+        ipc_recv(&mut ep_arena, &mut queues, recv_ep_cap, &mut recv_table).unwrap();
+
+        // Sender delivers a message + transferred cap → RecvComplete { msg, cap: Some(_) }.
+        let mut sender_table = CapabilityTable::new();
+        let xfer_target = create_endpoint(&mut ep_arena, Endpoint::new(0xCC)).unwrap();
+        let xfer_cap_h = sender_table
+            .insert_root(Capability::new(
+                all_task_rights(),
+                CapObject::Endpoint(xfer_target),
+            ))
+            .unwrap();
+        let sender_ep_cap = sender_table
+            .insert_root(Capability::new(
+                all_ep_rights(),
+                CapObject::Endpoint(ep_handle),
+            ))
+            .unwrap();
+        let send_outcome = ipc_send(
+            &mut ep_arena,
+            &mut queues,
+            sender_ep_cap,
+            &mut sender_table,
+            test_msg(456),
+            Some(xfer_cap_h),
+        )
+        .unwrap();
+        assert_eq!(send_outcome, SendOutcome::Delivered);
+
+        // Cancel from the receiver — endpoint is in RecvComplete now,
+        // not RecvWaiting; cancel must no-op without touching the
+        // parked message or capability.
+        ipc_cancel_recv(&mut ep_arena, &mut queues, recv_ep_cap, &recv_table).unwrap();
+
+        // Receiver collects — both the message and the transferred cap
+        // must still be available.
+        let outcome = ipc_recv(&mut ep_arena, &mut queues, recv_ep_cap, &mut recv_table).unwrap();
+        let RecvOutcome::Received {
+            msg,
+            cap: Some(recv_cap_h),
+        } = outcome
+        else {
+            panic!(
+                "expected Received with Some(cap) after cancel-on-RecvComplete; got {outcome:?}"
+            );
+        };
+        assert_eq!(msg, test_msg(456));
+        assert!(recv_table.lookup(recv_cap_h).is_ok());
     }
 
     #[test]
