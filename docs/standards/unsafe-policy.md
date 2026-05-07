@@ -75,6 +75,8 @@ The audit log is **append-only**. The original body of an entry (fields written 
 
 `cargo-geiger` output is periodically reconciled against the log. In-place editing of an entry's original body is a policy violation; reviewers should reject PRs that rewrite rather than amend.
 
+**Mechanical-edit exemption.** Repository-wide find-and-replace sweeps that change *terminology* without altering *meaning* — e.g. URL renames (`cemililik/TyrneOS` → `cemililik/Tyrne`), localisation passes (`Yüksek` → `High`), or trademark / project-name updates — may touch an entry's body in-place provided the PR description names the sweep, the substitution is uniform across the repository, and no semantic field of the entry (Operation, Invariants, Rejected alternatives' substance, Status) changes. Rationale: the append-only invariant exists to preserve verification-state-over-time history, not to ossify terminology that drifts at the project / language level. The PR-side record (commit message + reviewer note) is enough to reconstruct what changed; an Amendment block would carry no information beyond what `git blame` already provides for these classes of edit. The 2026-05-07 [PR #14 multi-axis review](../analysis/reviews/code-reviews/2026-05-07-pr-12-to-17-multi-axis-review/track-h-audit.md) §MIN-1 is the codifying source.
+
 ### 4. `unsafe impl` and `unsafe trait` follow the same discipline
 
 An `unsafe impl` declares that the implementer upholds invariants that the trait cannot express. The doc-comment on the `unsafe impl` must explain how those invariants are upheld. `unsafe trait` declarations list the invariants in the trait's doc-comment's `# Safety` section.
