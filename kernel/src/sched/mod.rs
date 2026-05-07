@@ -49,7 +49,9 @@
 use tyrne_hal::{ContextSwitch, Cpu, IrqGuard};
 
 use crate::cap::{CapHandle, CapObject, CapabilityTable};
-use crate::ipc::{ipc_recv, ipc_send, IpcError, IpcQueues, Message, RecvOutcome, SendOutcome};
+use crate::ipc::{
+    ipc_cancel_recv, ipc_recv, ipc_send, IpcError, IpcQueues, Message, RecvOutcome, SendOutcome,
+};
 use crate::obj::endpoint::EndpointArena;
 use crate::obj::{EndpointHandle, TaskHandle, TASK_ARENA_CAPACITY};
 
@@ -185,25 +187,27 @@ pub enum SchedError {
     ///
     /// # Rollback scope
     ///
-    /// When returned from [`ipc_recv_and_yield`], the **scheduler** state
-    /// is restored to its pre-call shape: `s.current` is reset to the
-    /// calling task, `s.task_states[current_idx]` is reset from
-    /// `Blocked` back to `Ready`, and the ready queue is left untouched.
-    /// The **endpoint** state, however, is **not** rolled back — the
-    /// Phase 1 `ipc_recv` call has already transitioned the endpoint
-    /// from `Idle` to `RecvWaiting` (recording a waiting receiver) before
-    /// Phase 2's ready-queue check runs, and the Deadlock path does not
-    /// reverse that transition. A subsequent `ipc_recv_and_yield` on the
-    /// same endpoint from the same caller therefore observes `QueueFull`
-    /// (a receiver is already registered), not `Pending`. In the v1
-    /// cooperative workload this is acceptable because the variant is
-    /// structurally unreachable; recovery semantics (endpoint rollback
-    /// or an explicit `ipc_cancel_recv`) are out of scope and will be
-    /// revisited if preemption / SMP ever exercises the path. Callers
-    /// that want the endpoint reset must destroy and re-create it.
+    /// When returned from [`ipc_recv_and_yield`], both the **scheduler**
+    /// and **endpoint** state are restored to their pre-call shape:
+    /// `s.current` is reset to the calling task,
+    /// `s.task_states[current_idx]` is reset from `Blocked` back to
+    /// `Ready`, the ready queue is left untouched, and the endpoint's
+    /// `Idle → RecvWaiting` transition that Phase 1's `ipc_recv` made
+    /// is reversed via [`ipc_cancel_recv`][crate::ipc::ipc_cancel_recv]
+    /// per [ADR-0032]. The two halves of the rollback are atomic
+    /// relative to the caller's observation; a subsequent
+    /// `ipc_recv_and_yield` on the same endpoint from the same caller
+    /// therefore observes a clean `Idle` slot and re-registers as
+    /// `Pending`. Callers no longer need to destroy and re-create the
+    /// endpoint to recover from a Deadlock return. With idle registered
+    /// (the v1 expected configuration) the variant is structurally
+    /// unreachable, but when preemption / SMP / multi-waiter shapes
+    /// land, this symmetric rollback keeps the recovery path
+    /// well-defined.
     ///
     /// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
     /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
+    /// [ADR-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
     Deadlock,
 }
 
@@ -858,13 +862,14 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
 /// - [`SchedError::NoCurrentTask`] — no running task when blocking is required.
 /// - [`SchedError::Deadlock`] — the ready queue is empty after blocking
 ///   the current task (every task is waiting on IPC and no idle task is
-///   registered). The **scheduler** state is restored before the return
-///   (see [`SchedError::Deadlock`]'s *Rollback scope*); the **endpoint**
-///   state was moved from `Idle` to `RecvWaiting` during Phase 1 and
-///   stays there — a subsequent `ipc_recv_and_yield` on the same
-///   endpoint from the same caller therefore observes `QueueFull`. Per
-///   [ADR-0022], registering an idle task at boot makes this variant
-///   unreachable in the v1 cooperative workload.
+///   registered). Both the **scheduler** state and the **endpoint** state
+///   are restored before the return (see [`SchedError::Deadlock`]'s
+///   *Rollback scope*): the Phase 1 `Idle → RecvWaiting` endpoint
+///   transition is reversed via [`ipc_cancel_recv`] per [ADR-0032], so a
+///   subsequent `ipc_recv_and_yield` on the same endpoint from the same
+///   caller observes a clean `Idle` slot. Per [ADR-0022], registering an
+///   idle task at boot makes this variant unreachable in the v1
+///   cooperative workload.
 /// - [`SchedError::Ipc`] — wraps [`IpcError`] failures from the underlying
 ///   [`ipc_recv`] calls. In particular,
 ///   [`IpcError::PendingAfterResume`] is returned when the resume-path
@@ -881,6 +886,7 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
 /// live `&mut` in the caller's scope.
 ///
 /// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
+/// [ADR-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
 pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     sched: *mut Scheduler<C>,
     cpu: &C,
@@ -919,15 +925,18 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     // — idle is consulted only when the ready queue is empty. If both
     // halves are `None` (no other Ready task AND no idle registered),
     // every task in the system is blocked on IPC and the kernel cannot
-    // make progress. The pre-block **scheduler** state is restored before
-    // returning `Err(SchedError::Deadlock)` so the caller observes the
-    // same scheduler state it had before the bridge was called. Note that
-    // the **endpoint** state was already transitioned from Idle to
-    // RecvWaiting by the Phase 1 ipc_recv call above; that transition is
-    // NOT rolled back here (see SchedError::Deadlock's doc-comment for
-    // the rollback-scope rationale). With idle registered (the v1
-    // expected configuration), Deadlock is structurally unreachable.
-    let (current_idx, next_idx) = {
+    // make progress. Per [ADR-0032], that path restores the pre-call
+    // shape of *both* the scheduler state (current + task_states slot)
+    // and the endpoint state (the Phase 1 `Idle → RecvWaiting`
+    // transition is reversed via `ipc_cancel_recv`) before returning
+    // `Err(SchedError::Deadlock)`. The two rollbacks live in separate
+    // momentary borrows: the scheduler `&mut` is dropped before the
+    // endpoint borrows are taken, so no cross-arena alias is alive at
+    // any instant. With idle registered (the v1 expected configuration),
+    // Deadlock is structurally unreachable.
+    //
+    // [ADR-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
+    let dispatch = {
         // SAFETY: caller contract — `sched` valid and exclusive for this
         // block; `&mut` does not cross the switch below. Rejected
         // alternatives as above (Shared safety contract §Rejected safer
@@ -944,17 +953,46 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         s.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
         s.current = None;
 
-        let Some(next_handle) = s.ready.dequeue().or(s.idle) else {
+        if let Some(next_handle) = s.ready.dequeue().or(s.idle) {
+            let next_idx = next_handle.slot().index() as usize;
+            s.task_states[next_idx] = TaskState::Ready;
+            s.current = Some(next_handle);
+            Some((current_idx, next_idx))
+        } else {
             // Restore so Err(Deadlock) leaves the scheduler unchanged.
+            // The endpoint-side rollback runs after this block drops its
+            // `&mut Scheduler<C>` (see the Deadlock branch below).
             s.task_states[current_idx] = prior_state;
             s.current = Some(current_handle);
-            return Err(SchedError::Deadlock);
-        };
-        let next_idx = next_handle.slot().index() as usize;
-        s.task_states[next_idx] = TaskState::Ready;
-        s.current = Some(next_handle);
-        (current_idx, next_idx)
+            None
+        }
     }; // `s: &mut Scheduler<C>` drops here.
+
+    let Some((current_idx, next_idx)) = dispatch else {
+        // Endpoint-side rollback per ADR-0032: reverse Phase 1's
+        // `Idle → RecvWaiting` transition so the caller observes the
+        // same endpoint state it had before the bridge was called.
+        // Phase 1 just validated `ep_cap` with RECV; the cancel cannot
+        // surface a new InvalidCapability under v1's single-thread
+        // cooperative invariant, so the result is asserted in debug
+        // and discarded in release.
+        // SAFETY: caller contract — `ep_arena`, `queues`, `caller_table`
+        // valid + distinct + exclusive for this momentary block. The
+        // scheduler `&mut` was dropped at the end of the dispatch block
+        // above; no cross-referent alias is alive here. Audit: UNSAFE-2026-0014.
+        let cancel_result = unsafe {
+            let arena_ref: &mut EndpointArena = &mut *ep_arena;
+            let queues_ref: &mut IpcQueues = &mut *queues;
+            let table_ref: &CapabilityTable = &*caller_table;
+            ipc_cancel_recv(arena_ref, queues_ref, ep_cap, table_ref)
+        };
+        debug_assert!(
+            cancel_result.is_ok(),
+            "ipc_cancel_recv on the same ep_cap that just passed Phase 1's validation \
+             cannot fail under v1's cooperative single-thread invariant"
+        );
+        return Err(SchedError::Deadlock);
+    };
 
     // Switch window — no `&mut` is alive.
     debug_assert_ne!(
@@ -1325,6 +1363,71 @@ mod tests {
         assert_eq!(sched.current, prior_current);
         assert_eq!(sched.task_states[0], prior_state);
         assert!(sched.ready.is_empty());
+
+        // ADR-0032: endpoint state must also be restored. A fresh ipc_recv
+        // on the same cap should observe Idle (returns Pending) rather
+        // than the pre-fix RecvWaiting (which would have returned
+        // QueueFull). The behavioural assertion mirrors the IPC-side
+        // `cancel_recv_clears_recv_waiting_back_to_idle` test.
+        let recv_outcome =
+            crate::ipc::ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(
+            matches!(recv_outcome, RecvOutcome::Pending),
+            "endpoint should be Idle after Deadlock-rollback; got {recv_outcome:?}"
+        );
+    }
+
+    /// ADR-0032 / T-015: explicit regression test for the symmetric
+    /// endpoint-state rollback. Pairs the scheduler-rollback assertion
+    /// (already covered by `ipc_recv_and_yield_returns_deadlock_when_
+    /// ready_queue_empty`) with the endpoint-state assertion as a
+    /// dedicated, well-named regression guard. Empirical form of
+    /// ADR-0032's Simulation table row 3b.
+    #[test]
+    fn ipc_recv_and_yield_deadlock_rolls_back_endpoint_state() {
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let mut table = CapabilityTable::new();
+        let mut stack = AlignedStack::<512>::new();
+        let task = task_handle(0);
+
+        let ep_cap = setup_single_task_with_recv_cap(
+            &mut sched,
+            &mut ep_arena,
+            &mut table,
+            task,
+            &mut stack,
+        );
+
+        // SAFETY: pointers refer to stack-local test state; no aliasing.
+        // FakeCpu::context_switch is a no-op marker; the deadlock path
+        // returns before reaching it.
+        let result = unsafe {
+            ipc_recv_and_yield(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                core::ptr::from_mut(&mut ep_arena),
+                core::ptr::from_mut(&mut queues),
+                core::ptr::from_mut(&mut table),
+                ep_cap,
+            )
+        };
+        assert!(matches!(result, Err(SchedError::Deadlock)));
+
+        // Pre-fix behaviour: a second ipc_recv would observe RecvWaiting
+        // (set by Phase 1) and return QueueFull. Post-fix: the ADR-0032
+        // cancel call inside the Deadlock branch resets the slot to
+        // Idle, so a second ipc_recv returns Pending — a fresh
+        // registration on a clean slot.
+        let recv_outcome =
+            crate::ipc::ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(
+            matches!(recv_outcome, RecvOutcome::Pending),
+            "ADR-0032 rollback failed: endpoint observed {recv_outcome:?}, \
+             want RecvOutcome::Pending (a clean Idle re-registration)"
+        );
     }
 
     /// `FakeCpu` variant that resets the `IpcQueues` state to `Idle` during

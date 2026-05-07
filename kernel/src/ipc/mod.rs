@@ -1,10 +1,14 @@
 //! IPC subsystem — Milestone A4 / [T-003][t003].
 //!
-//! Implements the three IPC primitives settled in [ADR-0017][adr-0017]:
+//! Implements the three IPC primitives settled in [ADR-0017][adr-0017] plus
+//! the [`ipc_cancel_recv`] recovery primitive added by [ADR-0032][adr-0032]:
 //!
 //! - [`ipc_send`] — synchronous rendezvous send on an [`Endpoint`].
 //! - [`ipc_recv`] — synchronous rendezvous receive on an [`Endpoint`].
 //! - [`ipc_notify`] — non-blocking bit-OR into a [`Notification`].
+//! - [`ipc_cancel_recv`] — reverse an `Idle → RecvWaiting` transition; used by
+//!   the scheduler bridge's `ipc_recv_and_yield` Deadlock-rollback path.
+//!   Recovery primitive (ADR-0032), not part of the user-observable surface.
 //!
 //! ## Waiter-state design
 //!
@@ -41,6 +45,7 @@
 //!
 //! [t003]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-a/T-003-ipc-primitives.md
 //! [adr-0017]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0017-ipc-primitive-set.md
+//! [adr-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
 
 use crate::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
 use crate::obj::endpoint::{EndpointArena, EndpointHandle};
@@ -414,6 +419,67 @@ pub fn ipc_notify(
     Ok(())
 }
 
+/// Cancel a receiver registration on an `Endpoint`.
+///
+/// Recovery primitive added by [ADR-0032][adr-0032]: reverses a Phase 1
+/// `ipc_recv` transition that left the endpoint in `RecvWaiting`. Used by
+/// the scheduler bridge's `ipc_recv_and_yield` Deadlock branch to keep
+/// the symmetric "error path leaves observable state unchanged" invariant
+/// — both *scheduler* and *endpoint* state restored before returning
+/// `Err(SchedError::Deadlock)`.
+///
+/// The caller must hold a capability on the target endpoint with the
+/// [`CapRights::RECV`] right (the same right that authorised the original
+/// `ipc_recv` registration).
+///
+/// # Behaviour
+///
+/// - **`RecvWaiting` → `Idle`**: the registered-receiver state is cleared.
+/// - **`Idle`**: no-op; returns `Ok(())`. Idempotent — a redundant cancel
+///   call is harmless.
+/// - **`SendPending { .. }`** or **`RecvComplete { .. }`**: no-op; returns
+///   `Ok(())`. Phase 1 has already advanced past the recv-only state, so
+///   the cancel has nothing to undo. (In v1 this branch is unreachable
+///   from the Deadlock path because Phase 1's `ipc_recv` returned
+///   `Pending` only after observing `Idle`; the broader IPC surface may
+///   reach it once preemption / multi-waiter shapes land.)
+///
+/// # Single-waiter scope (v1)
+///
+/// `EndpointState::RecvWaiting` is a unit variant — the slot itself
+/// implies "the only waiter" under v1's depth-1 single-waiter discipline
+/// ([ADR-0017]/[ADR-0019]). When multi-waiter wake-up lands, this
+/// signature gains a `caller: TaskHandle` parameter to remove the named
+/// caller from the waiter list rather than blanket-clearing the slot.
+///
+/// # Errors
+///
+/// [`IpcError::InvalidCapability`] — `ep_cap` is stale, refers to a
+/// non-endpoint object, or lacks `RECV`. The endpoint state is not
+/// touched on this error.
+///
+/// [adr-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
+/// [ADR-0017]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0017-ipc-primitive-set.md
+/// [ADR-0019]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0019-scheduler-shape.md
+pub fn ipc_cancel_recv(
+    ep_arena: &mut EndpointArena,
+    queues: &mut IpcQueues,
+    ep_cap: CapHandle,
+    caller_table: &CapabilityTable,
+) -> Result<(), IpcError> {
+    let ep_handle = validate_ep_cap(caller_table, ep_cap, CapRights::RECV)?;
+
+    ep_arena
+        .get(ep_handle.slot())
+        .ok_or(IpcError::InvalidCapability)?;
+
+    let state = queues.state_of(ep_handle);
+    if matches!(state, EndpointState::RecvWaiting) {
+        *state = EndpointState::Idle;
+    }
+    Ok(())
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn validate_ep_cap(
@@ -487,8 +553,8 @@ fn install_cap_if_some(
 )]
 mod tests {
     use super::{
-        ipc_notify, ipc_recv, ipc_send, EndpointState, IpcError, IpcQueues, Message, RecvOutcome,
-        SendOutcome,
+        ipc_cancel_recv, ipc_notify, ipc_recv, ipc_send, EndpointState, IpcError, IpcQueues,
+        Message, RecvOutcome, SendOutcome,
     };
     use crate::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
     use crate::obj::arena::SlotId;
@@ -1077,6 +1143,122 @@ mod tests {
         assert_eq!(msg, test_msg(7));
         // The recovered cap is live in recv_table.
         assert!(recv_table.lookup(recv_cap_h).is_ok());
+    }
+
+    // ── cancel_recv (T-015 / ADR-0032) ────────────────────────────────────────
+    //
+    // The recovery primitive added by ADR-0032 reverses an
+    // `Idle → RecvWaiting` transition for the calling task. v1's only
+    // production caller is `ipc_recv_and_yield`'s Phase 2 Deadlock branch
+    // (covered by the scheduler-side test `ipc_recv_and_yield_deadlock_
+    // rolls_back_endpoint_state`). The IPC-side tests below pin the
+    // primitive's state-machine contract directly, without going through
+    // the scheduler bridge.
+
+    #[test]
+    fn cancel_recv_clears_recv_waiting_back_to_idle() {
+        // RecvWaiting → Idle. Verify by a follow-up ipc_recv that returns
+        // Pending (a fresh registration on a clean Idle slot) rather than
+        // QueueFull (which would mean RecvWaiting was still in place).
+        let mut table = CapabilityTable::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let (_, ep_cap) = setup_ep(&mut table, &mut ep_arena, all_ep_rights());
+
+        // Register a receiver — endpoint enters RecvWaiting.
+        ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+
+        // Cancel the registration.
+        ipc_cancel_recv(&mut ep_arena, &mut queues, ep_cap, &table).unwrap();
+
+        // A fresh ipc_recv must observe Idle (returns Pending) not the
+        // pre-cancel RecvWaiting (which would return QueueFull).
+        let outcome = ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(matches!(outcome, RecvOutcome::Pending));
+    }
+
+    #[test]
+    fn cancel_recv_on_idle_is_noop() {
+        let mut table = CapabilityTable::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let (_, ep_cap) = setup_ep(&mut table, &mut ep_arena, all_ep_rights());
+
+        // No prior recv → endpoint stays Idle. Cancel must succeed and not
+        // alter state — a follow-up ipc_recv still returns Pending.
+        ipc_cancel_recv(&mut ep_arena, &mut queues, ep_cap, &table).unwrap();
+        let outcome = ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(matches!(outcome, RecvOutcome::Pending));
+    }
+
+    #[test]
+    fn cancel_recv_on_send_pending_does_not_drop_message() {
+        // Pre-state: SendPending (no receiver registered). Cancel must be
+        // a no-op — the parked sender's message is preserved. Verify by
+        // a follow-up ipc_recv that collects the message normally.
+        let mut sender_table = CapabilityTable::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let (ep_handle, send_ep_cap) = setup_ep(&mut sender_table, &mut ep_arena, all_ep_rights());
+
+        let outcome = ipc_send(
+            &mut ep_arena,
+            &mut queues,
+            send_ep_cap,
+            &mut sender_table,
+            test_msg(123),
+            None,
+        )
+        .unwrap();
+        assert_eq!(outcome, SendOutcome::Enqueued);
+
+        // Cancel from the receiver's perspective — different table, RECV-only cap.
+        let mut recv_table = CapabilityTable::new();
+        let recv_ep_cap = recv_table
+            .insert_root(Capability::new(
+                CapRights::RECV,
+                CapObject::Endpoint(ep_handle),
+            ))
+            .unwrap();
+        ipc_cancel_recv(&mut ep_arena, &mut queues, recv_ep_cap, &recv_table).unwrap();
+
+        // The parked SendPending message must still be deliverable.
+        let recv_outcome =
+            ipc_recv(&mut ep_arena, &mut queues, recv_ep_cap, &mut recv_table).unwrap();
+        let RecvOutcome::Received { msg, cap: None } = recv_outcome else {
+            panic!("expected Received(123) after cancel-on-SendPending; got {recv_outcome:?}");
+        };
+        assert_eq!(msg, test_msg(123));
+    }
+
+    #[test]
+    fn cancel_recv_without_recv_right_fails() {
+        // Symmetric to recv_without_recv_right_fails: cancel needs the
+        // same RECV right that authorised the original registration.
+        let mut table = CapabilityTable::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let (_, ep_cap) = setup_ep(&mut table, &mut ep_arena, CapRights::SEND);
+        assert_eq!(
+            ipc_cancel_recv(&mut ep_arena, &mut queues, ep_cap, &table).unwrap_err(),
+            IpcError::InvalidCapability,
+        );
+    }
+
+    #[test]
+    fn cancel_recv_is_idempotent() {
+        // RecvWaiting → Idle (first cancel) → Idle (second cancel no-op).
+        let mut table = CapabilityTable::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let (_, ep_cap) = setup_ep(&mut table, &mut ep_arena, all_ep_rights());
+
+        ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        ipc_cancel_recv(&mut ep_arena, &mut queues, ep_cap, &table).unwrap();
+        ipc_cancel_recv(&mut ep_arena, &mut queues, ep_cap, &table).unwrap();
+
+        let outcome = ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(matches!(outcome, RecvOutcome::Pending));
     }
 
     // ── reset_if_stale_generation guard tests (T-011) ─────────────────────────

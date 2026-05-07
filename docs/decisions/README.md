@@ -55,7 +55,7 @@ Each ADR contains:
 | 0024 | [EL drop to EL1 policy](0024-el-drop-policy.md) | Accepted | 2026-04-27 |
 | 0025 | [ADR governance amendments: forward-reference contract, rider hygiene](0025-adr-governance-amendments.md) | Accepted | 2026-04-27 |
 | 0026 | [Idle dispatch via separate fallback slot](0026-idle-dispatch-fallback.md) | Accepted | 2026-05-06 |
-| 0032 | [Endpoint state rollback on `ipc_recv_and_yield` Deadlock + `ipc_cancel_recv` primitive](0032-endpoint-rollback-and-cancel-recv.md) | Proposed | 2026-05-07 |
+| 0032 | [Endpoint state rollback on `ipc_recv_and_yield` Deadlock + `ipc_cancel_recv` primitive](0032-endpoint-rollback-and-cancel-recv.md) | Accepted | 2026-05-07 |
 
 ## Creating a new ADR
 

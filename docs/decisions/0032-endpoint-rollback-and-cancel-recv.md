@@ -1,6 +1,6 @@
 # 0032 — Endpoint state rollback on `ipc_recv_and_yield` Deadlock + `ipc_cancel_recv` primitive
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-05-07
 - **Deciders:** @cemililik
 

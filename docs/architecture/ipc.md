@@ -38,6 +38,7 @@ stateDiagram-v2
     SendPending --> Idle: ipc_recv collects msg+cap
     RecvWaiting --> RecvComplete: ipc_send (delivered)
     RecvComplete --> Idle: ipc_recv collects message
+    RecvWaiting --> Idle: ipc_cancel_recv (recovery)
     note right of SendPending
         SendPending { msg, cap: Option~Capability~ }
         — sender parked, possibly with
@@ -58,6 +59,10 @@ Four states, two of which carry an optional `Capability`:
 - **`RecvComplete { msg, cap }`** — a sender has already delivered to a registered receiver; the message and cap wait one operation longer for the receiver to call `ipc_recv` and collect them. (In A5+ the scheduler unblocks the receiver immediately; this state exists for the brief window between delivery and pickup.)
 
 Depth is **one** — at most one sender or receiver waits per endpoint at a time. A second arrival sees `IpcError::QueueFull`. Multi-waiter shapes are deferred to a future ADR (per [ADR-0019](../decisions/0019-scheduler-shape.md) §"Open questions" and [ADR-0017](../decisions/0017-ipc-primitive-set.md)).
+
+The `RecvWaiting → Idle` reverse arc is the recovery primitive [`ipc_cancel_recv`][cancel-recv] added by [ADR-0032](../decisions/0032-endpoint-rollback-and-cancel-recv.md). It is consumed exclusively by `ipc_recv_and_yield`'s Phase 2 Deadlock branch in v1 (kernel-internal — no userspace caller exists), keeping the symmetric "error path leaves observable state unchanged" invariant: when the bridge returns `SchedError::Deadlock`, both the scheduler state *and* the endpoint state are restored to their pre-call shape, so a subsequent retry observes a clean `Idle` slot rather than `QueueFull`. Userspace-driven endpoint destroy (Phase B2+) and a future preemption-rollback path (B5+) will reuse the same primitive.
+
+[cancel-recv]: https://github.com/cemililik/Tyrne/blob/main/kernel/src/ipc/mod.rs
 
 ### `IpcQueues`: states + slot generations
 
