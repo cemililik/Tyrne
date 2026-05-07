@@ -51,10 +51,11 @@ Each ADR contains:
 | 0020 | [`ContextSwitch` trait and `Cpu` v2](0020-cpu-trait-v2-context-switch.md) | Accepted | 2026-04-21 |
 | 0021 | [Raw-pointer scheduler IPC-bridge API](0021-raw-pointer-scheduler-ipc-bridge.md) | Accepted | 2026-04-22 |
 | 0022 | [Idle task and typed scheduler deadlock error](0022-idle-task-and-typed-scheduler-deadlock.md) | Superseded by 0026 (idle-task-location axis only; typed-error axis stands) | 2026-04-22 |
-| 0023 | Cross-table capability revocation policy *(no file at HEAD — accept-deferred per Phase B0 closure; tracked in [`phase-b.md`](../roadmap/phases/phase-b.md) ADR ledger)* | Deferred | 2026-04-27 |
+| 0023 | [Cross-table capability revocation policy](0023-cross-table-capability-revocation-policy.md) | Deferred | 2026-04-27 |
 | 0024 | [EL drop to EL1 policy](0024-el-drop-policy.md) | Accepted | 2026-04-27 |
 | 0025 | [ADR governance amendments: forward-reference contract, rider hygiene](0025-adr-governance-amendments.md) | Accepted | 2026-04-27 |
 | 0026 | [Idle dispatch via separate fallback slot](0026-idle-dispatch-fallback.md) | Accepted | 2026-05-06 |
+| 0032 | [Endpoint state rollback on `ipc_recv_and_yield` Deadlock + `ipc_cancel_recv` primitive](0032-endpoint-rollback-and-cancel-recv.md) | Proposed | 2026-05-07 |
 
 ## Creating a new ADR
 

@@ -36,6 +36,26 @@ Chosen option: **<Option X>**.
 
 <Why this one. Usually a paragraph or two connecting the decision drivers to the chosen option.>
 
+### Simulation
+
+<For multi-step state-machine ADRs (capability flows, IPC handshakes,
+scheduler dispatch, exception entry, MMU / TLB transitions, syscall ABI
+handshakes, etc.) include a 3–5 row table walking the worst-case
+interaction through the proposed shape. Each row records `(state-pre,
+action, state-post, switch target / observable effect)`. This subsection
+exists to prevent the failure mode the 2026-05-06 B1 smoke regression
+surfaced: ADR-0022 §Decision outcome chose its option on prose-only
+reasoning ("yield_now's only-one-ready early-return handles the case")
+that was correct only when one task was Ready; the demo's three-task
+moment broke the assumption and the kernel hung in WFI. ADR-0026
+§Decision outcome shows the shape in production. Codified after the
+[2026-05-07 B1 closure retro §"What we learned"](../analysis/reviews/business-reviews/2026-05-07-B1-closure.md).
+
+For ADRs whose subject is *not* a multi-step state machine (process /
+governance / dependency policy / single-decision shape), this subsection
+is omitted with a one-line note ("Not applicable — this ADR settles a
+single-shape decision; no state-machine to simulate.").>
+
 ### Dependency chain
 
 <List every task / piece of infrastructure / prior decision that must already

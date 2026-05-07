@@ -24,5 +24,6 @@ A dated file `YYYY-MM-DD-<context>.md` in this folder, following the shape in [`
 |------|-------|------|
 | 2026-04-21 | A6 baseline — v0.0.1 kernel footprint after Phase A exit (no hypothesis; baseline exploration per master-plan §Pre-flight) | [2026-04-21-A6-baseline.md](2026-04-21-A6-baseline.md) |
 | 2026-04-28 | B1 closure baseline — post-T-013 + T-012 footprint (kernel image, .bss, instruction counts; new Metric 6 — IRQ delivery cost) | [2026-04-28-B1-closure.md](2026-04-28-B1-closure.md) |
+| 2026-05-07 | B1 closure post-T-014 re-baseline — net footprint-neutral (`.text` −116 / `.rodata` +144 / `.bss` +8 bytes) after the T-014 idle-dispatch refactor and the comprehensive-review follow-up sweeps; smoke ~5.8 ms boot-to-end | [2026-05-07-B1-closure.md](2026-05-07-B1-closure.md) |
 
 > First full hypothesis-driven cycle is now infrastructure-unblocked — T-009 + T-012 lit up `now_ns()` at EL1 and provide the measurement primitive IPC round-trip latency needs. The B1 closure baseline above records the static-only metrics; future hypothesis-driven cycles will add IPC round-trip wall-clock measurement, stack high-water-mark probes, and `TrapFrame` slimming for ack-and-ignore IRQ handlers.
