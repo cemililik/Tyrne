@@ -144,4 +144,4 @@ The 11 P-numbered proposals from the [2026-05-06 Track-D paper review](../2026-0
 - [`docs/roadmap/current.md`](../../../roadmap/current.md) — quotes the now-stale `.text 21,792` headline; flagged in D1.
 - [`kernel/src/ipc/mod.rs`](../../../../kernel/src/ipc/mod.rs) — `ipc_cancel_recv` body (216 bytes).
 - [`kernel/src/sched/mod.rs`](../../../../kernel/src/sched/mod.rs) — `ipc_recv_and_yield`'s Deadlock branch (+12 bytes).
-- [`bsp-qemu-virt/src/main.rs:733–745`](../../../../bsp-qemu-virt/src/main.rs) — the in-source comment recording PR #15 γ.6's revert rationale.
+- [`bsp-qemu-virt/src/main.rs:733–745`](../../../../bsp-qemu-virt/src/main.rs#L733-L745) — the in-source comment recording PR #15 γ.6's revert rationale.

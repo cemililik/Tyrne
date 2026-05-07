@@ -38,7 +38,7 @@ PR #16 is the highest process-density PR by an order of magnitude (5 substantive
 
 - **NIT-G1 (PR #12).** Commit `c30f4ee` ("feat(kernel,bsp): T-014 — idle dispatch via separate fallback slot") has a trailer block mixing `Refs:` content with `Audit:` content awkwardly:
 
-  ```
+  ```text
   Refs: ADR-0026, ADR-0022, ADR-0021, T-014
   Audit: UNSAFE-2026-0014 (existing entry covers `register_idle`'s
   momentary-`&mut` pattern; explicit naming follows in a future
