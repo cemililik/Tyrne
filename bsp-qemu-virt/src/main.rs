@@ -44,6 +44,8 @@ mod console;
 mod cpu;
 mod exceptions;
 mod gic;
+mod mmu;
+mod mmu_bootstrap;
 
 use console::Pl011Uart;
 use cpu::QemuVirtCpu;
@@ -506,6 +508,10 @@ extern "C" {
 /// All capacities are statically bounded and the demo uses far fewer objects
 /// than the limits, so in practice none of these branches are reachable.
 #[unsafe(no_mangle)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "BSP boot sequence is intentionally linear top-to-bottom for auditability — splitting into helpers obscures the order each phase depends on (per docs/standards/bsp-boot-checklist.md)"
+)]
 pub extern "C" fn kernel_entry() -> ! {
     // ── Hardware setup ────────────────────────────────────────────────────────
 
@@ -530,26 +536,18 @@ pub extern "C" fn kernel_entry() -> ! {
 
     console.write_bytes(b"tyrne: hello from kernel_main\n");
 
-    // ── Exception vector table install + GIC init (T-012) ────────────────────
+    // ── Exception vector install — T-012 (must run before mmu_bootstrap) ──────
     //
-    // Sequence (per docs/architecture/exceptions.md §"Implementation map"):
-    //   1. Install VBAR_EL1 with the 2 KiB-aligned `tyrne_vectors` base
-    //      (assembled in src/vectors.s). After this, any exception taken
-    //      while DAIF is still masked still gets caught — the panic-class
-    //      trampolines fire instead of fetching from VBAR's reset value.
-    //   2. Construct + init the GIC v2 controller. `init` disables every
-    //      SPI, sets default priorities, routes SPIs to CPU 0, then
-    //      enables the distributor + CPU interface. No IRQ source is
-    //      enabled at this point — `enable(IrqNumber)` is a separate call.
-    //   3. Unmask DAIF.I (clear the I bit only — D, A, F stay masked).
-    //      With nothing enabled at the GIC, this is a no-op for IRQ
-    //      delivery; future `enable` calls will deliver IRQs through the
-    //      now-installed vector table.
-    //
-    // Order matters: vector table → GIC init → DAIF unmask. If GIC init
-    // were first, a fault in init() would jump to the un-installed vector
-    // and silently hang. Installing the vector table first guarantees
-    // visible failure for any later boot bug.
+    // `mmu_bootstrap`'s Step 3 is the only point in v1 where a fault
+    // is plausible *before* steady-state code paths take over: a typo
+    // in any descriptor or system-register value would surface as a
+    // Translation / Permission Fault on the next instruction-fetch
+    // after `SCTLR.M = 1` (per ADR-0027 §Simulation §Step 3).
+    // Installing VBAR_EL1 first means such a fault goes to the
+    // panic-class vector (which writes to UART and halts) rather
+    // than fetching from VBAR's reset value (silent hang). System-
+    // register writes are MMU-independent, so this step is safe to
+    // run pre-MMU.
 
     // SAFETY: `tyrne_vectors` is exported by src/vectors.s as the
     // 2 KiB-aligned base of the EL1 vector table. `MSR VBAR_EL1, x`
@@ -565,6 +563,57 @@ pub extern "C" fn kernel_entry() -> ! {
             options(nostack, nomem),
         );
     }
+
+    // ── boot_ns snapshot before mmu_bootstrap (T-016 / ADR-0027) ──────────────
+    //
+    // `cpu.now_ns()` reads `CNTVCT_EL0` (system register, MMU-independent).
+    // Sampling it here — before `mmu_bootstrap` — captures the boot-to-end
+    // baseline that *includes* MMU activation cost (~< 100 µs per
+    // ADR-0027 §Consequences). This keeps the post-T-016 boot-to-end
+    // measurement comparable to the pre-T-016 baseline modulo the
+    // bootstrap-routine addition.
+    let boot_ns = cpu.now_ns();
+    // SAFETY: single-core; no concurrent writer exists before `start()`.
+    // Audit: UNSAFE-2026-0001.
+    unsafe {
+        (*BOOT_NS.0.get()).write(boot_ns);
+    }
+
+    // ── MMU activation — T-016 / ADR-0027 ─────────────────────────────────────
+    //
+    // Activates the MMU with the v1 identity-mapped layout per
+    // ADR-0027 §Decision outcome (a). After this call returns, every
+    // subsequent load and instruction-fetch goes through the live
+    // translation regime; MMIO accesses go through the device-nGnRnE
+    // mapping installed for `0x0800_0000..0x0920_0000` (GIC + UART).
+    // GIC `init` and the timer banner therefore *follow* this call so
+    // their MMIO writes inherit the device attributes.
+
+    // SAFETY: called exactly once per boot, at EL1, with `.boot_pt`
+    // pre-zeroed by `_start`'s BSS-zero loop, before any subsequent
+    // MMIO step (GIC init, timer banner). The kernel image lives at
+    // PA `0x4008_0000` and is identity-covered by L2_high[0..64].
+    // Audit: UNSAFE-2026-0022 (page-table writes) + UNSAFE-2026-0023
+    // (system-register writes — MAIR/TCR/TTBR/SCTLR) +
+    // UNSAFE-2026-0024 (TLB / I-cache invalidate asm).
+    unsafe {
+        mmu_bootstrap::mmu_bootstrap();
+    }
+    console.write_bytes(b"tyrne: mmu activated\n");
+
+    // ── GIC init + DAIF unmask — T-012 (now post-MMU) ─────────────────────────
+    //
+    // Sequence (per docs/architecture/exceptions.md §"Implementation map"):
+    //   1. Construct + init the GIC v2 controller. `init` disables every
+    //      SPI, sets default priorities, routes SPIs to CPU 0, then
+    //      enables the distributor + CPU interface. No IRQ source is
+    //      enabled at this point — `enable(IrqNumber)` is a separate call.
+    //      MMIO writes go through the device-nGnRnE mapping installed
+    //      by `mmu_bootstrap`.
+    //   2. Unmask DAIF.I (clear the I bit only — D, A, F stay masked).
+    //      With nothing enabled at the GIC, this is a no-op for IRQ
+    //      delivery; future `enable` calls will deliver IRQs through the
+    //      now-installed vector table.
 
     // SAFETY: QEMU virt's GICv2 distributor + CPU interface live at
     // their well-known MMIO bases (per ADR-0011 references and the
@@ -602,13 +651,15 @@ pub extern "C" fn kernel_entry() -> ! {
         core::arch::asm!("msr daifclr, #0x2", options(nostack, nomem),);
     }
 
-    // ── Timer banner + boot timestamp (T-009) ───────────────────────────────
+    // ── Timer banner — T-009 (now post-MMU) ──────────────────────────────────
     //
     // The CPU's Timer impl is live the moment `QemuVirtCpu::new` returned
     // (it sampled CNTFRQ_EL0 and cached the resolution). Print the timer
-    // parameters so QEMU output makes the measurement visible, then
-    // snapshot `now_ns()` so `task_a`'s "all tasks complete" path can
-    // print boot-to-end elapsed nanoseconds.
+    // parameters so QEMU output makes the measurement visible. The UART
+    // write goes through the device-nGnRnE mapping installed by
+    // `mmu_bootstrap`. The boot-to-end timestamp was already captured
+    // pre-MMU (above) so the recorded baseline includes the MMU
+    // activation cost.
     {
         let mut w = FmtWriter(console);
         let _ = writeln!(
@@ -617,12 +668,6 @@ pub extern "C" fn kernel_entry() -> ! {
             cpu.frequency_hz(),
             cpu.resolution_ns()
         );
-    }
-    let boot_ns = cpu.now_ns();
-    // SAFETY: single-core; no concurrent writer exists before `start()`.
-    // Audit: UNSAFE-2026-0001.
-    unsafe {
-        (*BOOT_NS.0.get()).write(boot_ns);
     }
 
     // ── Kernel-object setup ───────────────────────────────────────────────────
