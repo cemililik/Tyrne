@@ -14,7 +14,7 @@ The four boot stages, each with a tightly bounded responsibility:
 
 1. **Firmware / loader.** QEMU's `-kernel` flag loads the ELF image at its linked-in load address (`0x40080000` per [ADR-0012](../decisions/0012-boot-flow-qemu-virt.md)), sets the PC to the ELF's entry point (`_start`), and enters at EL1 (default QEMU `virt`) or EL2 (`-machine virtualization=on`, or most real-hardware boot stacks delivering at EL2). The device-tree blob address is placed in `x0`; v1 ignores it.
 2. **Assembly stub (`_start`).** Three phases: first, K3-12 (interrupts masked via `MSR DAIFSet, #0xf`) executes at the very head of the reset vector so a spurious interrupt cannot escape into an uninstalled vector table. Second, the EL drop (per [ADR-0024](../decisions/0024-el-drop-policy.md)) reads `CurrentEL`; on EL2 it configures `HCR_EL2` / `SPSR_EL2` / `ELR_EL2` and `eret`s to a post-drop label, on EL1 it falls through, on EL3 (or any unexpected EL) it halts in a named-label `wfe`-loop (`halt_unsupported_el: wfe ; b halt_unsupported_el`) — there is no Rust panic infrastructure pre-`kernel_entry`. Third, the conventional setup: load `__stack_top` into `SP`, enable FP/SIMD via `CPACR_EL1`, zero the BSS range (`__bss_start` .. `__bss_end`) using 8-byte stores, and branch to `kernel_entry`. If `kernel_entry` ever returns (it shouldn't), the stub falls into a defensive `wfe ; b 2b` halt loop. After phase two, every later instruction runs at EL1 — the precondition T-009's `UNSAFE-2026-0016` runtime check now relies on as a load-bearing invariant rather than a defensive guard.
-3. **`kernel_entry` (Rust, in the BSP).** The first Rust code to run. Constructs the BSP's concrete HAL instances (for Phase 4c: the `Pl011Uart` console), then calls the portable [`tyrne_kernel::run`](../../kernel/src/lib.rs) with the console handle. Marked `#[no_mangle] extern "C"` so the assembly stub can find it.
+3. **`kernel_entry` (Rust, in the BSP).** The first Rust code to run. Constructs the BSP's concrete HAL instances (for Phase 4c: the `Pl011Uart` console), installs the EL1 vector table (T-012), captures the boot-to-end timestamp, **activates the MMU** via `mmu_bootstrap` (T-016 / ADR-0027 — this lands the v1 identity layout in `TTBR0_EL1` and flips `SCTLR_EL1.{M,I,C} = 1`; every subsequent MMIO access goes through device-nGnRnE attributes), initialises the GIC, unmasks `DAIF.I`, prints the timer banner, then sets up the kernel-object arenas + capability tables + IPC + scheduler before transferring control. Marked `#[no_mangle] extern "C"` so the assembly stub can find it.
 4. **`tyrne_kernel::run` (portable kernel).** Architecture- and board-agnostic. In Phase 4c v0.0.1 it writes a greeting to the console and halts with a `spin_loop` idle. Subsequent phases will bring up the scheduler, IPC, and capability system here before reaching steady state.
 
 ### Boot-time sequence
@@ -45,10 +45,16 @@ sequenceDiagram
     Note over KE: T-009 / UNSAFE-2026-0016 asserts CurrentEL == 1<br/>as a load-bearing post-condition of Phase 2
     KE->>KE: construct QemuVirtCpu (incl. CurrentEL self-check)
     KE->>KE: construct Pl011Uart at 0x0900_0000
-    KE->>K: call run(&console, &cpu)
-    K->>U: write_bytes(b"tyrne: hello from kernel_main\n")
-    K->>K: spin_loop() idle
-    Note over K: steady state (v0.0.1)
+    KE->>U: write_bytes(b"tyrne: hello from kernel_main\n")
+    KE->>KE: install VBAR_EL1 (T-012)
+    KE->>KE: boot_ns = cpu.now_ns() snapshot
+    KE->>KE: mmu_bootstrap() — activates MMU<br/>(T-016 / ADR-0027)
+    KE->>U: write_bytes(b"tyrne: mmu activated\n")
+    KE->>KE: GIC init + DAIF.I unmask (T-012)
+    KE->>U: write_bytes(b"tyrne: timer ready (...)")
+    KE->>KE: kernel-object setup, IPC, scheduler
+    KE->>KE: start() — never returns
+    Note over KE: steady state — cooperative IPC demo
 ```
 
 ### Memory map at boot
@@ -179,8 +185,8 @@ Properties the boot flow maintains. These are the claims a reader can rely on an
 - **EL3 → EL2 → EL1 chain.** v1 hardware targets do not boot at EL3; if a future BSP requires it, a follow-up task adds the EL3→EL2 transition on top of the existing EL2→EL1 logic per ADR-0024 §Open questions.
 - **DTB parsing and `BootInfo`.** The kernel's typed boot-info contract, probably introduced with Pi 4 support.
 - **Multi-core start.** PSCI `CPU_ON` for secondary cores.
-- **MMU activation at boot.** Currently MMU-off; the linker script may need adjustments when the kernel-half mapping is introduced.
-- **Guard-page stacks.** Dependent on MMU activation.
+- **High-half kernel migration.** v1 maps the kernel identity-only via `TTBR0_EL1`; the future ADR-0033 placeholder (per [ADR-0027 §Decision outcome (a)](../decisions/0027-kernel-virtual-memory-layout.md)) introduces the high-half mapping when B5 surfaces the per-task `TTBR0_EL1` swap.
+- **Guard-page stacks.** With the MMU now active (T-016), guard-page stacks become reachable — pending a follow-on B-phase task that remaps a stack region's bottom page as invalid.
 - **Measured boot / attestation.** Hardware-dependent; deferred per [ADR-0012](../decisions/0012-boot-flow-qemu-virt.md).
 
 ## References

@@ -2,7 +2,7 @@
 
 - **Phase:** B
 - **Milestone:** B2 — MMU activation (kernel-half mapping)
-- **Status:** Draft
+- **Status:** Done
 - **Created:** 2026-05-08
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** [ADR-0027](../../../decisions/0027-kernel-virtual-memory-layout.md) — must be `Accepted` before code lands.
@@ -158,3 +158,5 @@ The implementation lands in roughly six independently-bisectable commits. Each c
 | Date | Reviewer | Note |
 |------|----------|------|
 | 2026-05-08 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft`, paired with ADR-0027 (`Proposed`) per [ADR-0025 §Rule 1](../../../decisions/0025-adr-governance-amendments.md) (forward-reference contract) — ADR-0027's *Dependency chain* requires a real T-NNN file for the implementation step; this task is that file. Will move to `In Progress` only after ADR-0027 is `Accepted`. |
+| 2026-05-08 | @cemililik (+ Claude Opus 4.7 agent) | ADR-0027 `Accepted` (PR #22 merged). Status `Draft → In Progress`; implementation begins on branch `t-016-mmu-activation`. |
+| 2026-05-08 | @cemililik (+ Claude Opus 4.7 agent) | Status `In Progress → Done`. All six bisectable commits land green; QEMU smoke produces full demo trace through `tyrne: all tasks complete` with the new `tyrne: mmu activated` line; `-d int,unimp,guest_errors` empty across the boot-to-end window (≈ 7–8 ms; pre-T-016 baseline 4–6.5 ms; the addition is QEMU TCG translation-cache overhead, not real-hardware cost). UNSAFE-2026-0022 / 0023 / 0024 / 0025 introduced + ADR-0027 Amendments to UNSAFE-2026-0023/0024 for the bootstrap-site scope extension. Host tests: 42 (HAL — +12 vmsav8 encoder tests + 6 MapperFlush tests) + 100 (kernel — unchanged) + 40 (test-hal — +6 MapperFlush tests) = 182 (was 159). |
