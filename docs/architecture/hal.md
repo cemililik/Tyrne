@@ -87,16 +87,18 @@ Most methods are `unsafe fn`. The kernel wraps them with safe helpers that encod
 
 #### `Mmu`
 
-Virtual memory management primitives. The translation-table format is an associated type; the kernel sees page-table entries only through typed helpers.
+Virtual memory management primitives. Settled by [ADR-0009](../decisions/0009-mmu-trait.md); extended by [ADR-0027](../decisions/0027-kernel-virtual-memory-layout.md) with a typed `MapperFlush` flush-token discipline. The translation-table format is an associated type; the kernel sees page-table entries only through typed helpers.
 
 - Activate a translation-table base (set TTBR0/TTBR1 on aarch64).
-- Install a page-table entry mapping virtual → physical with rights flags.
-- Remove a page-table entry.
+- Install a page-table entry mapping virtual → physical with rights flags. **Returns a `MapperFlush` token (`Result<MapperFlush, MmuError>`)** — see below.
+- Remove a page-table entry. **Returns the unmapped frame paired with a `MapperFlush` token.**
 - Invalidate TLB entries — per-ASID, global, per-address.
 - Emit the cache maintenance sequence required by the architecture between writing a table entry and relying on the MMU having seen it.
 - Expose the supported granule sizes and permission flag set as compile-time constants.
 
 Memory allocation for page tables is not the HAL's job — the kernel owns a physical-frame allocator and hands the HAL frames to fill in.
+
+**`MapperFlush` flush-token discipline** ([ADR-0027 §Decision outcome (c)](../decisions/0027-kernel-virtual-memory-layout.md), [memory-management.md §"The MapperFlush flush-token discipline"](memory-management.md)). Mapping mutations (`Mmu::map`, `Mmu::unmap`) return a `#[must_use]` newtype carrying the just-mutated `VirtAddr`. The caller must explicitly `flush(mmu: &impl Mmu)` (executes `mmu.invalidate_tlb_address(va)`) or `ignore()` (documented no-op for bulk operations followed by a single `invalidate_tlb_all`). Forgetting both is a `unused_must_use` lint failure (denied workspace-wide). The discipline converts "did you remember to flush?" from a reviewer-attention concern into a compile-time error — pattern-of-record for future HAL trait surfaces where mutation requires a follow-up step.
 
 #### `IrqController`
 
