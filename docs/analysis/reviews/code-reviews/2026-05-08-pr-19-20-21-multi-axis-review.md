@@ -73,35 +73,37 @@ Patterns that span two or more PRs / tracks — these are the lessons worth carr
 
 Severity-sorted; action-sentence form. Items 1–4 are the **fix-before-merge** set (one of which is on PR #20's branch, three are flow-to-hygiene-PR or T-016 riders). Items 5–11 are **flow-to-hygiene-PR**. Items 12–15 are nits / non-blocking improvements.
 
+> **Closure status (2026-05-08):** all 15 items closed in the integration-PR branch (replaces #19/#20/#21). Closures land across commits `59c08e9` (review artefacts + T3-M1 same-branch fix), `b482fdb` (Track-2 Majors + Track-3 / Track-2 / Track-4 Minors + Track-2 Nits + 2026-05-07 Track-H NIT-1), and the wrap-up commit on integration branch (Track-3 path-drift + commit-style anchor + 158→159 narrative + hal.md hedge + ADR-0027 ≈18 MiB + TCR_EL1.A1 + glossary entries + LC_ALL=C + this annotation pattern). Per-item closure annotations follow the [2026-05-07 review's `8b6147d`-style pattern](2026-05-07-pr-12-to-17-multi-axis-review.md): each item gains ✅ + closing-commit SHA.
+
 ### Fix on PR #20 branch before merge
 
-1. **(Major / Track 3 M1)** Edit `docs/roadmap/phases/phase-b.md` line 110 (§B2 status block) + line 115 (§Sub-breakdown step 1) from `Proposed 2026-05-08` to `Accepted 2026-05-08`, matching the ADR ledger row at line 257. One-line same-branch commit. The Accept-commit careful-re-read pass missed the in-section status mentions.
+1. ✅ **(Major / Track 3 M1)** Edit `docs/roadmap/phases/phase-b.md` line 110 (§B2 status block) + line 115 (§Sub-breakdown step 1) from `Proposed 2026-05-08` to `Accepted 2026-05-08`, matching the ADR ledger row at line 257. One-line same-branch commit. The Accept-commit careful-re-read pass missed the in-section status mentions. — **closed by `59c08e9`**.
 
 ### Flow to hygiene PR (or T-016 §Audit-log section riders) before T-016 commit-1 lands
 
-2. **(Major / Track 2 M1)** Add a one-bullet entry under ADR-0027 §Consequences/Negative or §Decision outcome (c): "`mem::forget`, `ManuallyDrop::new`, and `let _ = ...` deliberately silence the `#[must_use]` lint on `MapperFlush`; this matches the `x86_64::structures::paging::MapperFlush` precedent and is the only documented path for a caller to drop the token without invoking `flush()` or `ignore()`."
-3. **(Major / Track 2 M2)** Add a one-line note to ADR-0027 §Consequences/Neutral or §Decision outcome (c): "The flush token does not bind the minting `Mmu` instance; multi-`Mmu` deployments (B3+ per-task `AddressSpace`, B5+ multi-CPU) will need a stronger token type. Out of scope for v1."
-4. **(Major / Track 2 M3)** Add an "ADR-0034 placeholder — Kernel-image section permissions (.text RX / .rodata R / .bss/.data RW)" entry to ADR-0027 §Decision outcome alongside the ADR-0033 bullet, *and* a corresponding row in `phase-b.md`'s ADR ledger. Currently the deferral is mentioned in T-016 §Out of scope and `memory-management.md` §map but has no named-ADR slot.
+2. ✅ **(Major / Track 2 M1)** Add a one-bullet entry under ADR-0027 §Consequences/Negative or §Decision outcome (c): "`mem::forget`, `ManuallyDrop::new`, and `let _ = ...` deliberately silence the `#[must_use]` lint on `MapperFlush`; this matches the `x86_64::structures::paging::MapperFlush` precedent and is the only documented path for a caller to drop the token without invoking `flush()` or `ignore()`." — **closed by `b482fdb`**.
+3. ✅ **(Major / Track 2 M2)** Add a one-line note to ADR-0027 §Consequences/Neutral or §Decision outcome (c): "The flush token does not bind the minting `Mmu` instance; multi-`Mmu` deployments (B3+ per-task `AddressSpace`, B5+ multi-CPU) will need a stronger token type. Out of scope for v1." — **closed by `b482fdb`**.
+4. ✅ **(Major / Track 2 M3)** Add an "ADR-0034 placeholder — Kernel-image section permissions (.text RX / .rodata R / .bss/.data RW)" entry to ADR-0027 §Decision outcome alongside the ADR-0033 bullet, *and* a corresponding row in `phase-b.md`'s ADR ledger. Currently the deferral is mentioned in T-016 §Out of scope and `memory-management.md` §map but has no named-ADR slot. — **closed by `b482fdb`**.
 
 ### Flow to hygiene PR (governance / wording polish)
 
-5. **(Minor / Track 3 m1)** `docs/roadmap/current.md` line 49: drop the words "Phase-2" before "§Simulation table" (the ADR-0027 table walks Steps 0..4, not a "Phase 2"; copy-paste from the ADR-0032 banner).
-6. **(Minor / Track 3 m2)** Same line: change "Accept will be a separate commit" to "Accept landed as a separate commit" or drop the sentence entirely (Accept already landed in `bb0a6ba`).
-7. **(Minor / Track 3 m3)** Add one line to `commit-style.md` (or the `start-task` / `write-adr` skill): "Banner authoring that names a PR should defer until after `gh pr create` returns the PR number; alternatively reference the branch slug." Closes the recurrence pattern.
-8. **(Minor / Track 1)** PR #19 PR description: clarify "180/180" — likely refers to link *instances* across the 7 files (~180) vs unique targets (83); substance is correct, phrasing is imprecise.
-9. **(Minor / Track 2 #4)** ADR-0027 §Simulation Step 3: one-sentence rationale for `DSB ISH` vs Linux's `DSB NSH` (forward-compatible with eventual SMP boot; v1 single-core would be fine with NSH). Optional — current choice is correct, just underdocumented.
-10. **(Minor / Track 2 #5)** Tighten ADR-0027 line 59 wording: "TCR_EL1.AS = 0 (8-bit ASID size; v1 leaves TTBR0_EL1.ASID = 0 globally)" — the current wording reads as if "AS=0" *is* the ASID value.
-11. **(Nit / Track 3 n1)** Align "first to apply §Simulation forward" framing across ADR-0027 §Context, current.md banner, phase-b.md §B2 banner, and PR #20 body. ADR-0032's Propose did land with a table; "first non-recovery-primitive state machine" is the precise framing.
+5. ✅ **(Minor / Track 3 m1)** `docs/roadmap/current.md` line 49: drop the words "Phase-2" before "§Simulation table" (the ADR-0027 table walks Steps 0..4, not a "Phase 2"; copy-paste from the ADR-0032 banner). — **closed by `b482fdb`**.
+6. ✅ **(Minor / Track 3 m2)** Same line: change "Accept will be a separate commit" to "Accept landed as a separate commit" or drop the sentence entirely (Accept already landed in `bb0a6ba`). — **closed by `b482fdb`**.
+7. ✅ **(Minor / Track 3 m3)** Add one line to `commit-style.md` (or the `start-task` / `write-adr` skill): "Banner authoring that names a PR should defer until after `gh pr create` returns the PR number; alternatively reference the branch slug." Closes the recurrence pattern. — **closed by `b482fdb`**.
+8. ⏳ **(Minor / Track 1)** PR #19 PR description: clarify "180/180" — likely refers to link *instances* across the 7 files (~180) vs unique targets (83); substance is correct, phrasing is imprecise. — **not closeable post-merge** (PR #19 is closed; gh PR description is immutable from this branch). Worth a note for future similar metric phrasings.
+9. ✅ **(Minor / Track 2 #4)** ADR-0027 §Simulation Step 3: one-sentence rationale for `DSB ISH` vs Linux's `DSB NSH` (forward-compatible with eventual SMP boot; v1 single-core would be fine with NSH). Optional — current choice is correct, just underdocumented. — **closed by `b482fdb`**.
+10. ✅ **(Minor / Track 2 #5)** Tighten ADR-0027 line 59 wording: "TCR_EL1.AS = 0 (8-bit ASID size; v1 leaves TTBR0_EL1.ASID = 0 globally)" — the current wording reads as if "AS=0" *is* the ASID value. — **closed by `b482fdb`** (plus the integration wrap-up commit's TCR_EL1.A1 forward-flag for ADR-0033).
+11. ✅ **(Nit / Track 3 n1)** Align "first to apply §Simulation forward" framing across ADR-0027 §Context, current.md banner, phase-b.md §B2 banner, and PR #20 body. ADR-0032's Propose did land with a table; "first non-recovery-primitive state machine" is the precise framing. — **closed by `b482fdb`**.
 
 ### Flow to a future hygiene PR (PR #21 follow-ups)
 
-12. **(Minor / Track 4 #1)** Add `trap 'kill -KILL "$cmd_pid" "$watchdog_pid" 2>/dev/null' EXIT INT TERM` (with PIDs tracked in shell globals) to `tools/perf-harness.sh` so Ctrl-C between iterations doesn't leak in-flight QEMU + watchdog for up to `TIMEOUT_S` seconds.
-13. **(Minor / Track 4 #2)** Either suppress p99 in the report when `n < 100` (it collapses to `max` under nearest-rank), or add a one-line note in the Methodology section: "p99 collapses to max for N < 100 under the nearest-rank convention." Reporting hygiene; underlying number is correct.
+12. ✅ **(Minor / Track 4 #1)** Add `trap 'kill -KILL "$cmd_pid" "$watchdog_pid" 2>/dev/null' EXIT INT TERM` (with PIDs tracked in shell globals) to `tools/perf-harness.sh` so Ctrl-C between iterations doesn't leak in-flight QEMU + watchdog for up to `TIMEOUT_S` seconds. — **closed by `b482fdb`** (`cleanup_in_flight()` + globals + EXIT INT TERM trap).
+13. ✅ **(Minor / Track 4 #2)** Either suppress p99 in the report when `n < 100` (it collapses to `max` under nearest-rank), or add a one-line note in the Methodology section: "p99 collapses to max for N < 100 under the nearest-rank convention." Reporting hygiene; underlying number is correct. — **closed by `b482fdb`** (Methodology note added).
 
 ### Nits / non-blocking
 
-14. **(Nit / Track 2 #7+#8)** ADR-0027 line 17 §-citation for "first application"; `memory-management.md` line 88 bit-field diagram cosmetic confusion (block-descriptor PA field is bits[47:21] not [47:12]).
-15. **(Nit / Track 4 #3)** `tools/perf-harness.sh:266-273` `read_stats` re-parses awk output via four `echo | awk` invocations — one `read` loop or a single `eval "$(awk ... | sed 's/^/STAT_/')"` would shave ~7 forks. Runs once per harness invocation; trivial.
+14. ✅ **(Nit / Track 2 #7+#8)** ADR-0027 line 17 §-citation for "first application"; `memory-management.md` line 88 bit-field diagram cosmetic confusion (block-descriptor PA field is bits[47:21] not [47:12]). — **closed by `b482fdb`** (line 17 framing tightened to "first non-recovery-primitive state-machine ADR"; memory-management.md page-table descriptor diagram redrawn with correct bit ranges + L1/L3 variants noted).
+15. ✅ **(Nit / Track 4 #3)** `tools/perf-harness.sh:266-273` `read_stats` re-parses awk output via four `echo | awk` invocations — one `read` loop or a single `eval "$(awk ... | sed 's/^/STAT_/')"` would shave ~7 forks. Runs once per harness invocation; trivial. — **already closed** by PR #21 review-round commit `ef30b5c` (8 echo|awk subshells became one while-read loop).
 
 ## Recommended merge order
 
@@ -121,7 +123,7 @@ A hygiene PR after #20 merges captures items 2–11; the perf-harness follow-ups
 - Track 3 (governance): [track-3-pr-20-governance.md](2026-05-08-pr-19-20-21-multi-axis-review/track-3-pr-20-governance.md)
 - Track 4 (perf-harness): [track-4-pr-21-perf-harness.md](2026-05-08-pr-19-20-21-multi-axis-review/track-4-pr-21-perf-harness.md)
 - PR diffs: [`gh pr view 19`](https://github.com/cemililik/Tyrne/pull/19) / [`gh pr view 20`](https://github.com/cemililik/Tyrne/pull/20) / [`gh pr view 21`](https://github.com/cemililik/Tyrne/pull/21)
-- ADR-0027 (kernel virtual memory layout): [`docs/decisions/0027-kernel-virtual-memory-layout.md`](../../decisions/0027-kernel-virtual-memory-layout.md)
+- ADR-0027 (kernel virtual memory layout): [`docs/decisions/0027-kernel-virtual-memory-layout.md`](../../../decisions/0027-kernel-virtual-memory-layout.md)
 - T-016 (MMU activation): [`docs/analysis/tasks/phase-b/T-016-mmu-activation.md`](../../tasks/phase-b/T-016-mmu-activation.md)
 - ADR-0009 §Revision rider, ADR-0012 §Open questions resolution
 - Companion architecture: [`docs/architecture/memory-management.md`](../../../architecture/memory-management.md)

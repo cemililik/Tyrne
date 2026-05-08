@@ -40,6 +40,14 @@
 
 set -euo pipefail
 
+# Force the C locale so awk's `%.3f` / thousands-separator output uses period
+# decimals and ASCII digits regardless of the maintainer's host locale. Without
+# this, an environment with `LC_ALL=tr_TR.UTF-8` (or similar) would emit
+# `5,169` (decimal comma) in baseline reports — which is a valid mantissa in
+# tr_TR but parses as a thousands-separator in en_US, producing silent drift
+# in any downstream consumer that re-parses the report.
+export LC_ALL=C
+
 # ─── Cleanup on Ctrl-C / TERM / unexpected exit ───────────────────────────────
 #
 # `run_with_timeout` runs QEMU and a sibling watchdog as background jobs;
@@ -51,6 +59,11 @@ set -euo pipefail
 # flight.
 CURRENT_CMD_PID=""
 CURRENT_WATCHDOG_PID=""
+# Idempotent by construction: if both globals are empty (i.e., between
+# iterations) the function is a no-op; if either holds a stale PID (process
+# already exited) `kill -KILL` returns ESRCH which `2>/dev/null || true` swallows.
+# Therefore the trap is safe to fire multiple times — EXIT will run after a
+# preceding INT/TERM has already cleaned up.
 cleanup_in_flight() {
     if [[ -n "$CURRENT_CMD_PID" ]]; then
         kill -KILL "$CURRENT_CMD_PID" 2>/dev/null || true
@@ -198,7 +211,15 @@ run_with_timeout() {
     status=$?
     set -e
 
-    kill -KILL "$watchdog_pid" 2>/dev/null || true
+    # `kill -0` is the standard "is the PID still alive?" probe — sends signal 0
+    # which validates the PID without delivering a kill. Skip the actual TERM/KILL
+    # if the watchdog has already exited (e.g. command finished within timeout
+    # → watchdog's `sleep timeout_s` returned naturally → watchdog exited
+    # with code 0 → kill on a dead PID returns ESRCH which we'd suppress with
+    # `2>/dev/null` anyway, but the explicit guard is more readable).
+    if kill -0 "$watchdog_pid" 2>/dev/null; then
+        kill -KILL "$watchdog_pid" 2>/dev/null || true
+    fi
     wait "$watchdog_pid" 2>/dev/null || true
 
     # Clear globals — the trap is now a no-op until the next iteration sets them.
@@ -212,7 +233,10 @@ run_with_timeout() {
 START_EPOCH=$(date +%s)
 START_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 HOST_UNAME=$(uname -a)
-QEMU_VERSION=$(qemu-system-aarch64 --version | head -n 1)
+# `head -n 1` would normally close stdin after one line, sending SIGPIPE to
+# the upstream `qemu-system-aarch64`; `set -o pipefail` then aborts. Use awk
+# with a `; exit` to consume only the first line without provoking SIGPIPE.
+QEMU_VERSION=$(qemu-system-aarch64 --version | awk 'NR==1 { print; exit }')
 GIT_HEAD=$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo "(unknown)")
 GIT_BRANCH=$(cd "$REPO_ROOT" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "(unknown)")
 

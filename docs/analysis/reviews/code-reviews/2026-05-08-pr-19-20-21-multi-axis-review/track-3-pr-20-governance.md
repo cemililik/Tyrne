@@ -28,7 +28,10 @@ Governance discipline is largely clean — Propose / Accept are correctly separa
 
 ### Nit
 
-- **n1. ADR-0027 §Context para 2** ("ADR-0027 is the first ADR drafted under [`write-adr` skill](../../.claude/skills/write-adr/SKILL.md) §Simulation discipline going forward"; "ADR-0026's table was the empirical retro-source; ADR-0032's was the first application; this is the first non-recovery-primitive state machine to use the rule") — the body's framing ("first non-recovery-primitive") is more precise than current.md / phase-b.md / PR body's "first to apply the rule forward (rather than retro-extracted as for ADR-0026 / ADR-0032)". The latter is technically true if "retro-extracted" is read narrowly as "back-fitted after the fact", since ADR-0032's table did land in its Propose. Wording could align across all four artefacts.
+- **n1. ADR-0027 §Context para 2 framing.** The excerpted ADR text reads (verbatim, link targets stripped to avoid mis-resolving from this track file's location):
+  > ADR-0027 is the **first ADR drafted under `write-adr` skill §Simulation discipline going forward** (ADR-0026's table was the empirical retro-source; ADR-0032's was the first application; this is the first *non-recovery-primitive* state machine to use the rule).
+  
+  The body's framing ("first non-recovery-primitive") is more precise than current.md / phase-b.md / PR body's "first to apply the rule forward (rather than retro-extracted as for ADR-0026 / ADR-0032)". The latter is technically true if "retro-extracted" is read narrowly as "back-fitted after the fact", since ADR-0032's table did land in its Propose. Wording could align across all four artefacts.
 - **n2. T-016 §Approach commit 5 lands `linker.ld` + `mmu_bootstrap` in one commit** — the linker reservation is `.bss`-internal (zero behavioural change to the running kernel until consumed), so the routine that consumes the symbols can land alongside without splitting commit 5 into 5a/5b. Bisectability holds.
 
 ### Praise

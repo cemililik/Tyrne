@@ -23,7 +23,7 @@ flowchart TB
         L0_0["L0[0]: table → L1"]
         L1_0["L1[0]: table → L2_low<br/>(0..1 GiB region)"]
         L1_1["L1[1]: table → L2_high<br/>(1..2 GiB region)"]
-        L2_low_mmio["L2_low[64..72]:<br/>2 MiB blocks for<br/>0x0800_0000..0x0902_0000<br/>device-nGnRnE"]
+        L2_low_mmio["L2_low[64..73]:<br/>9 × 2 MiB blocks for<br/>0x0800_0000..0x0920_0000<br/>device-nGnRnE"]
         L2_high_ram["L2_high[0..64]:<br/>2 MiB blocks for<br/>0x4000_0000..0x4800_0000<br/>normal cached"]
         L0_0 --> L1_0
         L0_0 --> L1_1

@@ -127,7 +127,7 @@ Roadmap banners (`current.md`, `phase-b.md`, retro / closure-trio docs) sometime
 2. **Or refer to the branch slug** instead (e.g., "see the `t-015-endpoint-rollback-cancel-recv` branch") — branch names are author-controlled and stable across reopen / supersede.
 3. **Or name the commit SHA** for permanent-record references (matches the audit-log Amendment discipline in [`unsafe-policy.md §3`](unsafe-policy.md)).
 
-The deferral is one extra commit on the same branch — not a separate PR. Codified after [PR #18 / PR #20 each needed a one-commit PR-number fix-up](../analysis/reviews/code-reviews/2026-05-07-pr-12-to-17-multi-axis-review/track-g-process.md#min-g3) and the [2026-05-08 PR #19/#20/#21 multi-axis review](../analysis/reviews/code-reviews/2026-05-08-pr-19-20-21-multi-axis-review.md) §"Cross-PR observations" §1 promoted the recurrence pattern to a process rule.
+The deferral is one extra commit on the same branch — not a separate PR. Codified after [PR #18 + PR #20 each needed a one-commit PR-number fix-up — the recurrence pattern is documented in the 2026-05-08 multi-axis review's §"Cross-PR observations" §1 ("PR-numbering hygiene drift recurrence")](../analysis/reviews/code-reviews/2026-05-08-pr-19-20-21-multi-axis-review.md).
 
 ## Tooling
 
