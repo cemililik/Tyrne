@@ -1,6 +1,6 @@
 # 0027 — Kernel virtual memory layout (B2 — identity-mapped MMU activation)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-05-08
 - **Deciders:** @cemililik
 
