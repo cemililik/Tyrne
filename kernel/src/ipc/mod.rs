@@ -479,7 +479,6 @@ pub fn ipc_notify(
 /// [adr-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
 /// [ADR-0017]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0017-ipc-primitive-set.md
 /// [ADR-0019]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0019-scheduler-shape.md
-/// [ADR-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
 pub fn ipc_cancel_recv(
     ep_arena: &mut EndpointArena,
     queues: &mut IpcQueues,

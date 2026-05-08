@@ -138,10 +138,10 @@ The 11 P-numbered proposals from the [2026-05-06 Track-D paper review](../2026-0
 - [2026-05-07 B1-closure perf re-baseline](../../performance-optimization-reviews/2026-05-07-B1-closure.md) — the comparison anchor.
 - [2026-04-28 B1-closure perf baseline](../../performance-optimization-reviews/2026-04-28-B1-closure.md) — the historical reference.
 - [Track-D 2026-05-06 paper review](../2026-05-06-full-tree/track-d-performance.md) — the P1–P11 proposal queue.
-- [ADR-0032 — Endpoint state rollback + `ipc_cancel_recv`](../../../decisions/0032-endpoint-rollback-and-cancel-recv.md) — the design driver for PR #17.
-- [ADR-0026 — Idle dispatch via separate fallback slot](../../../decisions/0026-idle-dispatch-fallback.md) — the structural-unreachability invariant that makes the new cancel path zero-runtime-cost in v1.
-- [ADR-0017 — IPC primitive set](../../../decisions/0017-ipc-primitive-set.md) — gains the §Revision notes rider for `ipc_cancel_recv`.
-- [`docs/roadmap/current.md`](../../../roadmap/current.md) — quotes the now-stale `.text 21,792` headline; flagged in D1.
-- [`kernel/src/ipc/mod.rs`](../../../../kernel/src/ipc/mod.rs) — `ipc_cancel_recv` body (216 bytes).
-- [`kernel/src/sched/mod.rs`](../../../../kernel/src/sched/mod.rs) — `ipc_recv_and_yield`'s Deadlock branch (+12 bytes).
-- [`bsp-qemu-virt/src/main.rs:733–745`](../../../../bsp-qemu-virt/src/main.rs#L733-L745) — the in-source comment recording PR #15 γ.6's revert rationale.
+- [ADR-0032 — Endpoint state rollback + `ipc_cancel_recv`](../../../../decisions/0032-endpoint-rollback-and-cancel-recv.md) — the design driver for PR #17.
+- [ADR-0026 — Idle dispatch via separate fallback slot](../../../../decisions/0026-idle-dispatch-fallback.md) — the structural-unreachability invariant that makes the new cancel path zero-runtime-cost in v1.
+- [ADR-0017 — IPC primitive set](../../../../decisions/0017-ipc-primitive-set.md) — gains the §Revision notes rider for `ipc_cancel_recv`.
+- [`docs/roadmap/current.md`](../../../../roadmap/current.md) — quotes the now-stale `.text 21,792` headline; flagged in D1.
+- [`kernel/src/ipc/mod.rs`](../../../../../kernel/src/ipc/mod.rs) — `ipc_cancel_recv` body (216 bytes).
+- [`kernel/src/sched/mod.rs`](../../../../../kernel/src/sched/mod.rs) — `ipc_recv_and_yield`'s Deadlock branch (+12 bytes).
+- [`bsp-qemu-virt/src/main.rs:733–745`](../../../../../bsp-qemu-virt/src/main.rs#L733-L745) — the in-source comment recording PR #15 γ.6's revert rationale.

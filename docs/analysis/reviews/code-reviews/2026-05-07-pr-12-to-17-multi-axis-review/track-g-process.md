@@ -133,14 +133,14 @@ The 14-day window establishes the post-2026-04-27 ADR-governance regime as **exe
 
 ## References
 
-- [ADR-0025 — ADR governance amendments: forward-reference contract, rider hygiene](../../../decisions/0025-adr-governance-amendments.md) — §Rule 1, §Rule 2, §Revision notes (cool-down withdrawal).
-- [`.claude/skills/write-adr/SKILL.md`](../../../../.claude/skills/write-adr/SKILL.md) — full procedure, especially §10 separate-commit Accept and §Simulation (added in PR #16 commit `77a578a`).
-- [`.claude/skills/supersede-adr/SKILL.md`](../../../../.claude/skills/supersede-adr/SKILL.md) — §7 solo-phase combined-commit clause invoked by ADR-0026's landing.
-- [`docs/standards/commit-style.md`](../../../standards/commit-style.md) — trailer hygiene + merging-strategy clauses.
+- [ADR-0025 — ADR governance amendments: forward-reference contract, rider hygiene](../../../../decisions/0025-adr-governance-amendments.md) — §Rule 1, §Rule 2, §Revision notes (cool-down withdrawal).
+- [`.claude/skills/write-adr/SKILL.md`](../../../../../.claude/skills/write-adr/SKILL.md) — full procedure, especially §10 separate-commit Accept and §Simulation (added in PR #16 commit `77a578a`).
+- [`.claude/skills/supersede-adr/SKILL.md`](../../../../../.claude/skills/supersede-adr/SKILL.md) — §7 solo-phase combined-commit clause invoked by ADR-0026's landing.
+- [`docs/standards/commit-style.md`](../../../../standards/commit-style.md) — trailer hygiene + merging-strategy clauses.
 - [`docs/analysis/reviews/business-reviews/master-plan.md`](../../business-reviews/master-plan.md) §Acceptance criteria — smoke-trace AC added by commit `77a578a`.
 - [`docs/analysis/reviews/business-reviews/2026-05-07-B1-closure.md`](../../business-reviews/2026-05-07-B1-closure.md) — the retrospective that produced the §Simulation + smoke-trace rules.
-- [`docs/decisions/0023-cross-table-capability-revocation-policy.md`](../../../decisions/0023-cross-table-capability-revocation-policy.md) — Deferred placeholder body landed in PR #16 commit `7e530c0`.
-- [`docs/decisions/0026-idle-dispatch-fallback.md`](../../../decisions/0026-idle-dispatch-fallback.md) — single-commit Accept landing on 2026-05-06; pattern-of-record for MIN-G1.
-- [`docs/decisions/0032-endpoint-rollback-and-cancel-recv.md`](../../../decisions/0032-endpoint-rollback-and-cancel-recv.md) — first ADR drafted under the new §Simulation rule; first Accept commit under write-adr §10 separate-commit discipline.
+- [`docs/decisions/0023-cross-table-capability-revocation-policy.md`](../../../../decisions/0023-cross-table-capability-revocation-policy.md) — Deferred placeholder body landed in PR #16 commit `7e530c0`.
+- [`docs/decisions/0026-idle-dispatch-fallback.md`](../../../../decisions/0026-idle-dispatch-fallback.md) — single-commit Accept landing on 2026-05-06; pattern-of-record for MIN-G1.
+- [`docs/decisions/0032-endpoint-rollback-and-cancel-recv.md`](../../../../decisions/0032-endpoint-rollback-and-cancel-recv.md) — first ADR drafted under the new §Simulation rule; first Accept commit under write-adr §10 separate-commit discipline.
 - Track A (Kernel correctness) — sibling axis review for the same PR window.
 - Track J (Hygiene) — predecessor pattern for the multi-axis review format (`docs/analysis/reviews/code-reviews/2026-05-06-full-tree/track-j-hygiene.md`).
