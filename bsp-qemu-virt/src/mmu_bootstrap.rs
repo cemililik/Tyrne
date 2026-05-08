@@ -168,8 +168,21 @@ pub unsafe fn mmu_bootstrap() {
     // current regime (translation off) remains in effect until Step 3
     // explicitly flips the bit. The trailing `ISB` ensures the system-
     // register writes are observed before the MMU is enabled.
-    // Audit: UNSAFE-2026-0023 (extending its activate-only scope to
-    // these bootstrap MAIR/TCR/TTBR/SCTLR writes via Amendment).
+    //
+    // `nomem` is **deliberately omitted** here (kept for the prior
+    // pre-T-016 commit but removed by the 2026-05-09 review-round
+    // per CodeRabbit's compiler-side memory-barrier concern). Without
+    // `nomem`, the compiler treats this asm block as a memory clobber
+    // and cannot reorder Step 1's page-table descriptor writes past
+    // it. (Step 1's writes are `core::ptr::write_volatile`, which are
+    // already anchored at the source location, but recording memory
+    // intent on the asm block protects against any future non-
+    // volatile accesses that land nearby.) Architectural global
+    // visibility of those stores is enforced by Step 3's `DSB ISH`,
+    // which drains all prior memory accesses inner-shareable before
+    // the MMU enable. Audit: UNSAFE-2026-0023 (extending its
+    // activate-only scope to these bootstrap MAIR/TCR/TTBR/SCTLR
+    // writes via Amendment).
     unsafe {
         asm!(
             "msr mair_el1, {mair}",
@@ -180,7 +193,7 @@ pub unsafe fn mmu_bootstrap() {
             mair = in(reg) MAIR_EL1_VALUE,
             tcr = in(reg) TCR_EL1_VALUE,
             ttbr0 = in(reg) (l0 as u64),
-            options(nostack, nomem),
+            options(nostack),
         );
     }
 

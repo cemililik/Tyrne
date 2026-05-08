@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tyrne_hal::{FrameProvider, MapperFlush, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr};
+use tyrne_hal::{
+    FrameProvider, MapperFlush, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr, PAGE_SIZE,
+};
 
 /// A simple [`FrameProvider`] backed by a `Vec` of pre-allocated frames.
 ///
@@ -151,6 +153,22 @@ impl Mmu for FakeMmu {
         flags: MappingFlags,
         _frames: &mut dyn FrameProvider,
     ) -> Result<MapperFlush, MmuError> {
+        // Mirror the real `Mmu` contract: VA must be `PAGE_SIZE`-aligned.
+        // Without this check, kernel-side code that passes unaligned VAs
+        // would silently succeed under host tests and fail on real hardware.
+        // (PR #23 review-round 2026-05-09 Finding 7.)
+        if !va.0.is_multiple_of(PAGE_SIZE) {
+            return Err(MmuError::MisalignedAddress);
+        }
+        // Mirror `QemuVirtMmu::map`'s rejection of unrepresentable flag
+        // combinations (DEVICE + EXECUTE — MMIO is never executable per
+        // ADR-0027 §Decision outcome (b)). Keeps the FakeMmu's contract
+        // identical to the real impl so kernel logic exercised on the
+        // host catches the same misuse it would catch on hardware.
+        // (PR #23 review-round 2026-05-09 Finding 3 / 7.)
+        if flags.contains(MappingFlags::DEVICE) && flags.contains(MappingFlags::EXECUTE) {
+            return Err(MmuError::InvalidFlags);
+        }
         if as_.mappings.contains_key(&va) {
             return Err(MmuError::AlreadyMapped);
         }
@@ -163,6 +181,11 @@ impl Mmu for FakeMmu {
         as_: &mut FakeAddressSpace,
         va: VirtAddr,
     ) -> Result<(MapperFlush, PhysFrame), MmuError> {
+        // Mirror the real `Mmu` contract: VA must be `PAGE_SIZE`-aligned.
+        // (PR #23 review-round 2026-05-09 Finding 7.)
+        if !va.0.is_multiple_of(PAGE_SIZE) {
+            return Err(MmuError::MisalignedAddress);
+        }
         as_.mappings
             .remove(&va)
             .map(|(pa, _)| (MapperFlush::new(va), pa))
@@ -454,5 +477,63 @@ mod tests {
             "bulk-with-ignore must not issue per-address invalidates"
         );
         assert_eq!(mmu.tlb_all_count(), 1);
+    }
+
+    // ── Contract parity with real Mmu (PR #23 review-round 2026-05-09) ────────
+
+    #[test]
+    fn map_rejects_unaligned_va() {
+        let mmu = FakeMmu::new();
+        // SAFETY: page-aligned by construction.
+        let mut as_ = unsafe { mmu.create_address_space(frame(0x1000)) };
+        let mut fp = VecFrameProvider::new(vec![]);
+
+        let err = mmu
+            .map(
+                &mut as_,
+                VirtAddr(0x4001), // off by one byte
+                frame(0x8000),
+                MappingFlags::WRITE,
+                &mut fp,
+            )
+            .expect_err("unaligned VA must fail");
+        assert_eq!(err, MmuError::MisalignedAddress);
+        assert_eq!(
+            as_.mapping_count(),
+            0,
+            "rejected map must not insert a mapping"
+        );
+    }
+
+    #[test]
+    fn unmap_rejects_unaligned_va() {
+        let mmu = FakeMmu::new();
+        // SAFETY: page-aligned by construction.
+        let mut as_ = unsafe { mmu.create_address_space(frame(0x1000)) };
+
+        let err = mmu
+            .unmap(&mut as_, VirtAddr(0x4_0123))
+            .expect_err("unaligned VA must fail");
+        assert_eq!(err, MmuError::MisalignedAddress);
+    }
+
+    #[test]
+    fn map_rejects_device_plus_execute() {
+        let mmu = FakeMmu::new();
+        // SAFETY: page-aligned by construction.
+        let mut as_ = unsafe { mmu.create_address_space(frame(0x1000)) };
+        let mut fp = VecFrameProvider::new(vec![]);
+
+        let err = mmu
+            .map(
+                &mut as_,
+                VirtAddr(0x0900_0000),
+                frame(0x0900_0000),
+                MappingFlags::DEVICE | MappingFlags::EXECUTE,
+                &mut fp,
+            )
+            .expect_err("DEVICE + EXECUTE must be rejected");
+        assert_eq!(err, MmuError::InvalidFlags);
+        assert_eq!(as_.mapping_count(), 0);
     }
 }

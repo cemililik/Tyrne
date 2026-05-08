@@ -126,23 +126,30 @@ impl Mmu for QemuVirtMmu {
         // invariant is established by the trait's `create_address_space`
         // safety contract (root is a zero-initialised, exclusively-owned
         // PhysFrame populated with a valid VMSAv8 layout before this
-        // call) and by the caller. After the MSR, TLBI VMALLE1 + DSB
-        // ISH + ISB invalidate every TLB entry on the inner-shareable
-        // domain (forward-compatible with future SMP per ADR-0027
-        // §Simulation §"Why DSB ISH"); the final ISB drains the
-        // pipeline so the next instruction-fetch goes through the
-        // freshly-installed regime. options(nostack, nomem) is
-        // correct: the asm reads no memory and writes no stack.
+        // call) and by the caller.
+        //
+        // Sequence: `MSR TTBR0_EL1` + `ISB` (translation regime now
+        // staged but stale TLB entries may exist) + `DSB ISHST`
+        // (ensure any prior page-table descriptor stores are globally
+        // observable inner-shareable before the TLBI broadcast — see
+        // 2026-05-09 review-round Finding 4 / ADR-0027 §"Why DSB ISH"
+        // forward-compat) + `TLBI VMALLE1` + `DSB ISH` (drain
+        // invalidate completion) + `ISB` (drain pipeline so the next
+        // instruction-fetch goes through the freshly-installed
+        // regime). `options(nostack)` only — `nomem` omitted so the
+        // compiler treats this asm as a memory clobber and cannot
+        // reorder prior page-table writes past it.
         // Audit: UNSAFE-2026-0023.
         unsafe {
             asm!(
                 "msr ttbr0_el1, {0}",
                 "isb",
+                "dsb ishst",
                 "tlbi vmalle1",
                 "dsb ish",
                 "isb",
                 in(reg) ttbr0,
-                options(nostack, nomem),
+                options(nostack),
             );
         }
     }
@@ -158,6 +165,20 @@ impl Mmu for QemuVirtMmu {
         // VA must be 4 KiB-aligned (the trait method's contract).
         if !va.0.is_multiple_of(PAGE_SIZE) {
             return Err(MmuError::MisalignedAddress);
+        }
+
+        // Reject unrepresentable flag combinations up-front instead of
+        // letting `flags_to_descriptor_bits` silently coerce them.
+        // DEVICE mappings are unconditionally non-executable (PXN=1,
+        // UXN=1) per ADR-0027 §Decision outcome (b) — the v1 MMIO
+        // attack surface gains nothing from execute permissions, and
+        // userspace MMIO is out of scope. A caller passing
+        // DEVICE | EXECUTE has either a bug or a misunderstanding;
+        // either way, the trait surface should reject the request
+        // rather than silently drop EXECUTE. (2026-05-09 review-round
+        // Finding 3.)
+        if flags.contains(MappingFlags::DEVICE) && flags.contains(MappingFlags::EXECUTE) {
+            return Err(MmuError::InvalidFlags);
         }
 
         // Walk L0 → L1 → L2, allocating intermediate tables when needed,
@@ -221,19 +242,35 @@ impl Mmu for QemuVirtMmu {
         let arg = ((va.0 as u64) >> 12) & 0x0000_FFFF_FFFF_FFFF;
 
         // SAFETY: TLBI VAE1 invalidates a per-VA TLB entry. The
-        // operand encoding is per ARM ARM §D11.2.4. The DSB ISH
-        // ensures the invalidate completes within the inner-shareable
-        // domain before subsequent translations; ISB drains the
-        // pipeline so a subsequent instruction-fetch sees the
-        // post-invalidate state. options(nostack, nomem) is correct.
+        // operand encoding is per ARM ARM §D11.2.4. Sequence (per
+        // ARM ARM canonical pattern + Linux `arch/arm64/include/asm/
+        // tlbflush.h`):
+        //   - DSB ISHST  ensures any preceding page-table descriptor
+        //                store is globally observable inner-shareable
+        //                BEFORE the TLBI broadcast. Without this, on
+        //                SMP a peer core could receive the TLBI, walk
+        //                the still-stale descriptor on a TLB miss,
+        //                and re-cache it. (2026-05-09 review-round
+        //                Finding 4 / ADR-0027 §"Why DSB ISH"
+        //                forward-compat.)
+        //   - TLBI VAE1  per-VA invalidate.
+        //   - DSB ISH    ensures the invalidate completes within the
+        //                inner-shareable domain.
+        //   - ISB        drains the pipeline so a subsequent
+        //                instruction-fetch sees the post-invalidate
+        //                state.
+        // `options(nostack)` only — `nomem` omitted so the compiler
+        // treats this asm as a memory clobber against any prior
+        // descriptor store.
         // Audit: UNSAFE-2026-0024.
         unsafe {
             asm!(
+                "dsb ishst",
                 "tlbi vae1, {0}",
                 "dsb ish",
                 "isb",
                 in(reg) arg,
-                options(nostack, nomem),
+                options(nostack),
             );
         }
     }
@@ -241,10 +278,19 @@ impl Mmu for QemuVirtMmu {
     fn invalidate_tlb_all(&self) {
         // SAFETY: TLBI VMALLE1 invalidates every stage-1 EL1 TLB
         // entry on the current core (and within the inner-shareable
-        // domain after the DSB ISH). DSB ISH + ISB sequence as above.
+        // domain after the DSB ISH). DSB ISHST before TLBI ensures
+        // prior descriptor stores are globally observable BEFORE the
+        // broadcast; DSB ISH + ISB after sequence as above per ARM
+        // ARM canonical pattern. (2026-05-09 review-round Finding 4.)
         // Audit: UNSAFE-2026-0024.
         unsafe {
-            asm!("tlbi vmalle1", "dsb ish", "isb", options(nostack, nomem),);
+            asm!(
+                "dsb ishst",
+                "tlbi vmalle1",
+                "dsb ish",
+                "isb",
+                options(nostack),
+            );
         }
     }
 }

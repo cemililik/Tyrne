@@ -233,9 +233,25 @@ pub struct MapperFlush(VirtAddr);
 impl MapperFlush {
     /// Mint a flush token for `va`.
     ///
-    /// Visible only to [`Mmu`] implementers within the [`tyrne_hal`] crate
-    /// (and to the in-tree `tyrne-test-hal::FakeMmu` impl via `pub`-with-
-    /// crate-discipline). Kernel code never constructs tokens directly.
+    /// **Visibility note.** This constructor is `pub` (not `pub(crate)`)
+    /// because BSP `Mmu` implementations (e.g.,
+    /// `bsp-qemu-virt::QemuVirtMmu`) live in separate crates and must
+    /// be able to mint tokens at every `Mmu::map` / `Mmu::unmap`
+    /// return. The discipline that "kernel code never constructs
+    /// tokens directly" is enforced **by convention**, not by
+    /// visibility: kernel code receives tokens from `Mmu` calls and
+    /// discharges them via [`Self::flush`] / [`Self::ignore`];
+    /// constructing a `MapperFlush` directly outside an `Mmu`
+    /// implementation is a code-smell that reviewers should reject.
+    ///
+    /// Soundness analysis: a misbehaving caller could mint extra
+    /// tokens or never mint them, but cannot cause memory unsoundness
+    /// — the token's only "power" is to call
+    /// [`Mmu::invalidate_tlb_address`], which is a TLB hint, not a
+    /// memory-safety operation. The 2026-05-09 PR #23 review-round
+    /// Finding 5 + ADR-0027 §Decision outcome (c)'s "escape hatches
+    /// are deliberate, documented, and rare" paragraph record this
+    /// trade-off.
     pub const fn new(va: VirtAddr) -> Self {
         Self(va)
     }
