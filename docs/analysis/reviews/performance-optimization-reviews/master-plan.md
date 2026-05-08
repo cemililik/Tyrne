@@ -102,6 +102,8 @@ Combine the six role outputs into a single artifact. The Measurement and Regress
 - [ ] Verdict stated.
 - [ ] Index in [`README.md`](README.md) updated.
 
+> **Closure-trio coordination cross-reference.** When this performance review is one leg of a *milestone-completion* or *phase-closure* trio (business + security + performance), the trio's acceptance is gated on the [business master-plan §Acceptance criteria](../business-reviews/master-plan.md) "no closure-trio without recorded smoke" rule — the business retrospective must include a verbatim QEMU smoke trace + `-d int,unimp,guest_errors` event count. Performance reviews shipped *as artefacts of* a closure trio inherit this gate; performance reviews triggered independently (regression bisection, hypothesis-driven baseline refresh, etc.) do **not** claim closure semantics and are exempt from the smoke requirement. Recorded after the [2026-05-07 PR #12-#17 multi-axis review's Track G §MIN-G3](../code-reviews/2026-05-07-pr-12-to-17-multi-axis-review/track-g-process.md) flagged the rule's location-asymmetry: the AC was authored only in the business master-plan; this rider extends visibility to the performance axis.
+
 ## Output template
 
 ```markdown

@@ -40,6 +40,11 @@ Thumbs.db
 tmp/
 .tmp/
 
+# Claude Code runtime state — per-session lock files coordinating tools like
+# ScheduleWakeup. The .claude/skills/ tree itself IS tracked (project skills
+# are source of truth); only runtime lock files are ignored.
+.claude/*.lock
+
 # Python tooling occasionally used for build scripts
 __pycache__/
 *.pyc
