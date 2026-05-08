@@ -210,11 +210,20 @@ while [[ "$i" -le "$ITERATIONS" ]]; do
     set -e
 
     # Extract the first boot-to-end ns sample from the captured output.
-    SAMPLE=$(printf '%s\n' "$OUTPUT" \
-        | grep -oE 'boot-to-end elapsed = [0-9]+ ns' \
-        | head -n 1 \
-        | grep -oE '[0-9]+' \
-        | head -n 1 || true)
+    # Single awk: match the line, strip everything before/after the number,
+    # exit on first hit. Replaces a 4-pipe pipeline (printf | grep | head |
+    # grep | head) with one awk invocation; awk exits 0 on no-match so no
+    # `|| true` is needed to satisfy `set -e`. The sub/sub pattern keeps
+    # the extraction format-shift-tolerant — any "...= NUM ns..." shape
+    # the kernel emits resolves to NUM regardless of preceding fields.
+    SAMPLE=$(awk '
+        /boot-to-end elapsed = [0-9]+ ns/ {
+            sub(/.*boot-to-end elapsed = /, "")
+            sub(/ ns.*/, "")
+            print
+            exit
+        }
+    ' <<< "$OUTPUT")
 
     if [[ -n "$SAMPLE" ]]; then
         SAMPLES+=("$SAMPLE")
@@ -306,16 +315,24 @@ read_stats() {
     }'
 }
 
-# Parse the awk output back into named shell variables.
-STATS=$(read_stats)
-STAT_MIN=$(echo "$STATS"    | awk '$1=="min"    {print $2}')
-STAT_P10=$(echo "$STATS"    | awk '$1=="p10"    {print $2}')
-STAT_P50=$(echo "$STATS"    | awk '$1=="p50"    {print $2}')
-STAT_P90=$(echo "$STATS"    | awk '$1=="p90"    {print $2}')
-STAT_P99=$(echo "$STATS"    | awk '$1=="p99"    {print $2}')
-STAT_MAX=$(echo "$STATS"    | awk '$1=="max"    {print $2}')
-STAT_MEAN=$(echo "$STATS"   | awk '$1=="mean"   {print $2}')
-STAT_STDDEV=$(echo "$STATS" | awk '$1=="stddev" {print $2}')
+# Parse the awk output back into named shell variables in a single pass.
+# Replaces 8 echo|awk subshells with one while-read loop. Bash 3.2 compatible
+# (`while read` with a heredoc keeps the loop in the parent shell so variable
+# assignments persist after the loop ends).
+while read -r key val; do
+    case "$key" in
+        min)    STAT_MIN=$val ;;
+        p10)    STAT_P10=$val ;;
+        p50)    STAT_P50=$val ;;
+        p90)    STAT_P90=$val ;;
+        p99)    STAT_P99=$val ;;
+        max)    STAT_MAX=$val ;;
+        mean)   STAT_MEAN=$val ;;
+        stddev) STAT_STDDEV=$val ;;
+    esac
+done <<EOF
+$(read_stats)
+EOF
 
 # Format helpers: thousands-separator on ns, three-decimal ms.
 fmt_ns() {
