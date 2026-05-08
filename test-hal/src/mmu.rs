@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tyrne_hal::{FrameProvider, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr};
+use tyrne_hal::{FrameProvider, MapperFlush, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr};
 
 /// A simple [`FrameProvider`] backed by a `Vec` of pre-allocated frames.
 ///
@@ -150,18 +150,22 @@ impl Mmu for FakeMmu {
         pa: PhysFrame,
         flags: MappingFlags,
         _frames: &mut dyn FrameProvider,
-    ) -> Result<(), MmuError> {
+    ) -> Result<MapperFlush, MmuError> {
         if as_.mappings.contains_key(&va) {
             return Err(MmuError::AlreadyMapped);
         }
         as_.mappings.insert(va, (pa, flags));
-        Ok(())
+        Ok(MapperFlush::new(va))
     }
 
-    fn unmap(&self, as_: &mut FakeAddressSpace, va: VirtAddr) -> Result<PhysFrame, MmuError> {
+    fn unmap(
+        &self,
+        as_: &mut FakeAddressSpace,
+        va: VirtAddr,
+    ) -> Result<(MapperFlush, PhysFrame), MmuError> {
         as_.mappings
             .remove(&va)
-            .map(|(pa, _)| pa)
+            .map(|(pa, _)| (MapperFlush::new(va), pa))
             .ok_or(MmuError::NotMapped)
     }
 
@@ -177,7 +181,7 @@ impl Mmu for FakeMmu {
 #[cfg(test)]
 mod tests {
     use super::{FakeMmu, VecFrameProvider};
-    use tyrne_hal::{MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr};
+    use tyrne_hal::{MapperFlush, MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr};
 
     fn frame(addr: usize) -> PhysFrame {
         PhysFrame::from_aligned(PhysAddr(addr)).expect("test addr must be page-aligned")
@@ -239,14 +243,16 @@ mod tests {
         let mut as_ = unsafe { mmu.create_address_space(frame(0x1000)) };
         let mut fp = VecFrameProvider::new(vec![frame(0x2000)]);
 
-        mmu.map(
-            &mut as_,
-            VirtAddr(0x4000),
-            frame(0x8000),
-            MappingFlags::WRITE,
-            &mut fp,
-        )
-        .expect("first map must succeed");
+        let flush = mmu
+            .map(
+                &mut as_,
+                VirtAddr(0x4000),
+                frame(0x8000),
+                MappingFlags::WRITE,
+                &mut fp,
+            )
+            .expect("first map must succeed");
+        flush.flush(&mmu);
         assert_eq!(as_.mapping_count(), 1);
 
         let (pa, flags) = as_
@@ -255,9 +261,10 @@ mod tests {
         assert_eq!(pa, frame(0x8000));
         assert!(flags.contains(MappingFlags::WRITE));
 
-        let returned = mmu
+        let (unmap_flush, returned) = mmu
             .unmap(&mut as_, VirtAddr(0x4000))
             .expect("unmap must succeed");
+        unmap_flush.flush(&mmu);
         assert_eq!(returned, frame(0x8000));
         assert_eq!(as_.mapping_count(), 0);
     }
@@ -277,7 +284,8 @@ mod tests {
             MappingFlags::WRITE,
             &mut fp,
         )
-        .expect("first map must succeed");
+        .expect("first map must succeed")
+        .flush(&mmu);
 
         let err = mmu
             .map(
@@ -312,6 +320,138 @@ mod tests {
         assert_eq!(
             mmu.tlb_address_invalidations(),
             vec![VirtAddr(0x4000), VirtAddr(0x5000)]
+        );
+        assert_eq!(mmu.tlb_all_count(), 1);
+    }
+
+    // ── MapperFlush token semantics ───────────────────────────────────────────
+
+    #[test]
+    fn mapper_flush_carries_virt_addr() {
+        let token = MapperFlush::new(VirtAddr(0x4000));
+        assert_eq!(token.virt_addr(), VirtAddr(0x4000));
+    }
+
+    #[test]
+    fn mapper_flush_flush_invokes_invalidate_tlb_address() {
+        let mmu = FakeMmu::new();
+        let token = MapperFlush::new(VirtAddr(0x12_3000));
+        token.flush(&mmu);
+        assert_eq!(
+            mmu.tlb_address_invalidations(),
+            vec![VirtAddr(0x12_3000)],
+            "flush() must invoke invalidate_tlb_address for the held VA"
+        );
+        assert_eq!(
+            mmu.tlb_all_count(),
+            0,
+            "flush() must not invoke invalidate_tlb_all"
+        );
+    }
+
+    #[test]
+    fn mapper_flush_ignore_is_documented_noop() {
+        let mmu = FakeMmu::new();
+        let token = MapperFlush::new(VirtAddr(0x4000));
+        token.ignore();
+        assert!(
+            mmu.tlb_address_invalidations().is_empty(),
+            "ignore() must not invoke invalidate_tlb_address"
+        );
+        assert_eq!(
+            mmu.tlb_all_count(),
+            0,
+            "ignore() must not invoke invalidate_tlb_all"
+        );
+    }
+
+    #[test]
+    fn map_returns_token_with_mapped_va() {
+        let mmu = FakeMmu::new();
+        // SAFETY: FakeMmu::create_address_space does not dereference its
+        // argument; `frame(0x1000)` is page-aligned by construction.
+        let mut as_ = unsafe { mmu.create_address_space(frame(0x1000)) };
+        let mut fp = VecFrameProvider::new(vec![]);
+
+        let flush = mmu
+            .map(
+                &mut as_,
+                VirtAddr(0x4_0000),
+                frame(0x8000),
+                MappingFlags::WRITE,
+                &mut fp,
+            )
+            .expect("map must succeed");
+        assert_eq!(
+            flush.virt_addr(),
+            VirtAddr(0x4_0000),
+            "map's MapperFlush must carry the VA passed to map"
+        );
+        flush.flush(&mmu);
+        assert_eq!(mmu.tlb_address_invalidations(), vec![VirtAddr(0x4_0000)]);
+    }
+
+    #[test]
+    fn unmap_returns_token_with_unmapped_va_and_frame() {
+        let mmu = FakeMmu::new();
+        // SAFETY: FakeMmu::create_address_space does not dereference its
+        // argument; `frame(0x1000)` is page-aligned by construction.
+        let mut as_ = unsafe { mmu.create_address_space(frame(0x1000)) };
+        let mut fp = VecFrameProvider::new(vec![]);
+
+        mmu.map(
+            &mut as_,
+            VirtAddr(0x5_0000),
+            frame(0x9000),
+            MappingFlags::WRITE,
+            &mut fp,
+        )
+        .expect("map must succeed")
+        .ignore();
+
+        let (flush, returned) = mmu
+            .unmap(&mut as_, VirtAddr(0x5_0000))
+            .expect("unmap must succeed");
+        assert_eq!(returned, frame(0x9000), "unmap must return the mapped PA");
+        assert_eq!(
+            flush.virt_addr(),
+            VirtAddr(0x5_0000),
+            "unmap's MapperFlush must carry the VA passed to unmap"
+        );
+        flush.flush(&mmu);
+        assert_eq!(mmu.tlb_address_invalidations(), vec![VirtAddr(0x5_0000)]);
+    }
+
+    #[test]
+    fn bulk_map_with_ignore_then_invalidate_tlb_all() {
+        let mmu = FakeMmu::new();
+        // SAFETY: page-aligned by construction.
+        let mut as_ = unsafe { mmu.create_address_space(frame(0x1000)) };
+        let mut fp = VecFrameProvider::new(vec![]);
+
+        for (i, &va) in [
+            VirtAddr(0x10_0000),
+            VirtAddr(0x11_0000),
+            VirtAddr(0x12_0000),
+        ]
+        .iter()
+        .enumerate()
+        {
+            mmu.map(
+                &mut as_,
+                va,
+                frame(0x100_0000 + i * 0x1000),
+                MappingFlags::WRITE,
+                &mut fp,
+            )
+            .expect("map must succeed")
+            .ignore();
+        }
+        mmu.invalidate_tlb_all();
+
+        assert!(
+            mmu.tlb_address_invalidations().is_empty(),
+            "bulk-with-ignore must not issue per-address invalidates"
         );
         assert_eq!(mmu.tlb_all_count(), 1);
     }
