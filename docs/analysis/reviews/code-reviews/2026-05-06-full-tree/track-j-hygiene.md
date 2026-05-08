@@ -66,7 +66,7 @@ grep -rn -i -E '(TODO|FIXME|HACK|XXX)' \
 
 | File:line | Tag | Has reference (task/ADR)? | Note |
 |---|---|---|---|
-| *(none)* | — | — | The kernel crate explicitly bans them via [`#![deny(clippy::todo)]`](../../../../../kernel/src/lib.rs#L41); the absence of any `TODO` / `FIXME` / `HACK` is therefore a positive lint-enforced property, not just author discipline. |
+| *(none)* | — | — | Two distinct disciplines combine. (1) **Macro hygiene**: the kernel crate's [`#![deny(clippy::todo)]`](../../../../../kernel/src/lib.rs#L41) catches the `todo!()` *macro* (a release-build hard-stop if the kernel ever reaches an unfinished branch). (2) **Comment hygiene**: the absence of plain `TODO` / `FIXME` / `HACK` *comments* is verified by the recursive `grep` scan above — author discipline, not lint-enforced. Both properties are positive; neither subsumes the other. |
 
 Empty TODO/FIXME slate is unusually clean for a 1.5-month-old kernel codebase and a healthy signal.
 
@@ -139,9 +139,9 @@ Recommended action: pick one English replacement (`High` is the natural carry-ov
 
 ### Observation
 
-#### J-OBS1 — TODO/FIXME-free codebase enforced by lint, not just discipline
+#### J-OBS1 — TODO-macro hygiene enforced by lint; TODO/FIXME/HACK *comment* hygiene by author discipline
 
-The kernel crate's [`#![deny(clippy::todo)]`](../../../../../kernel/src/lib.rs#L41) at HEAD `214052d` is an active deny-lint, meaning a `// TODO` comment in any kernel module would fail the `kernel-clippy` gate. Combined with the zero hits from the recursive `(TODO|FIXME|HACK|XXX)` scan, the project's hygiene posture here is structurally maintained, not author-by-author. Worth preserving when the lint policy is migrated into a workspace-level `[workspace.lints]` block (currently only `kernel/src/lib.rs` carries it; `hal`, `test-hal`, and `bsp-qemu-virt` do not — minor gap, not raised as a non-blocking finding because the lint is genuinely targeted at the kernel proper).
+The kernel crate's [`#![deny(clippy::todo)]`](../../../../../kernel/src/lib.rs#L41) at HEAD `214052d` is an active deny-lint that catches the **`todo!()` macro** in any kernel module — release-build hard-stop the moment the kernel reaches an unfinished branch. The lint does NOT flag plain `// TODO` / `// FIXME` / `// HACK` comments (per the upstream Clippy lint definition); the zero hits from the recursive `(TODO|FIXME|HACK|XXX)` `grep` scan above is therefore an author-discipline result, not a lint-enforced one. The two disciplines combine into a clean hygiene posture, but they are distinct mechanisms — worth keeping straight if the lint policy is later migrated into a workspace-level `[workspace.lints]` block (currently only `kernel/src/lib.rs` carries it; `hal`, `test-hal`, and `bsp-qemu-virt` do not — minor gap, not raised as a non-blocking finding because the lint is genuinely targeted at the kernel proper).
 
 #### J-OBS2 — `#[allow(dead_code)]` reason fields are uniformly accurate
 

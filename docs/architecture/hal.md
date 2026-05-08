@@ -270,7 +270,7 @@ The HAL is where most of Tyrne's `unsafe` lives. By construction:
 - Every privileged-state manipulation (system registers, barriers, CPU mode changes) is `unsafe`.
 - Every context-switch primitive is `unsafe` at least internally.
 
-The [unsafe-policy.md](../standards/unsafe-policy.md) applies in full: each `unsafe` block has a `SAFETY:` comment, an entry in [`docs/audits/unsafe-log.md`](../audits/) (created with the first `unsafe` block that lands), and security-review approval on the commit that introduces it.
+The [unsafe-policy.md](../standards/unsafe-policy.md) applies in full: each `unsafe` block has a `SAFETY:` comment, an entry in [`docs/audits/unsafe-log.md`](../audits/unsafe-log.md) (created with the first `unsafe` block that lands), and security-review approval on the commit that introduces it.
 
 A well-structured BSP wraps most of its unsafe code in a small number of typed abstractions (`Mmio<T>`, `SystemRegister<T>`) and implements the HAL traits in terms of those. This keeps the audit surface concentrated rather than diffuse.
 

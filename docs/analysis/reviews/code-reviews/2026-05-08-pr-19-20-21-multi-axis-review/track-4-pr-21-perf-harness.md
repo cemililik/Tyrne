@@ -134,7 +134,7 @@ places — no drift.**
 | `2026-05-08-post-pr-19-pre-adr-0027` | `perf-baseline-2026-05-08-post-pr-19-pre-adr-0027.md` | "Boot-to-end perf baseline — 2026-05-08 — post-pr-19-pre-adr-0027" | Matches PR brief; observed in baseline report |
 | `post-pr-19` (no leading date) | `perf-baseline-2026-05-08-post-pr-19.md` (today prepended) | "… — 2026-05-08 — post-pr-19" | Correct |
 | `foo-2026-05-08` (date in middle) | `perf-baseline-2026-05-08-foo-2026-05-08.md` (today prepended; embedded date untouched) | "… — 2026-05-08 — foo-2026-05-08" | Correct — glob is anchored, no over-match |
-| `2026-05-08-2026-05-09-foo` (two leading-ish dates) | `perf-baseline-2026-05-08-2026-05-09-foo.md` (only first date treated as the date head) | "… — 2026-05-08 — 2026-05-09-foo" | Correct — strips one date, not both. Also: `--report` validation at line 101 *forbids* such pathological inputs anyway in normal use |
+| `2026-05-08-2026-05-09-foo` (two leading-ish dates) | `perf-baseline-2026-05-08-2026-05-09-foo.md` (only first date treated as the date head) | "… — 2026-05-08 — 2026-05-09-foo" | Correct — strips one date, not both. Note: `--report` validation at line 101 (`[A-Za-z0-9._-]`) **does not forbid** such inputs (digits + hyphens both match); strip-one-date semantics is the documented behaviour for this shape, not a bug |
 
 Same dedup applied to filename and H1: yes (cross-checked
 `tools/perf-harness.sh:316-322` against `tools/perf-harness.sh:331-340`).

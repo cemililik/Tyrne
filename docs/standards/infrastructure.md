@@ -113,6 +113,7 @@ A run aborts non-zero if fewer than 50 % of iterations produced a valid sample �
 - **Cite the band, not a single sample.** When a PR's commentary needs a boot-to-end figure, run the harness and quote the `p10 / p50 / p90` triple plus the iteration count. A solitary `boot-to-end elapsed = X ns` from a single QEMU launch is not a load-bearing measurement; QEMU TCG's translation-cache behaviour gives ~15-30 % run-to-run variance and a single sample can fall anywhere in the band.
 - **Single-run anecdotes from before this harness landed are preserved as historical record.** The 2026-04-21 / 2026-04-28 / 2026-05-07 perf reviews quote single-run figures; those numbers are not retroactively replaced — but every *new* perf claim cites a harness band.
 - **Baseline reports under `docs/analysis/reports/perf-baseline-*.md`** are append-only artefacts. Re-baselines after a perf-relevant change land as fresh reports with a new context slug; old reports stay in place as the historical record.
+- **Regression detection is currently manual** — the reviewer eyeballs the new band against the prior baseline. A future harness mode (sketched as `--baseline=<file>` accepting a previous `perf-baseline-*.md`, asserting the new `p50` / `p90` stay within a configured tolerance and exiting non-zero on regression) is the obvious next step once enough baselines exist to calibrate a sensible threshold; not in scope for v1.
 
 ### Counter caveat
 

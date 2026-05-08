@@ -63,7 +63,7 @@ CURRENT_WATCHDOG_PID=""
 # iterations) the function is a no-op; if either holds a stale PID (process
 # already exited) `kill -KILL` returns ESRCH which `2>/dev/null || true` swallows.
 # Therefore the trap is safe to fire multiple times — EXIT will run after a
-# preceding INT/TERM has already cleaned up.
+# preceding INT/TERM has already cleaned up the in-flight processes.
 cleanup_in_flight() {
     if [[ -n "$CURRENT_CMD_PID" ]]; then
         kill -KILL "$CURRENT_CMD_PID" 2>/dev/null || true
@@ -72,7 +72,22 @@ cleanup_in_flight() {
         kill -KILL "$CURRENT_WATCHDOG_PID" 2>/dev/null || true
     fi
 }
-trap 'cleanup_in_flight' EXIT INT TERM
+# Three traps with distinct semantics:
+#   EXIT — runs cleanup on any exit path (normal completion, `exit N`, signal-
+#          handler `exit`, untrapped error). No explicit exit needed; whatever
+#          exit code the script is already on propagates.
+#   INT  — Ctrl-C from terminal. Clean up, then exit 130 (= 128 + SIGINT 2),
+#          matching the Bash convention so callers can detect "user
+#          interrupted" via `$?`. Without an explicit `exit`, the trap returns
+#          and the iteration loop continues — ignoring Ctrl-C entirely, which
+#          is precisely what we do NOT want.
+#   TERM — kill / SIGTERM from a parent process or job system. Same shape as
+#          INT but exit 143 (= 128 + SIGTERM 15).
+# EXIT fires after INT/TERM's `exit` triggers, finds the globals already
+# cleared (because cleanup_in_flight ran first), and is a no-op.
+trap 'cleanup_in_flight' EXIT
+trap 'cleanup_in_flight; exit 130' INT
+trap 'cleanup_in_flight; exit 143' TERM
 
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -542,7 +557,7 @@ if [[ -n "$REPORT_CONTEXT" ]]; then
         echo
         echo "One ns value per line, in iteration order (NOT sorted):"
         echo
-        echo '```'
+        echo '```text'  # markdownlint MD040: fenced blocks need a language tag
         for sample in "${SAMPLES[@]}"; do
             echo "$sample"
         done

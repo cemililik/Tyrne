@@ -56,7 +56,7 @@ Stddev is the population formula (`n` divisor) — descriptive.
 
 One ns value per line, in iteration order (NOT sorted):
 
-```
+```text
 3949008
 3862000
 5482000
