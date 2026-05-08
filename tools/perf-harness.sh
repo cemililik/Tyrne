@@ -40,6 +40,27 @@
 
 set -euo pipefail
 
+# ─── Cleanup on Ctrl-C / TERM / unexpected exit ───────────────────────────────
+#
+# `run_with_timeout` runs QEMU and a sibling watchdog as background jobs;
+# without an EXIT-trap, Ctrl-C between iterations leaks both processes for
+# up to TIMEOUT_S seconds (the watchdog never gets reaped because `wait` is
+# interrupted before the watchdog cleanup line runs). `cmd_pid` and
+# `watchdog_pid` are tracked in shell globals updated by `run_with_timeout`
+# at every call so the trap can address whichever pair is currently in
+# flight.
+CURRENT_CMD_PID=""
+CURRENT_WATCHDOG_PID=""
+cleanup_in_flight() {
+    if [[ -n "$CURRENT_CMD_PID" ]]; then
+        kill -KILL "$CURRENT_CMD_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$CURRENT_WATCHDOG_PID" ]]; then
+        kill -KILL "$CURRENT_WATCHDOG_PID" 2>/dev/null || true
+    fi
+}
+trap 'cleanup_in_flight' EXIT INT TERM
+
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 
 ITERATIONS=20
@@ -160,6 +181,7 @@ run_with_timeout() {
 
     "$@" &
     cmd_pid=$!
+    CURRENT_CMD_PID="$cmd_pid"  # exposed to the EXIT/INT/TERM trap above
 
     (
         sleep "$timeout_s"
@@ -168,6 +190,7 @@ run_with_timeout() {
         kill -KILL "$cmd_pid" 2>/dev/null || true
     ) >/dev/null 2>&1 &
     watchdog_pid=$!
+    CURRENT_WATCHDOG_PID="$watchdog_pid"  # exposed to the EXIT/INT/TERM trap
 
     # `set -e` would abort here on a non-zero wait; suppress.
     set +e
@@ -177,6 +200,10 @@ run_with_timeout() {
 
     kill -KILL "$watchdog_pid" 2>/dev/null || true
     wait "$watchdog_pid" 2>/dev/null || true
+
+    # Clear globals — the trap is now a no-op until the next iteration sets them.
+    CURRENT_CMD_PID=""
+    CURRENT_WATCHDOG_PID=""
     return "$status"
 }
 
@@ -459,6 +486,13 @@ if [[ -n "$REPORT_CONTEXT" ]]; then
         echo "Statistics are computed across the valid samples only. Percentile"
         echo "convention is *nearest-rank* (1-indexed; \`idx = ceil(p/100 * n)\`)."
         echo "Stddev is the population formula (\`n\` divisor) — descriptive."
+        echo
+        echo "**Note on p99 at small \`n\`.** Under nearest-rank, \`p99 = a[ceil(0.99 *"
+        echo "n)]\`; for any \`n < 100\` the index rounds up to \`n\` and \`p99 == max\`"
+        echo "by construction. The number is reported as-computed (matching p10 /"
+        echo "p50 / p90's convention) but readers should not over-read it as a"
+        echo "tail-latency signal at small \`n\`. p99 becomes statistically"
+        echo "informative when \`n >= 100\`."
         echo
         echo "## Metric — boot-to-end elapsed (nanoseconds)"
         echo

@@ -114,6 +114,21 @@ When an AI agent produces a commit on the maintainer's behalf:
 - Commits that bundle feature + unrelated refactor + typo fix.
 - Trailers that lie: `Refs: ADR-0099` when ADR-0099 does not exist.
 
+## PR-number references in committed artefacts
+
+Roadmap banners (`current.md`, `phase-b.md`, retro / closure-trio docs) sometimes name a PR number while that PR is still open. The number is assigned by GitHub at `gh pr create` time and depends on what other PRs land first across the repository — it cannot be reliably predicted. Two recurrence-prone failures:
+
+- **Off-by-one at create time**: a banner authored before `gh pr create` returns picks a number based on "next available", but a colleague (or a parallel session) opens a PR first and shifts the number by one. PR #18 (the 2026-05-07 hygiene PR) and PR #20 (the ADR-0027 PR) each had a one-commit fix-up to correct a banner that named the wrong number.
+- **Drift after rebase / re-open**: a banner names PR #N; the PR is closed and re-opened (or superseded by an integration PR) and the new PR is #M; the banner now points at the wrong issue.
+
+**Discipline.** When a committed artefact would name a PR number:
+
+1. **Defer banner authoring** until *after* `gh pr create` returns the actual number, then add a follow-up commit that fills it in.
+2. **Or refer to the branch slug** instead (e.g., "see the `t-015-endpoint-rollback-cancel-recv` branch") — branch names are author-controlled and stable across reopen / supersede.
+3. **Or name the commit SHA** for permanent-record references (matches the audit-log Amendment discipline in [`unsafe-policy.md §3`](unsafe-policy.md)).
+
+The deferral is one extra commit on the same branch — not a separate PR. Codified after [PR #18 / PR #20 each needed a one-commit PR-number fix-up](../analysis/reviews/code-reviews/2026-05-07-pr-12-to-17-multi-axis-review/track-g-process.md#min-g3) and the [2026-05-08 PR #19/#20/#21 multi-axis review](../analysis/reviews/code-reviews/2026-05-08-pr-19-20-21-multi-axis-review.md) §"Cross-PR observations" §1 promoted the recurrence pattern to a process rule.
+
 ## Tooling
 
 - `.gitmessage` template (to be added) — pre-populates the subject/body structure on `git commit` when configured via `git config commit.template`.

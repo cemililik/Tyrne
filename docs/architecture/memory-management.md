@@ -83,13 +83,15 @@ The [ADR-0033 placeholder] (the future high-half ADR) flips `EPD1=1 → 0` and p
 
 ### Page-table entry encoding (block descriptor at L2)
 
-Each L2 block descriptor has the shape:
+Each L2 block descriptor has the shape (per ARM ARM §D5.3, AArch64 stage-1 block descriptor at level 2 with 4 KiB granule):
 
 ```text
-bit  63                                     12 11 10 9 8 7 6 5 4 3 2 1 0
-    |xN| ... | OutputAddress[47:21] | ... | nG|AF|SH|AP|NS| AttrIndx |T|V|
-    |U/P|                                  |  |  |   |  |  |        | | |
+bit  63   54 53 52      48 47                21 20      12 11 10 9 8 7 6 5 4 3 2 1 0
+    |UXN|PXN| Contig | Res |OutputAddress[47:21]| Reserved |nG|AF|SH| AP|NS|AttrIdx|T|V|
+    |   |   |        |     |   (2 MiB-aligned)  |   (RES0) |  |  |   |   |  |       | | |
 ```
+
+(For L3 page descriptors and level-1 block descriptors the `OutputAddress` field shifts: pages at L3 use bits [47:12] for 4 KiB-aligned PA; blocks at L1 use bits [47:30] for 1 GiB-aligned PA. The table below describes the L2 block-descriptor case used by v1's bootstrap.)
 
 | Field | Bits | v1 value | Meaning |
 |-------|------|----------|---------|
