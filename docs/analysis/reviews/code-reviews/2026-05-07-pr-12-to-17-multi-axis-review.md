@@ -6,6 +6,8 @@
 - **Type:** Post-merge multi-axis sweep — *not* a merge gate. Findings flow into a follow-up PR; "Block" reserved for genuine regression/audit-discipline violation.
 - **Risk class:** Security-sensitive (PR #17 touches IPC + scheduler invariants; cross-references the [2026-05-07 B1 closure security review](../security-reviews/2026-05-07-B1-closure.md), whose single forward-flag this PR closes).
 
+> **2026-05-08 closure status:** all 9 hygiene items from §Follow-up backlog closed in [PR #18](https://github.com/cemililik/Tyrne/pull/18) (merge `aa7e6c5`). Forward-flagged item 11 (P10 wall-clock harness) closed by the [2026-05-08 B2-prep integration PR](https://github.com/cemililik/Tyrne/pull/22) (replaces the originally-opened #19 / #20 / #21). Items 10 / 12 / 13 remain forward-flagged on their downstream venues (ADR-0030 / ADR-0019; first userspace-destroy task; B5+ preemption ADR). See §Follow-up backlog at the bottom of this file for per-item closure annotations.
+
 ## Scope
 
 Eight axes, each scanning all six PRs. Per-axis files under [`2026-05-07-pr-12-to-17-multi-axis-review/`](2026-05-07-pr-12-to-17-multi-axis-review/):
@@ -102,24 +104,26 @@ Patterns repeating across two or more tracks — promote-to-process candidates:
 
 Severity-sorted, action-cumulative. **No Blocker**, **no v1 Major**. The Major C-1 is forward-flagged for ADR-0030 / ADR-0019 work and is *not* a B2-prep follow-up.
 
-### Hygiene PR before ADR-0027 drafting (recommended single PR — ~1 working session)
+> **Status (2026-05-08): all 9 hygiene items closed in [PR #18](https://github.com/cemililik/Tyrne/pull/18) (merge `aa7e6c5`); item 11 (P10 wall-clock harness) closed in this branch's integration PR (replaces #19/#20/#21). Items 10 / 12 / 13 remain forward-flagged on the appropriate downstream venues. See per-item closure notes below.**
 
-1. **Update `current.md` + 2026-05-07 perf re-baseline** with `.text 22,020` (was 21,792); add a +228-byte amendment block citing PR #17. *(Track D Minor)*
-2. **Add `RecvComplete` no-op test** in `kernel/src/ipc/mod.rs` (`cancel_recv_on_recv_complete_is_noop`, ~25 LOC). *(Track F Minor)*
-3. **Doc-rider on `ipc_cancel_recv`** clarifying `SendPending`/`RecvComplete` no-op semantics + cap-drain expectations for the future B2+ destroy caller. *(Track A Minor + Track C Minor consolidated)*
-4. **Tighten cancel-block `// SAFETY:` comment** in `sched/mod.rs` (cancel block says `caller_table` is "exclusive" but actual borrow is `&CapabilityTable`). *(Track A Nit)*
-5. **Back-fill SHAs in UNSAFE-2026-0014 Amendments 3 + 4** (`c30f4ee` for T-014, `7a402cb` for T-015). *(Track H Minor)*
-6. **One-line rider in `unsafe-policy.md §3`** exempting mechanical localization edits from the introducing-commit-boundary, OR append a localization-sweep Amendment to UNSAFE-2026-0016. *(Track H Minor)*
-7. **One-line rider in ADR-0026 §Revision notes** naming the codifying commit of `write-adr` §Simulation (the rule's chronology vis-à-vis ADR-0032 Propose). *(Track G Minor)*
-8. **Cross-reference master-plan AC** ("no closure-trio without recorded smoke") into `security-reviews/master-plan.md` and `performance-optimization-reviews/master-plan.md`. *(Track G Minor)*
-9. **Skill-clause reconciliation rider** between `write-adr` §10 ("separate Accept commit") and `supersede-adr` §7 ("solo-phase combined commit"), recording which rule wins for ADR-0026's situation in PR #12. *(Track G Minor)*
+### Hygiene PR before ADR-0027 drafting (closed by PR #18)
+
+1. ✅ **Update `current.md` + 2026-05-07 perf re-baseline** with `.text 22,020` (was 21,792); add a +228-byte amendment block citing PR #17. *(Track D Minor)* — closed by PR #18 commit `94a6c0f`; verified at HEAD via `grep "22,020 bytes" docs/roadmap/current.md`.
+2. ✅ **Add `RecvComplete` no-op test** in `kernel/src/ipc/mod.rs` (`cancel_recv_on_recv_complete_does_not_drop_message_or_cap`, ~30 LOC — implementation went slightly stronger than the originally-recommended ~25 LOC by also pinning the cap-bearing-state property). *(Track F Minor)* — closed by PR #18 commit `25854a1`; verified at HEAD via `host-test 159/159`.
+3. ✅ **Doc-rider on `ipc_cancel_recv`** clarifying `SendPending`/`RecvComplete` no-op semantics + cap-drain expectations for the future B2+ destroy caller. *(Track A Minor + Track C Minor consolidated)* — closed by PR #18 commit `25854a1`.
+4. ✅ **Tighten cancel-block `// SAFETY:` comment** in `sched/mod.rs` (cancel block said `caller_table` was "exclusive" but actual borrow is `&CapabilityTable`). *(Track A Nit)* — closed by PR #18 commit `25854a1`.
+5. ✅ **Back-fill SHAs in UNSAFE-2026-0014 Amendments 3 + 4** (`c30f4ee` for T-014, `7a402cb` for T-015). *(Track H Minor)* — closed by PR #18 commit `94a6c0f`.
+6. ✅ **One-line rider in `unsafe-policy.md §3`** exempting mechanical localization edits from the introducing-commit-boundary. *(Track H Minor)* — closed by PR #18 commit `94a6c0f` (chose the standard-side fix over a per-entry Amendment).
+7. ✅ **One-line rider in ADR-0026 §Revision notes** naming the codifying commit of `write-adr` §Simulation (the rule's chronology vis-à-vis ADR-0032 Propose). *(Track G Minor)* — closed by PR #18 commit `94a6c0f`.
+8. ✅ **Cross-reference master-plan AC** ("no closure-trio without recorded smoke") into `security-reviews/master-plan.md` and `performance-optimization-reviews/master-plan.md`. *(Track G Minor)* — closed by PR #18 commit `94a6c0f`.
+9. ✅ **Skill-clause reconciliation rider** between `write-adr` §10 ("separate Accept commit") and `supersede-adr` §7 ("solo-phase combined commit"), recording which rule wins for ADR-0026's situation in PR #12. *(Track G Minor)* — closed by PR #18 commit `94a6c0f` (rider lives in ADR-0026 §Revision notes alongside item 7's chronology rider).
 
 ### Forward-flagged (do *not* pull into this hygiene PR)
 
-10. **`RecvWaiting` waiter-identity gap** — open in ADR-0019 §Open and ADR-0030 (placeholder) draft; v1 unobservable but must be addressed before any multi-waiter or syscall-ABI commit. *(Track C Major, tracked, no v1 action)*
-11. **P10 wall-clock harness for QEMU smoke** — should land before ADR-0027 implementation so B2 changes are measured against a tight band rather than the wide ~4–6.5 ms envelope. *(Track D Minor + Track F Minor consolidated; cross-cutting #2)*
-12. **Cancel-on-cap-bearing-state destroy-drain ADR** — when B2+ userspace-destroy lands, the v1 no-op must be re-examined; either ADR-0032 §Revision rider or a new ADR. *(Track C Minor, Track A Minor; cross-cutting #1)*
-13. **B5+ preemption-rollback re-validation of ADR-0032's symmetric arc** — when preemption arrives, today's "structurally unreachable Deadlock branch" assumption disappears and the cancel arc starts being exercised in production. Re-read ADR-0032's "Negative consequences" rider. *(Track C, tracked)*
+10. **`RecvWaiting` waiter-identity gap** — open in ADR-0019 §Open and ADR-0030 (placeholder) draft; v1 unobservable but must be addressed before any multi-waiter or syscall-ABI commit. *(Track C Major, tracked, no v1 action)* — **status unchanged 2026-05-08**: still forward-flagged for ADR-0030 / ADR-0019.
+11. ✅ **P10 wall-clock harness for QEMU smoke** — should land before ADR-0027 implementation so B2 changes are measured against a tight band rather than the wide ~4–6.5 ms envelope. *(Track D Minor + Track F Minor consolidated; cross-cutting #2)* — closed in the [2026-05-08 integration PR](../../../analysis/reviews/code-reviews/2026-05-08-pr-19-20-21-multi-axis-review.md) (replaces #21). [`tools/perf-harness.sh`](../../../../tools/perf-harness.sh) lives; first measured baseline at HEAD pre-T-016: **p10=3.884 ms / p50=4.642 ms / p90=5.584 ms** over 20 iterations (see [`docs/analysis/reports/perf-baseline-2026-05-08-post-pr-19-pre-adr-0027.md`](../../reports/perf-baseline-2026-05-08-post-pr-19-pre-adr-0027.md)). The "should land before ADR-0027 implementation" gating condition is satisfied: P10 lands alongside ADR-0027 Accept in the same integration PR; T-016 implementation will be the first to measure against the new band.
+12. **Cancel-on-cap-bearing-state destroy-drain ADR** — when B2+ userspace-destroy lands, the v1 no-op must be re-examined; either ADR-0032 §Revision rider or a new ADR. *(Track C Minor, Track A Minor; cross-cutting #1)* — **status unchanged 2026-05-08**: still forward-flagged for the first userspace-destroy task. The PR #18 doc-rider on `ipc_cancel_recv` (item 3 above) already names the future destroy-drain caller, so the forward-flag is documented at the source level too.
+13. **B5+ preemption-rollback re-validation of ADR-0032's symmetric arc** — when preemption arrives, today's "structurally unreachable Deadlock branch" assumption disappears and the cancel arc starts being exercised in production. Re-read ADR-0032's "Negative consequences" rider. *(Track C, tracked)* — **status unchanged 2026-05-08**: still forward-flagged for B5+ preemption ADR.
 
 ## Self-critique — what this review may have missed
 

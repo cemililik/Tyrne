@@ -91,6 +91,34 @@ CI is expected to be set up early in Phase 4 (Rust toolchain + workspace skeleto
 - `qemu-system-aarch64` on the Linux runner for smoke tests.
 - Real-hardware jobs (Raspberry Pi lab, when it exists) are self-hosted runners, off the PR hot path, running on release cadence.
 
+## Performance harness
+
+`tools/perf-harness.sh` is the canonical source for boot-to-end timing claims. It wraps `tools/run-qemu.sh` in an iteration loop with a per-run watchdog, parses the kernel's `boot-to-end elapsed = X ns` emission out of each run's serial output, and prints `min / p10 / p50 / p90 / p99 / max / mean / stddev` in both ns and ms. Maintainer-launched only; not yet wired into CI (matches the QEMU smoke convention above — promotion to a CI gate is a B2-or-later follow-up alongside the smoke job).
+
+### Usage
+
+```text
+tools/perf-harness.sh                                           # 20 iterations, debug build
+tools/perf-harness.sh --iterations=K --timeout=SECONDS          # tune iteration count + per-run watchdog
+tools/perf-harness.sh --release                                 # use the release ELF (forwarded to run-qemu.sh)
+tools/perf-harness.sh --quiet                                   # suppress per-iteration progress
+tools/perf-harness.sh --report=CONTEXT                          # also emit a markdown report under
+                                                                # docs/analysis/reports/perf-baseline-YYYY-MM-DD-CONTEXT.md
+```
+
+A run aborts non-zero if fewer than 50 % of iterations produced a valid sample — that threshold is treated as environmental (kernel image missing, QEMU not in PATH, host under heavy load) rather than a measurement worth aggregating.
+
+### Reporting discipline
+
+- **Cite the band, not a single sample.** When a PR's commentary needs a boot-to-end figure, run the harness and quote the `p10 / p50 / p90` triple plus the iteration count. A solitary `boot-to-end elapsed = X ns` from a single QEMU launch is not a load-bearing measurement; QEMU TCG's translation-cache behaviour gives ~15-30 % run-to-run variance and a single sample can fall anywhere in the band.
+- **Single-run anecdotes from before this harness landed are preserved as historical record.** The 2026-04-21 / 2026-04-28 / 2026-05-07 perf reviews quote single-run figures; those numbers are not retroactively replaced — but every *new* perf claim cites a harness band.
+- **Baseline reports under `docs/analysis/reports/perf-baseline-*.md`** are append-only artefacts. Re-baselines after a perf-relevant change land as fresh reports with a new context slug; old reports stay in place as the historical record.
+- **Regression detection is currently manual** — the reviewer eyeballs the new band against the prior baseline. A future harness mode (sketched as `--baseline=<file>` accepting a previous `perf-baseline-*.md`, asserting the new `p50` / `p90` stay within a configured tolerance and exiting non-zero on regression) is the obvious next step once enough baselines exist to calibrate a sensible threshold; not in scope for v1.
+
+### Counter caveat
+
+The harness measures the kernel's `now_ns()` delta. Under QEMU TCG that counter advances based on emulated instructions, so the band reflects translation-cache variance plus host-scheduler jitter rather than wall-clock time on real hardware. The numbers are useful for *relative* regression detection across a tight window of commits on the same host; they are not predictive of boot-time on real ARM silicon. When that question becomes load-bearing the harness gains a `--hardware` mode or the measurement moves to a self-hosted Pi runner — neither is in scope for v1.
+
 ## Supply-chain security
 
 ### `cargo-vet`

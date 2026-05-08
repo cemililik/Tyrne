@@ -219,6 +219,10 @@ Each of these is a future ADR; the `Mmu` trait is expected to grow.
 - **ACL on page-table structures themselves.** Should the kernel be able to mark page-table frames read-only to prevent corruption from errant kernel writes? Requires per-frame flags beyond what the current trait exposes.
 - **Adopting the `bitflags` crate.** Once a second or third bitfield appears in the HAL (IrqController priority, mapping flags, etc.), the `bitflags` ergonomic win may outweigh the dependency cost. ADR-gated.
 
+## Revision notes
+
+- **2026-05-08 — `MapperFlush` typed flush-token return added by [ADR-0027](0027-kernel-virtual-memory-layout.md) / T-016.** ADR-0027 §Decision outcome (c) extends `Mmu::map` and `Mmu::unmap` so they return a `MapperFlush` token alongside their existing return values: `map` becomes `Result<MapperFlush, MmuError>`; `unmap` becomes `Result<(MapperFlush, PhysFrame), MmuError>` (preserving the unmapped frame this trait already returns). The token is `#[must_use]` and carries the just-mapped (or just-unmapped) `VirtAddr`; callers discharge it via `flush(mmu: &impl Mmu)` (executes `mmu.invalidate_tlb_address(va)`) or `ignore()` (documented no-op for callers who will issue a single `invalidate_tlb_all` afterwards). **The change is additive in the [ADR-0017](0017-ipc-primitive-set.md) sense:** the existing `activate` / `invalidate_tlb_address` / `invalidate_tlb_all` methods stay byte-stable; the `create_address_space` / `address_space_root` methods are unchanged; the trait's v1 surface commitments hold. The rider is recorded here because the trait is the canonical reference, and a future reader looking only at this ADR should see the extension. T-016 lands the implementation across HAL (`MapperFlush` newtype + return-type changes) and the BSP-side `QemuVirtMmu` impl. Mirrors the [ADR-0017 §Revision rider for `ipc_cancel_recv`](0017-ipc-primitive-set.md) precedent — additive recovery / discipline primitive that does not extend the user-observable surface.
+
 ## References
 
 - [ADR-0006: Workspace layout](0006-workspace-layout.md).
