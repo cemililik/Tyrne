@@ -548,6 +548,18 @@ pub extern "C" fn kernel_entry() -> ! {
     // than fetching from VBAR's reset value (silent hang). System-
     // register writes are MMU-independent, so this step is safe to
     // run pre-MMU.
+    //
+    // Limit of this defence (recorded by 2026-05-09 review-round
+    // Axis 4): the panic vector itself fetches from PA `tyrne_vectors`
+    // and writes diagnostic output to the PL011 UART. If the bad
+    // descriptor lives in `L2_high[0]` (kernel image — covers
+    // `0x4000_0000..0x4020_0000`, which contains the panic vector
+    // itself) or `L2_low[72]` (the 2 MiB block containing the PL011
+    // UART at `0x0900_0000`), the fault produces a recursive trap
+    // (silent hang) that pre-installing VBAR_EL1 cannot rescue. The
+    // defence covers ~80 % of the descriptor-error failure surface;
+    // the remaining 20 % is caught by the host-tested encoders + the
+    // §Simulation table review discipline.
 
     // SAFETY: `tyrne_vectors` is exported by src/vectors.s as the
     // 2 KiB-aligned base of the EL1 vector table. `MSR VBAR_EL1, x`

@@ -15,7 +15,8 @@ review](../reviews/code-reviews/2026-05-06-full-tree/track-d-performance.md)).
 | Per-run timeout | 5 s |
 | Build profile | debug |
 | Kernel ELF | `target/aarch64-unknown-none/debug/tyrne-bsp-qemu-virt` |
-| Git HEAD | `6494ed2` on `t-016-mmu-activation` |
+| Git HEAD | `6494ed2` on `t-016-mmu-activation` (merge-base; T-016 implementation lived in the working tree at measurement time, uncommitted) |
+| Working-tree state | T-016 diff applied to working tree but not yet committed: new files `hal/src/mmu/vmsav8.rs`, `bsp-qemu-virt/src/mmu.rs`, `bsp-qemu-virt/src/mmu_bootstrap.rs`; modified `hal/src/lib.rs` + `hal/src/mmu/mod.rs` (renamed from `hal/src/mmu.rs`) + `test-hal/src/mmu.rs` + `bsp-qemu-virt/src/main.rs` + `bsp-qemu-virt/linker.ld`. The numbers reproduce on commit `b573d83` (the `feat(bsp-qemu-virt)` commit that lands MMU activation) since it is the equivalent post-T-016 state. |
 | QEMU | `QEMU emulator version 10.2.2` |
 | Host `uname -a` | `Darwin MacBookPro.hgw.local 24.6.0 Darwin Kernel Version 24.6.0: Wed Nov  5 21:30:23 PST 2025; root:xnu-11417.140.69.705.2~1/RELEASE_X86_64 x86_64` |
 | Wall-clock (full harness run) | 100 s |

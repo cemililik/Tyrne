@@ -36,8 +36,7 @@
 use core::arch::asm;
 
 use tyrne_hal::mmu::vmsav8::{
-    flags_to_descriptor_bits, page_descriptor, table_descriptor, BLOCK_OA_MASK_L2, PAGE_OA_MASK_L3,
-    TABLE_NLA_MASK,
+    flags_to_descriptor_bits, page_descriptor, table_descriptor, PAGE_OA_MASK_L3, TABLE_NLA_MASK,
 };
 use tyrne_hal::{
     FrameProvider, MapperFlush, MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr,
@@ -388,12 +387,18 @@ unsafe fn walk_or_alloc_table(
     let existing = unsafe { core::ptr::read_volatile(slot_ptr) };
 
     if (existing & DESC_VALID_BIT) != 0 {
-        // Existing entry. It must be a table descriptor (valid + table
-        // bit set); a block descriptor at L0/L1/L2 would mean the v1
-        // bootstrap pre-mapped this region as a block, and per
-        // [T-016 §Out of scope] we do not split blocks here. Either
-        // way we report `AlreadyMapped` for the map path; on unmap we
-        // walk into it (no block-split-on-unmap either).
+        // Existing entry at L0/L1/L2. Two shapes are possible:
+        //   - Table descriptor (valid + table bit set) — walk into it.
+        //   - Block descriptor (valid + table bit clear) — the v1
+        //     bootstrap pre-mapped this region as a 2 MiB block (or
+        //     larger at L0/L1). Splitting the block into 4 KiB pages
+        //     is deferred to the first B3+ caller per T-016 §Out of
+        //     scope, so both `map` and `unmap` return `AlreadyMapped`
+        //     here. (An `unmap` against a block-mapped region is
+        //     semantically asking "remove a sub-2-MiB page" inside a
+        //     block — which requires the same block-split logic;
+        //     a future `MmuError::BlockMapped` variant may
+        //     disambiguate when block-split lands.)
         let is_table = (existing & DESC_TABLE_OR_PAGE_BIT) != 0;
         if !is_table {
             return Err(MmuError::AlreadyMapped);
@@ -413,21 +418,11 @@ unsafe fn walk_or_alloc_table(
 
     // SAFETY: caller's `FrameProvider` contract guarantees the frame
     // is zero-initialised when we receive it; we install the table
-    // descriptor pointing at it. The `BLOCK_OA_MASK_L2` /
-    // `PAGE_OA_MASK_L3` constants are imported only to satisfy the
-    // pub-use; the actual encoder is `table_descriptor`. Audit:
-    // UNSAFE-2026-0025.
+    // descriptor pointing at it via the host-tested `table_descriptor`
+    // encoder from `tyrne_hal::mmu::vmsav8`. Audit: UNSAFE-2026-0025.
     let descriptor = table_descriptor(new_table.as_usize() as u64);
     // SAFETY: in-bounds write. Audit: UNSAFE-2026-0025.
     unsafe { core::ptr::write_volatile(slot_ptr, descriptor) };
 
     Ok(new_table)
 }
-
-// Suppress "unused import" for OA masks that we re-export only for
-// downstream consumers (audit-log readers / future unit tests).
-#[allow(
-    dead_code,
-    reason = "re-exported for symmetry with HAL encoder constants"
-)]
-const _: u64 = BLOCK_OA_MASK_L2;
