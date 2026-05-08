@@ -137,7 +137,7 @@ The token does not carry a `&Mmu` reference (which would require a lifetime para
 
 ## Boot-time MMU activation sequence
 
-The `mmu_bootstrap` Rust function (landing in [`bsp-qemu-virt/src/mmu_bootstrap.rs`](../../bsp-qemu-virt/src/mmu_bootstrap.rs) per T-016 step 4) is called once by `kernel_entry`, between the timer banner and the GIC initialisation. The activation sequence (from ADR-0027 §Simulation) is:
+The `mmu_bootstrap` Rust function (landing in [`bsp-qemu-virt/src/mmu_bootstrap.rs`](../../bsp-qemu-virt/src/mmu_bootstrap.rs) per T-016 step 4) is called once by `kernel_entry` immediately after the `cpu.now_ns()` boot-snapshot and **before any MMIO-touching step** — both the timer banner (which writes the UART) and the GIC initialisation (which writes the GIC distributor / CPU interface) must follow MMU activation so their MMIO accesses go through the device-attribute mapping. The full `kernel_entry` order is `cpu.now_ns()` → `mmu_bootstrap()` → "tyrne: mmu activated" print → GIC init → timer banner → demo. The activation sequence (from ADR-0027 §Simulation) is:
 
 ```mermaid
 sequenceDiagram
@@ -155,7 +155,7 @@ sequenceDiagram
     Note over CPU: TLBI VMALLE1<br/>DSB ISH<br/>IC IALLU<br/>DSB ISH<br/>ISB<br/>SCTLR_EL1.{M,I,C} = 1<br/>ISB
     CPU-->>B: PC continues at identity-mapped VA<br/>(same address as before; now via TLB)
     B-->>K: Step 4 — return; MMU active
-    Note over K: print "tyrne: mmu activated"<br/>continue with GIC init
+    Note over K: print "tyrne: mmu activated"<br/>continue with GIC init,<br/>then timer banner, then demo
 ```
 
 The critical correctness moment is **Step 3**: the `ISB` after `MSR SCTLR_EL1` drains the pipeline so the next instruction-fetch goes through the freshly-installed translation regime. Because the kernel image is identity-mapped (PA = VA), the translation succeeds and the PC continues running at the same address it had before the flip. Any error in Step 1 (bad block descriptor; missing AF; wrong attribute index) produces a Translation Fault on that next instruction — caught by either the EL1 synchronous-exception vector (installed by [T-012](../analysis/tasks/phase-b/T-012-exception-and-irq-infrastructure.md)) or by `qemu -d int,unimp,guest_errors` reporting the fault.

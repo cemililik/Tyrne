@@ -113,9 +113,13 @@ For this decision to be fully in effect:
    the four boot frames per the §Simulation §Step 1 layout, configure
    `MAIR_EL1` / `TCR_EL1` / `TTBR0_EL1` / `TTBR1_EL1`, perform the
    TLB + I-cache invalidate + barrier sequence of §Step 3, then flip
-   `SCTLR_EL1.{M,I,C}`. Called once by `kernel_entry` between the
-   timer banner and the GIC initialisation (so `gic.init()`'s MMIO
-   writes go through the device-attribute mapping). — T-016
+   `SCTLR_EL1.{M,I,C}`. Called once by `kernel_entry` immediately
+   after the `cpu.now_ns()` boot-snapshot and before any MMIO-touching
+   step (timer banner and GIC initialisation alike, so both
+   their UART / GIC-distributor writes go through the
+   device-attribute mapping). The full kernel_entry order is:
+   `cpu.now_ns()` → `mmu_bootstrap()` → "tyrne: mmu activated" print
+   → GIC init → timer banner → demo. — T-016
 5. Add audit-log entries: UNSAFE-2026-0022 (page-table frame writes
    in `mmu_bootstrap`), UNSAFE-2026-0023 (`MAIR_EL1` / `TCR_EL1` /
    `TTBR0_EL1` / `TTBR1_EL1` / `SCTLR_EL1` writes), UNSAFE-2026-0024
