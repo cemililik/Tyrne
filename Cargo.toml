@@ -42,6 +42,11 @@ pedantic = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "deny"
 missing_safety_doc = "deny"
 alloc_instead_of_core = "deny"
+# `todo!()` macro is "I haven't finished writing this" — never appropriate
+# in checked-in code, regardless of crate. Lifted from kernel-local to
+# workspace per the 2026-05-07 B1 closure-trio §Adjustments item Track J
+# §J-OBS1 (closed in the 2026-05-09 B2 closure-trio cleanup commit).
+todo = "deny"
 
 # Release profile: optimized, thin on debug info, panic=abort comes from
 # .cargo/config.toml rustflags so it only applies to the bare-metal target.
