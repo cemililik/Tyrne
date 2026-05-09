@@ -108,8 +108,16 @@ pub unsafe fn mmu_bootstrap() {
     // SAFETY: write the L0 → L1 → L2 chain. All four frames are page-
     // aligned, exclusively owned by this routine for the duration of
     // the call (single-core, single-caller), and pre-zeroed by the
-    // BSS loop. Indices used are constant, in-range. Audit:
-    // UNSAFE-2026-0022.
+    // BSS loop. Indices used are constant, in-range.
+    // Safer alternatives rejected: VMSAv8 page-table descriptors are
+    // raw `u64` words at fixed offsets within physical frames the BSP
+    // does not own as Rust objects (they are address-keyed, not
+    // value-owned). Materialising a `&mut [u64; 512]` reference into
+    // these frames is itself the audited operation; wrapping it in a
+    // safe-looking abstraction would not remove the underlying raw-
+    // pointer write — only obscure where the audit point lives.
+    // `core::ptr::write_volatile` is the most honest expression of
+    // what the bootstrap is doing. Audit: UNSAFE-2026-0022.
     unsafe {
         // L0[0] → L1
         core::ptr::write_volatile(l0.add(0), table_descriptor(l1 as u64));
@@ -180,7 +188,16 @@ pub unsafe fn mmu_bootstrap() {
     // volatile accesses that land nearby.) Architectural global
     // visibility of those stores is enforced by Step 3's `DSB ISH`,
     // which drains all prior memory accesses inner-shareable before
-    // the MMU enable. Audit: UNSAFE-2026-0023 (extending its
+    // the MMU enable.
+    // Safer alternatives rejected: aarch64 EL1 system registers
+    // (`MAIR_EL1`, `TCR_EL1`, `TTBR0_EL1`, `TTBR1_EL1`) are accessed
+    // exclusively via `MSR` / `MRS` instructions; no `cortex-a` /
+    // `aarch64-cpu` crate is currently in the dependency graph (and
+    // adding one would be a load-bearing dependency for a single
+    // bootstrap site — see ADR-0014's dependency-policy "minimum
+    // necessary surface" rule). Inline asm via `core::arch::asm!`
+    // is the language-supplied minimal surface for the architected
+    // `MSR` instruction. Audit: UNSAFE-2026-0023 (extending its
     // activate-only scope to these bootstrap MAIR/TCR/TTBR/SCTLR
     // writes via Amendment).
     unsafe {
@@ -208,9 +225,16 @@ pub unsafe fn mmu_bootstrap() {
     // the kernel image is identity-covered by L2_high[0..64], the
     // fetch succeeds and the PC continues at the same address. Any
     // typo in Step 1 would surface here as a Translation Fault on the
-    // next fetch (per ADR-0027 §Simulation §Step 3). Audit:
-    // UNSAFE-2026-0024 (TLB / I-cache asm) + UNSAFE-2026-0023
-    // (SCTLR_EL1 write).
+    // next fetch (per ADR-0027 §Simulation §Step 3).
+    // Safer alternatives rejected: `TLBI`, `IC IALLU`, `DSB`, `ISB`,
+    // and the `MRS`/`MSR SCTLR_EL1` pair are architectural cache- and
+    // pipeline-maintenance / system-register instructions with no
+    // safe-Rust equivalent. The architected ordering across these
+    // instructions (drain → invalidate → enable → drain) cannot be
+    // expressed without inline asm because each barrier's effect is
+    // global to the CPU pipeline state, not modelled in any safe
+    // abstraction. Audit: UNSAFE-2026-0024 (TLB / I-cache asm) +
+    // UNSAFE-2026-0023 (SCTLR_EL1 write).
     unsafe {
         asm!(
             "tlbi vmalle1",
