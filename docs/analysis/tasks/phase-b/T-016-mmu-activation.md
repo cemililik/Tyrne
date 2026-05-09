@@ -6,7 +6,7 @@
 - **Created:** 2026-05-08
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** [ADR-0027](../../../decisions/0027-kernel-virtual-memory-layout.md) — must be `Accepted` before code lands.
-- **Informs:** Unblocks the B-phase MMU-touching work that depends on a live MMU surface (frame allocator / PMM, finer-grained kernel section permissions, eventually userspace mappings in B5+). Closes [ADR-0012 §Open questions "Boot-time MMU activation"](../../../decisions/0012-boot-flow-qemu-virt.md). Sets up the future high-half migration (ADR-0033 placeholder) without locking it in today.
+- **Informs:** Unblocks the B-phase MMU-touching work that depends on a live MMU surface (frame allocator / PMM — now opened as [T-017](T-017-physical-memory-manager.md) per [ADR-0035](../../../decisions/0035-physical-memory-manager.md), finer-grained kernel section permissions, eventually userspace mappings in B5+). Closes [ADR-0012 §Open questions "Boot-time MMU activation"](../../../decisions/0012-boot-flow-qemu-virt.md). Sets up the future high-half migration (ADR-0033 placeholder) without locking it in today.
 - **ADRs required:** [ADR-0027](../../../decisions/0027-kernel-virtual-memory-layout.md). Touches [ADR-0009](../../../decisions/0009-mmu-trait.md) §Revision notes (additive `MapperFlush` return type). No supersession.
 
 ---

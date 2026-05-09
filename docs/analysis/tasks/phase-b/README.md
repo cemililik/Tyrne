@@ -15,6 +15,7 @@ Tasks belonging to [Phase B — Real userspace](../../../roadmap/phases/phase-b.
 | [T-013](T-013-el-drop-to-el1.md) | EL drop to EL1 in boot (boot.s asm extension + `current_el` HAL helper) | B1 | Done (2026-04-27) |
 | [T-014](T-014-idle-dispatch-fallback.md) | Idle dispatch via separate fallback slot (closes B1 smoke regression; implements ADR-0026) | B1 | Done (2026-05-07) |
 | [T-015](T-015-endpoint-rollback-cancel-recv.md) | Endpoint state rollback on `ipc_recv_and_yield` Deadlock + `ipc_cancel_recv` primitive (implements ADR-0032) | B2 prep | Done (2026-05-07) |
-| [T-016](T-016-mmu-activation.md) | MMU activation with identity-mapped kernel + `MapperFlush` token discipline (implements ADR-0027) | B2 | Draft (2026-05-08) |
+| [T-016](T-016-mmu-activation.md) | MMU activation with identity-mapped kernel + `MapperFlush` token discipline (implements ADR-0027) | B2 | Done (2026-05-08; B2 milestone Closed 2026-05-09) |
+| [T-017](T-017-physical-memory-manager.md) | Physical Memory Manager (PMM): bitmap allocator + reservation tracking + `FrameProvider` impl (implements ADR-0035) | B3 | Draft (2026-05-09) |
 
 Tasks are added here as they become active. See [`../../../roadmap/phases/phase-b.md`](../../../roadmap/phases/phase-b.md) for the full phase plan.

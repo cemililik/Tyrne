@@ -141,19 +141,27 @@ B3 builds per-task address spaces on top of this. B5 (syscall trap) reuses the e
 
 Multiple per-task translation tables. Capability-gated map / unmap. Activation on context switch (tie-in to A5's context switch, now post-B0 with raw-pointer scheduler API).
 
+**Status: B3 prep active 2026-05-09 — ADR-0035 (PMM bitmap allocator) Proposed; T-017 (PMM bring-up) Draft.** PMM is the prerequisite layer below the address-space abstraction (B3 §3 "Map / unmap operations" and B3 §2 "`AddressSpace` kernel object" both consume frames). [ADR-0035](../../decisions/0035-physical-memory-manager.md) settles the PMM design (bitmap allocator with hint pointer, 4 KiB metadata for QEMU virt's 32 K frames, reservation-list at init); T-017 implements it. ADR-0028 (address-space data structure) + T-018 follow once PMM lands.
+
 ### Sub-breakdown
 
-1. **ADR-0028 — Address-space data structure.** How a BSP-specific `AddressSpace` is represented; who owns its page tables; how it integrates with the `Mmu` trait's associated type.
-2. **`AddressSpace` kernel object** — a new kernel-object type, like those from A3, with `AddressSpaceCap`.
-3. **Map / unmap operations** — wrappers around [`Mmu::map`](../../../hal/src/mmu.rs) / `Mmu::unmap` that validate the caller's capabilities.
-4. **TLB invalidation on unmap** — single-core only; multi-core is Phase C.
-5. **Activation on context switch** — the context-switch path invokes [`Mmu::activate`](../../../hal/src/mmu.rs) when crossing between tasks with different address spaces.
-6. **Tests** — isolation between two address spaces (a map in AS-X is not visible in AS-Y); activation round-trip.
+1. **ADR-0035 — Physical Memory Manager (bitmap allocator).** B3 prerequisite. Settles allocation discipline + reservation tracking + `FrameProvider` impl shape. Includes the §Simulation table walking init / alloc / free / exhaustion / recovery state transitions. Forward-portable to high-half kernel (ADR-0033 placeholder) without algorithm rewrite. *Proposed 2026-05-09.*
+2. **ADR-0028 — Address-space data structure.** How a BSP-specific `AddressSpace` is represented; who owns its page tables; how it integrates with the `Mmu` trait's associated type. **Sits above ADR-0035** — consumes PMM frames for the root translation table + intermediate L1/L2/L3 frames via [`Mmu::map`](../../../hal/src/mmu/mod.rs)'s `&mut dyn FrameProvider`.
+3. **`AddressSpace` kernel object** — a new kernel-object type, like those from A3, with `AddressSpaceCap`.
+4. **Map / unmap operations** — wrappers around [`Mmu::map`](../../../hal/src/mmu/mod.rs) / `Mmu::unmap` that validate the caller's capabilities.
+5. **TLB invalidation on unmap** — single-core only; multi-core is Phase C. **Already implemented** in [T-016](../../analysis/tasks/phase-b/T-016-mmu-activation.md) at the HAL surface (`MapperFlush::flush(&mmu)` discharges the per-VA invalidate); B3 §4 wires this into the capability-gated unmap path.
+6. **Activation on context switch** — the context-switch path invokes [`Mmu::activate`](../../../hal/src/mmu/mod.rs) when crossing between tasks with different address spaces.
+7. **Tests** — isolation between two address spaces (a map in AS-X is not visible in AS-Y); activation round-trip.
+
+### Tasks under B3
+
+- [T-017 — Physical Memory Manager (PMM): bitmap allocator + reservation tracking + `FrameProvider` impl](../../analysis/tasks/phase-b/T-017-physical-memory-manager.md) — Draft (2026-05-09; opens with ADR-0035 Propose per [ADR-0025 §Rule 1](../../decisions/0025-adr-governance-amendments.md))
 
 ### Acceptance criteria
 
-- ADR-0028 Accepted.
-- Two address spaces coexist; the kernel activates each when its owning task runs.
+- ADR-0035 Accepted; ADR-0028 Accepted.
+- T-017 Done: PMM live; bitmap allocator; reservation list at init; `FrameProvider` impl; smoke trace gains `tyrne: pmm initialized (...)` line.
+- T-018 Done: two address spaces coexist; the kernel activates each when its owning task runs.
 - Isolation verified on QEMU: AS-X cannot read AS-Y's data.
 
 ### Flags to resolve during B3
@@ -262,6 +270,7 @@ When B6 is Done, run a business review. Phase C becomes active after that review
 | ADR-0032 | Endpoint state rollback on `ipc_recv_and_yield` Deadlock + `ipc_cancel_recv` primitive | B2 prep (**Accepted 2026-05-07**) | drove [T-015 (Done 2026-05-07)](../../analysis/tasks/phase-b/T-015-endpoint-rollback-cancel-recv.md) via PR #17. Surfaced as Track A non-blocker in the [2026-05-06 comprehensive review](../../analysis/reviews/code-reviews/2026-05-06-full-tree-comprehensive.md) and a forward-flagged item in the [2026-05-07 B1 closure security review](../../analysis/reviews/security-reviews/2026-05-07-B1-closure.md). Closed before B-phase task lands the first userspace-driven endpoint destroy. ADR-0017 §Revision notes rider records the additive recovery primitive (user-observable surface unchanged). |
 | ADR-0033 | Kernel high-half migration | B5+ (placeholder; named-but-unallocated) | named in [ADR-0027](../../decisions/0027-kernel-virtual-memory-layout.md) §Decision outcome (Option D) as the future home of the `TTBR0_EL1`-swap discipline that arrives with userspace. No file today; opens with the first B5 task whose userspace requires per-task address-space switching. Mirrors the slot-naming pattern of ADR-0028 / 0029 / 0030 / 0031. |
 | ADR-0034 | Kernel-image section permissions (.text RX / .rodata R / .bss/.data RW) | B-late (placeholder; named-but-unallocated) | named in [ADR-0027 §Decision outcome (a)](../../decisions/0027-kernel-virtual-memory-layout.md) as the future home of finer-grained kernel-image permissions. v1 maps the entire 128 MiB RAM range as kernel R/W/X via 2 MiB blocks; T-016 §Out of scope and [`memory-management.md` §"v1 layout"](../../architecture/memory-management.md) defer the re-map. Opens with the first B-phase task whose threat model includes a kernel R/W of `.text` as a meaningful surface — likely paired with the B5+ first userspace destroy that introduces an attacker-controlled execution context. |
+| ADR-0035 | Physical Memory Manager (B3 prerequisite — bitmap allocator) | B3 (**Proposed 2026-05-09**) | new — drove the realisation that B3's "Address space abstraction" milestone has a foundational prerequisite (a real `FrameProvider` impl over physical RAM) which deserves its own ADR rather than being absorbed into ADR-0028 (address-space data structure). Drives [T-017 (Draft 2026-05-09)](../../analysis/tasks/phase-b/T-017-physical-memory-manager.md). Bitmap allocator with hint pointer; 4 KiB metadata for QEMU virt's 32 K frames; reservation-list at init; forward-portable to high-half kernel without algorithm rewrite. Includes the §Simulation table walking init / alloc / free / exhaustion / recovery state transitions per [`write-adr` skill §Simulation](../../../.claude/skills/write-adr/SKILL.md). |
 
 Numbers are tentative. Final numbers are assigned when the ADR is actually written, per [ADR-0013](../../decisions/0013-roadmap-and-planning.md).
 
