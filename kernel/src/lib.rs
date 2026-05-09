@@ -36,15 +36,17 @@
 // Kernel-specific stricter lints — these layer onto `[workspace.lints]`
 // (Cargo.toml `unsafe_op_in_unsafe_fn` / `missing_docs` /
 // `undocumented_unsafe_blocks` / `missing_safety_doc` /
-// `alloc_instead_of_core` / `pedantic`). Do NOT re-state the workspace
-// denies here; only add kernel-tighter ones the workspace cannot enforce
-// (e.g. `clippy::panic` is too aggressive for `tyrne-test-hal` which
-// builds host-test fakes that legitimately panic). Per
-// docs/standards/error-handling.md + docs/standards/unsafe-policy.md.
+// `alloc_instead_of_core` / `pedantic` / `todo`). Do NOT re-state the
+// workspace denies here; only add kernel-tighter ones the workspace
+// cannot enforce (e.g. `clippy::panic` is too aggressive for
+// `tyrne-test-hal` which builds host-test fakes that legitimately
+// panic). Per docs/standards/error-handling.md +
+// docs/standards/unsafe-policy.md. `clippy::todo` was lifted from
+// here to workspace lints in the 2026-05-09 B2 closure-trio cleanup
+// (closes B1 §Adjustments item Track J §J-OBS1).
 #![deny(clippy::panic)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
-#![deny(clippy::todo)]
 #![deny(clippy::arithmetic_side_effects)]
 #![deny(clippy::float_arithmetic)]
 
