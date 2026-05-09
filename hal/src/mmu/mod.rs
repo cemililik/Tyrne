@@ -2,7 +2,16 @@
 //!
 //! See [ADR-0009] for the v1 scope and the list of deferred capabilities.
 //!
+//! Pure descriptor-encoding arithmetic for the aarch64 `VMSAv8` page-table
+//! format lives in the [`vmsav8`] submodule — host-testable const fn
+//! helpers used by every aarch64 BSP that implements [`Mmu`]. See
+//! [ADR-0009 §Revision notes][adr-0009-rev] for the additive-extension
+//! record.
+//!
 //! [ADR-0009]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md
+//! [adr-0009-rev]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md#revision-notes
+
+pub mod vmsav8;
 
 use core::ops::{BitAnd, BitOr, BitOrAssign};
 
@@ -189,6 +198,95 @@ pub trait FrameProvider {
     fn alloc_frame(&mut self) -> Option<PhysFrame>;
 }
 
+/// Typed flush token returned by [`Mmu::map`] and [`Mmu::unmap`].
+///
+/// `MapperFlush` carries the just-mutated [`VirtAddr`] and is decorated
+/// `#[must_use]` so a caller that drops it without explicitly handling it
+/// triggers a `unused_must_use` lint failure (denied workspace-wide). Two
+/// methods discharge the token:
+///
+/// - [`MapperFlush::flush`] executes [`Mmu::invalidate_tlb_address`] for
+///   the held address. Use this at single-mutation call sites.
+/// - [`MapperFlush::ignore`] is a documented no-op; use it after a bulk
+///   sequence of mutations that will be followed by a single
+///   [`Mmu::invalidate_tlb_all`].
+///
+/// Forgetting both is a compile-time error. Mirrors the
+/// `x86_64::structures::paging::MapperFlush` Rust ecosystem precedent;
+/// see [ADR-0027 §Decision outcome (c)][adr-0027] and
+/// [`docs/architecture/memory-management.md` §"The MapperFlush flush-token
+/// discipline"][mm-doc] for the full rationale.
+///
+/// The token does not bind the minting [`Mmu`] instance — `flush` accepts
+/// any `Mmu` impl. v1 has a single `Mmu` instance so the absence of an
+/// instance-identity check is harmless; future multi-CPU / multi-address-
+/// space topologies may grow the shape (flagged in ADR-0027).
+///
+/// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+/// [mm-doc]: https://github.com/cemililik/Tyrne/blob/main/docs/architecture/memory-management.md
+#[must_use = "MapperFlush carries a TLB-invalidation responsibility — \
+              call .flush(mmu) to invalidate the per-address TLB entry, \
+              or .ignore() if a bulk invalidate_tlb_all() will follow"]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct MapperFlush(VirtAddr);
+
+impl MapperFlush {
+    /// Mint a flush token for `va`.
+    ///
+    /// **Visibility note.** This constructor is `pub` (not `pub(crate)`)
+    /// because BSP `Mmu` implementations (e.g.,
+    /// `bsp-qemu-virt::QemuVirtMmu`) live in separate crates and must
+    /// be able to mint tokens at every `Mmu::map` / `Mmu::unmap`
+    /// return. The discipline that "kernel code never constructs
+    /// tokens directly" is enforced **by convention**, not by
+    /// visibility: kernel code receives tokens from `Mmu` calls and
+    /// discharges them via [`Self::flush`] / [`Self::ignore`];
+    /// constructing a `MapperFlush` directly outside an `Mmu`
+    /// implementation is a code-smell that reviewers should reject.
+    ///
+    /// Soundness analysis: a misbehaving caller could mint extra
+    /// tokens or never mint them, but cannot cause memory unsoundness
+    /// — the token's only "power" is to call
+    /// [`Mmu::invalidate_tlb_address`], which is a TLB hint, not a
+    /// memory-safety operation. The 2026-05-09 PR #23 review-round
+    /// Finding 5 + ADR-0027 §Decision outcome (c)'s "escape hatches
+    /// are deliberate, documented, and rare" paragraph record this
+    /// trade-off.
+    pub const fn new(va: VirtAddr) -> Self {
+        Self(va)
+    }
+
+    /// Return the virtual address this token covers.
+    #[must_use]
+    pub const fn virt_addr(self) -> VirtAddr {
+        self.0
+    }
+
+    /// Discharge the token by invalidating the per-address TLB entry on
+    /// `mmu`.
+    ///
+    /// Equivalent to `mmu.invalidate_tlb_address(self.virt_addr())`.
+    pub fn flush<M: Mmu + ?Sized>(self, mmu: &M) {
+        mmu.invalidate_tlb_address(self.0);
+    }
+
+    /// Discharge the token without issuing a per-address invalidate.
+    ///
+    /// Documented no-op for callers performing a bulk sequence of
+    /// mutations followed by a single [`Mmu::invalidate_tlb_all`].
+    /// The asymmetry between [`Self::flush`] and `ignore` is the
+    /// discipline: forgetting both is a compile error; choosing `ignore`
+    /// records the intent that a sweeping invalidate covers the work.
+    #[inline(always)]
+    #[allow(
+        clippy::unused_self,
+        reason = "consuming `self` is the entire point — it discharges the \
+                  #[must_use] flush-token contract; converting to an \
+                  associated function would defeat the lint discipline"
+    )]
+    pub fn ignore(self) {}
+}
+
 /// Memory management unit operations.
 ///
 /// See [`docs/architecture/hal.md`] and [ADR-0009] for the v1 scope. In
@@ -204,7 +302,15 @@ pub trait FrameProvider {
 /// `&dyn Mmu` via casting a concrete reference, but `map` / `unmap` require
 /// the concrete type.
 ///
+/// `map` and `unmap` return a typed [`MapperFlush`] token that the caller
+/// must discharge via `.flush(mmu)` or `.ignore()` — see
+/// [ADR-0027 §Decision outcome (c)][adr-0027] for the rationale and
+/// [ADR-0009 §Revision notes][adr-0009-rev] for the additive-extension
+/// record.
+///
 /// [ADR-0009]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md
+/// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+/// [adr-0009-rev]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md#revision-notes
 pub trait Mmu: Send + Sync {
     /// Per-BSP address-space structure.
     type AddressSpace: Send;
@@ -229,6 +335,11 @@ pub trait Mmu: Send + Sync {
     /// If intermediate translation tables are needed, they are obtained
     /// from `frames`.
     ///
+    /// On success, returns a [`MapperFlush`] token that the caller must
+    /// discharge via `.flush(self)` (executes [`Self::invalidate_tlb_address`]
+    /// for `va`) or `.ignore()` (documented no-op for bulk operations
+    /// followed by a single [`Self::invalidate_tlb_all`]).
+    ///
     /// # Errors
     ///
     /// - [`MmuError::AlreadyMapped`] if `va` already has a mapping.
@@ -245,16 +356,25 @@ pub trait Mmu: Send + Sync {
         pa: PhysFrame,
         flags: MappingFlags,
         frames: &mut dyn FrameProvider,
-    ) -> Result<(), MmuError>;
+    ) -> Result<MapperFlush, MmuError>;
 
-    /// Remove the mapping at `va` and return the physical frame it covered.
+    /// Remove the mapping at `va` and return the physical frame it covered
+    /// paired with a [`MapperFlush`] token covering the just-removed
+    /// virtual address.
+    ///
+    /// The caller must discharge the token via `.flush(self)` or
+    /// `.ignore()` per the same discipline as [`Self::map`].
     ///
     /// # Errors
     ///
     /// Returns [`MmuError::NotMapped`] if `va` has no mapping, and
     /// [`MmuError::MisalignedAddress`] if `va` is not
     /// [`PAGE_SIZE`]-aligned.
-    fn unmap(&self, as_: &mut Self::AddressSpace, va: VirtAddr) -> Result<PhysFrame, MmuError>;
+    fn unmap(
+        &self,
+        as_: &mut Self::AddressSpace,
+        va: VirtAddr,
+    ) -> Result<(MapperFlush, PhysFrame), MmuError>;
 
     /// Invalidate any TLB entry covering `va` on the current core.
     fn invalidate_tlb_address(&self, va: VirtAddr);

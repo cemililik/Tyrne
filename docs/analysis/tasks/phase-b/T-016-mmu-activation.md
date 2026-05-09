@@ -2,7 +2,7 @@
 
 - **Phase:** B
 - **Milestone:** B2 — MMU activation (kernel-half mapping)
-- **Status:** Draft
+- **Status:** Done
 - **Created:** 2026-05-08
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** [ADR-0027](../../../decisions/0027-kernel-virtual-memory-layout.md) — must be `Accepted` before code lands.
@@ -13,7 +13,7 @@
 
 ## User story
 
-As the Tyrne kernel, I want the MMU active with identity-mapped kernel image and MMIO regions, MAIR-attribute-aware mappings, and a `MapperFlush` typed flush-token discipline at the [`Mmu`](../../../../hal/src/mmu.rs) trait surface, so that B3+ MMU-touching work can build on a live translation regime, MMIO accesses obey the device-attribute contract, and TLB-invalidation discipline is enforced at the type system instead of in reviewer attention.
+As the Tyrne kernel, I want the MMU active with identity-mapped kernel image and MMIO regions, MAIR-attribute-aware mappings, and a `MapperFlush` typed flush-token discipline at the [`Mmu`](../../../../hal/src/mmu/mod.rs) trait surface, so that B3+ MMU-touching work can build on a live translation regime, MMIO accesses obey the device-attribute contract, and TLB-invalidation discipline is enforced at the type system instead of in reviewer attention.
 
 ## Context
 
@@ -25,9 +25,9 @@ T-016 is the implementation of those decisions per the ADR's §Dependency chain:
 
 - [ ] **ADR-0027 Accepted** before code lands. Same-day Accept after careful re-read is permitted per [ADR-0025 §Revision notes](../../../decisions/0025-adr-governance-amendments.md); Propose commit is separate from the Accept commit per [`write-adr` skill §10](../../../../.claude/skills/write-adr/SKILL.md).
 
-### HAL trait extension (`hal/src/mmu.rs`)
+### HAL trait extension (`hal/src/mmu/mod.rs`)
 
-- [ ] **`MapperFlush` newtype added** at the same module level as the [`Mmu`](../../../../hal/src/mmu.rs) trait. Carries a `VirtAddr`. `#[must_use = "MapperFlush carries a TLB-invalidation responsibility …"]`. Two methods: `flush<M: Mmu<…>>(self, mmu: &M)` (executes `mmu.invalidate_tlb_address(self.va)`) and `ignore(self)` (documented no-op for bulk-operation callers who issue a single `invalidate_tlb_all` afterwards). Constructor is `pub(crate)` so only HAL impls (e.g., `QemuVirtMmu`) can mint tokens.
+- [ ] **`MapperFlush` newtype added** at the same module level as the [`Mmu`](../../../../hal/src/mmu/mod.rs) trait. Carries a `VirtAddr`. `#[must_use = "MapperFlush carries a TLB-invalidation responsibility …"]`. Two methods: `flush<M: Mmu<…>>(self, mmu: &M)` (executes `mmu.invalidate_tlb_address(self.va)`) and `ignore(self)` (documented no-op for bulk-operation callers who issue a single `invalidate_tlb_all` afterwards). Constructor is `pub(crate)` so only HAL impls (e.g., `QemuVirtMmu`) can mint tokens.
 - [ ] **`Mmu::map` return type** changed from `Result<(), MmuError>` to `Result<MapperFlush, MmuError>`.
 - [ ] **`Mmu::unmap` return type** changed from `Result<PhysFrame, MmuError>` to `Result<(MapperFlush, PhysFrame), MmuError>` — preserves the unmapped frame the current API returns and adds the token.
 - [ ] **`tyrne-test-hal::TestMmu`** updated to return tokens. Existing test-HAL consumers (host tests for kernel-frame logic) updated to `.flush()` / `.ignore()` per the discipline.
@@ -35,7 +35,7 @@ T-016 is the implementation of those decisions per the ADR's §Dependency chain:
 
 ### BSP MMU implementation (`bsp-qemu-virt/src/mmu.rs`)
 
-- [ ] **New file `bsp-qemu-virt/src/mmu.rs`** implementing `QemuVirtMmu` for the [`Mmu`](../../../../hal/src/mmu.rs) trait surface. Concrete `AddressSpace` type holds the root `PhysFrame`. Methods:
+- [ ] **New file `bsp-qemu-virt/src/mmu.rs`** implementing `QemuVirtMmu` for the [`Mmu`](../../../../hal/src/mmu/mod.rs) trait surface. Concrete `AddressSpace` type holds the root `PhysFrame`. Methods:
   - `unsafe fn create_address_space(&self, root: PhysFrame) -> Self::AddressSpace` — wraps the frame; no allocation.
   - `fn address_space_root(&self, as_: &Self::AddressSpace) -> PhysFrame` — accessor.
   - `fn activate(&self, as_: &Self::AddressSpace)` — `MSR TTBR0_EL1, root; ISB; TLBI VMALLE1; DSB ISH; ISB`. (v1 only writes `TTBR0_EL1`; the future high-half ADR-0033 will introduce `TTBR1_EL1` activation.)
@@ -102,7 +102,7 @@ T-016 is the implementation of those decisions per the ADR's §Dependency chain:
 
 The implementation lands in roughly six independently-bisectable commits. Each commit ends green (`cargo host-test`, `kernel-clippy`); QEMU smoke is verified at the *end* of the chain (after step 6) because intermediate commits leave the kernel image with the bootstrap routine wired but not yet enabled.
 
-1. **HAL `MapperFlush` token** — `hal/src/mmu.rs` gains the `MapperFlush` newtype; `Mmu::map` / `unmap` return-type signatures change. `tyrne-test-hal::TestMmu` updated to mint tokens. ADR-0009 §Revision notes rider lands. No BSP code yet; the kernel does not call `Mmu::map` post-bootstrap in v1, so the rest of the workspace continues to compile. Host tests added: `mapper_flush_must_use_lints_unused_token`, `mapper_flush_flush_invokes_invalidate_tlb_address`, `mapper_flush_ignore_is_documented_noop`.
+1. **HAL `MapperFlush` token** — `hal/src/mmu/mod.rs` gains the `MapperFlush` newtype; `Mmu::map` / `unmap` return-type signatures change. `tyrne-test-hal::TestMmu` updated to mint tokens. ADR-0009 §Revision notes rider lands. No BSP code yet; the kernel does not call `Mmu::map` post-bootstrap in v1, so the rest of the workspace continues to compile. Host tests added: `mapper_flush_must_use_lints_unused_token`, `mapper_flush_flush_invokes_invalidate_tlb_address`, `mapper_flush_ignore_is_documented_noop`.
 2. **`bsp-qemu-virt/src/mmu.rs` — descriptor encoding helpers** — pure functions (`block_descriptor` / `table_descriptor` / `page_descriptor` / `flags_to_descriptor_bits`). Host-testable. No `unsafe`. Tests pin every `MappingFlags` permutation against the encoding table in [`docs/architecture/memory-management.md`](../../../architecture/memory-management.md) §"Page-table entry encoding".
 3. **`bsp-qemu-virt/src/mmu.rs` — `QemuVirtMmu` impl skeleton** — `create_address_space` / `address_space_root` / `activate` / `invalidate_tlb_address` / `invalidate_tlb_all` (the methods that don't need `FrameProvider`). `map` and `unmap` are stubbed with `unimplemented!()` in this commit; the next commit fills them in. UNSAFE-2026-0023 (system-register writes in `activate`) and UNSAFE-2026-0024 (TLB asm) audit entries land here.
 4. **`bsp-qemu-virt/src/mmu.rs` — `Mmu::map` / `unmap` body** — page-table walk + descriptor encoding + frame allocation from `FrameProvider` + `MapperFlush::new(va)` return. UNSAFE-2026-0025 (per-call descriptor writes) audit entry lands here. Tests: `map_into_empty_address_space_routes_through_frame_provider`, `map_returns_already_mapped_when_va_already_present`, `unmap_returns_frame_and_flush_token`.
@@ -146,7 +146,7 @@ The implementation lands in roughly six independently-bisectable commits. Each c
 - [`docs/architecture/memory-management.md`](../../../architecture/memory-management.md) — companion architecture chapter; lands in the same PR as ADR-0027.
 - [`docs/audits/unsafe-log.md`](../../../audits/unsafe-log.md) — UNSAFE-2026-0022 through 0025 land with this task.
 - [`docs/standards/unsafe-policy.md`](../../../standards/unsafe-policy.md) — audit-discipline contract every new entry follows.
-- [`hal/src/mmu.rs`](../../../../hal/src/mmu.rs) — the trait this task extends.
+- [`hal/src/mmu/mod.rs`](../../../../hal/src/mmu/mod.rs) — the trait this task extends.
 - [`bsp-qemu-virt/src/mmu.rs`](../../../../bsp-qemu-virt/src/mmu.rs) — new file; lands with this task.
 - [`bsp-qemu-virt/src/mmu_bootstrap.rs`](../../../../bsp-qemu-virt/src/mmu_bootstrap.rs) — new file; lands with this task.
 - [`bsp-qemu-virt/linker.ld`](../../../../bsp-qemu-virt/linker.ld) — extended with `.boot_pt` reservation in this task.
@@ -158,3 +158,6 @@ The implementation lands in roughly six independently-bisectable commits. Each c
 | Date | Reviewer | Note |
 |------|----------|------|
 | 2026-05-08 | @cemililik (+ Claude Opus 4.7 agent) | Opened with status `Draft`, paired with ADR-0027 (`Proposed`) per [ADR-0025 §Rule 1](../../../decisions/0025-adr-governance-amendments.md) (forward-reference contract) — ADR-0027's *Dependency chain* requires a real T-NNN file for the implementation step; this task is that file. Will move to `In Progress` only after ADR-0027 is `Accepted`. |
+| 2026-05-08 | @cemililik (+ Claude Opus 4.7 agent) | ADR-0027 `Accepted` (PR #22 merged). Status `Draft → In Progress`; implementation begins on branch `t-016-mmu-activation`. |
+| 2026-05-08 | @cemililik (+ Claude Opus 4.7 agent) | Status `In Progress → Done`. All six bisectable commits land green; QEMU smoke produces full demo trace through `tyrne: all tasks complete` with the new `tyrne: mmu activated` line; `-d int,unimp,guest_errors` empty across the boot-to-end window (≈ 7–8 ms; pre-T-016 baseline 4–6.5 ms; the addition is QEMU TCG translation-cache overhead, not real-hardware cost). UNSAFE-2026-0022 / 0023 / 0024 / 0025 introduced + ADR-0027 Amendments to UNSAFE-2026-0023/0024 for the bootstrap-site scope extension. Host tests: 42 (HAL — +12 vmsav8 encoder tests + 6 MapperFlush tests) + 100 (kernel — unchanged) + 40 (test-hal — +6 MapperFlush tests) = 182 (was 159). |
+| 2026-05-09 | @cemililik (+ Claude Opus 4.7 agent) | **PR #23 review-round on the post-Done artefact:** verdict *Approve with nits*. Two deviations from the user-story recorded for future readers: (1) **`MapperFlush::new` is `pub`, not `pub(crate)`** as the Acceptance criteria specified — `pub(crate)` was infeasible because `bsp-qemu-virt` lives in a different crate from `tyrne_hal` and must mint tokens at every `Mmu::map`/`unmap` return. The discipline is preserved at the lint level (`unused_must_use = "deny"` workspace-wide) rather than at the construction level; soundness analysis: a misbehaving caller could mint extra tokens or never mint them but cannot cause memory unsoundness because the token's only "power" is to call `mmu.invalidate_tlb_address(va)` (a TLB hint, not a memory-safety operation). The doc-comment on `MapperFlush::new` records the convention "kernel code never constructs tokens directly". (2) **`VBAR_EL1` install runs *before* the `cpu.now_ns()` snapshot**, not after as the user-story implied — kept early as a defensive vector for any `mmu_bootstrap` fault per ADR-0027 §Simulation §Step 3; the `kernel_entry` comment now notes the ~80 % failure-surface coverage (faults from corrupted `L2_high[0]` or `L2_low[72]` descriptors still produce silent recursive traps because the panic vector itself fetches from those regions). Other corrections to the prior 2026-05-08 row: `-d int,unimp,guest_errors` is **not** empty — it shows pre-existing PL011 "data written to disabled UART" warnings (358 on `main`, 379 on T-016; the +21 delta is exactly one byte per character of the new UART line). Perf-harness band is **5.397 / 6.153 / 6.652 ms** (p10 / p50 / p90; n=20, debug, QEMU TCG), not `≈ 7–8 ms` — both numbers in the prior row reflect single-run anecdote rather than the harness-measured band. PL011 init noise is recorded as a follow-on B-phase task suggestion. |

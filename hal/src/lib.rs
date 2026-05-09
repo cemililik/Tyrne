@@ -36,7 +36,7 @@ mod console;
 mod context_switch;
 pub mod cpu;
 mod irq_controller;
-mod mmu;
+pub mod mmu;
 pub mod timer;
 
 pub use console::{Console, FmtWriter};
@@ -44,7 +44,8 @@ pub use context_switch::ContextSwitch;
 pub use cpu::{CoreId, Cpu, IrqGuard, IrqState};
 pub use irq_controller::{IrqController, IrqNumber};
 pub use mmu::{
-    FrameProvider, MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr, PAGE_SIZE,
+    FrameProvider, MapperFlush, MappingFlags, Mmu, MmuError, PhysAddr, PhysFrame, VirtAddr,
+    PAGE_SIZE,
 };
 pub use timer::Timer;
 
