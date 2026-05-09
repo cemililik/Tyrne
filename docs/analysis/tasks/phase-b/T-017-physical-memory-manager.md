@@ -31,16 +31,18 @@ T-017 is the implementation of those decisions per the ADR's §Dependency chain:
 - [ ] **`Pmm` struct** in `kernel/src/mm/pmm.rs`. Fields:
   - `bitmap: [u8; PMM_BITMAP_BYTES]` — one bit per frame; bit `i` set ⇔ frame `i` is Allocated or Reserved (the bitmap collapses Reserved + Allocated into a single bit per ADR-0035 §Negative consequences).
   - `extent: PhysFrameRange` — the BSP-provided physical-RAM range this PMM manages.
+  - `reserved_ranges: [Option<PhysFrameRange>; MAX_RESERVED_RANGES]` — fixed-size cached copy of the BSP-provided reservation list, so `free_frame` can defensively reject Reserved-frame-PA inputs (per [ADR-0035 §Simulation §Step 2 Critical row](../../../decisions/0035-physical-memory-manager.md#simulation)). v1 has ≤ 4 reserved ranges (kernel image + `.boot_pt` + boot stack); `MAX_RESERVED_RANGES = 8` provides headroom for future BSPs without unbounded metadata growth.
   - `hint: usize` — the next frame index to scan from on alloc.
   - `free_count: usize` — cached count of frames in `Free` state.
   - `reserved_count: usize` — cached count of frames in `Reserved` state (set at init; never changes post-init).
   - `allocated_count: usize` — cached count of frames in `Allocated` state.
 - [ ] **`PMM_BITMAP_BYTES` const** parameterised over the BSP's frame count. For QEMU virt's 128 MiB / 4 KiB = 32 768 frames, `PMM_BITMAP_BYTES = 4096`. The kernel crate exposes the type as `Pmm<const N: usize>` with `N = PMM_BITMAP_BYTES`; the BSP provides the const at instantiation time.
-- [ ] **`Pmm::new(extent, reserved)`** constructor — `pub fn new(extent: PhysFrameRange, reserved: &[PhysFrameRange]) -> Self`. Walks the reserved-range list and sets every covered frame's bit to 1 (Reserved). Sets `hint` to the first frame *not* in any reserved range. Computes `free_count` / `reserved_count` / `allocated_count` initial values. **Safe Rust**; no `unsafe`. Per [ADR-0035 §Simulation §Step 0](../../../decisions/0035-physical-memory-manager.md#simulation).
+- [ ] **`MAX_RESERVED_RANGES` const** = 8 (kernel-crate constant; same across BSPs). Caps the size of the `reserved_ranges` array. v1 uses 3 entries; the headroom accommodates future BSP layouts without unbounded metadata. `Pmm::new` returns `Err(PmmError::TooManyReservedRanges)` if the caller passes more.
+- [ ] **`Pmm::new(extent, reserved)`** constructor — `pub fn new(extent: PhysFrameRange, reserved: &[PhysFrameRange]) -> Result<Self, PmmError>`. Validates `reserved.len() <= MAX_RESERVED_RANGES` (returns `Err(TooManyReservedRanges)` otherwise); walks the reserved-range list and sets every covered frame's bit to 1 (Reserved); copies the list into the `reserved_ranges` array for `free_frame`'s defensive validation; sets `hint` to the first frame *not* in any reserved range; computes `free_count` / `reserved_count` / `allocated_count` initial values. **Safe Rust**; no `unsafe`. Per [ADR-0035 §Simulation §Step 0](../../../decisions/0035-physical-memory-manager.md#simulation).
 - [ ] **`Pmm::alloc_frame() -> Option<PhysFrame>`** — scans bitmap from `hint` forward for a 0 bit; on hit, sets the bit, zero-fills the 4 KiB frame contents via `core::ptr::write_bytes`, advances `hint`, decrements `free_count`, increments `allocated_count`, returns `Some(PhysFrame)`. On miss (forward + wrap scan both empty), returns `None`. Per [ADR-0035 §Simulation §Steps 1, 3](../../../decisions/0035-physical-memory-manager.md#simulation).
-- [ ] **`Pmm::free_frame(frame: PhysFrame) -> Result<(), PmmError>`** — computes frame index from PA; validates the frame was Allocated (not Reserved, not already Free) by reading the bit and consulting `reserved_count` cache; clears the bit; rewinds `hint = min(hint, i)`; increments `free_count`; decrements `allocated_count`. Returns `Err(PmmError::DoubleFree)` on attempted free of a Reserved or never-Allocated frame. Per [ADR-0035 §Simulation §Step 2](../../../decisions/0035-physical-memory-manager.md#simulation).
+- [ ] **`Pmm::free_frame(frame: PhysFrame) -> Result<(), PmmError>`** — computes frame index from PA; defensively rejects via O(R) scan of `reserved_ranges` if the frame falls in any reserved range (returns `Err(PmmError::DoubleFree)` without mutation); reads the bit — if `0` (already Free), returns `Err(PmmError::DoubleFree)`; if `1` (Allocated), clears the bit; rewinds `hint = min(hint, i)`; increments `free_count`; decrements `allocated_count`. Per [ADR-0035 §Simulation §Step 2](../../../decisions/0035-physical-memory-manager.md#simulation). The Reserved-vs-Allocated bitmap-collapse plus the explicit reserved-range check is the v1 trade-off: 128 bytes of cached range metadata buys defensive `free_frame(reserved_pa)` rejection without doubling the bitmap.
 - [ ] **`Pmm::stats() -> PmmStats`** — returns `{ total_frames, reserved_frames, allocated_frames, free_frames }`. Diagnostic surface for host tests + future runtime self-checks. Per [ADR-0035 §Simulation §Step 4](../../../decisions/0035-physical-memory-manager.md#simulation).
-- [ ] **`PmmError` enum** — `#[non_exhaustive]`. Variants: `OutOfRange` (frame PA outside the managed `extent`), `MisalignedAddress` (frame PA not 4 KiB-aligned — should be unreachable through `PhysFrame` construction but defensively named), `DoubleFree` (frame was already Free or is Reserved).
+- [ ] **`PmmError` enum** — `#[non_exhaustive]`. Variants: `OutOfRange` (frame PA outside the managed `extent`), `MisalignedAddress` (frame PA not 4 KiB-aligned — should be unreachable through `PhysFrame` construction but defensively named), `DoubleFree` (frame was already Free or its PA falls in a reserved range), `TooManyReservedRanges` (caller passed more than `MAX_RESERVED_RANGES` to `Pmm::new`).
 - [ ] **`PhysFrameRange` struct** — `(start: PhysAddr, end: PhysAddr)` half-open range. Lives in `kernel/src/mm/mod.rs` (or `tyrne_hal::mmu` if a future ADR generalises it). v1: kernel-internal type.
 - [ ] **`impl FrameProvider for Pmm`** — `fn alloc_frame(&mut self) -> Option<PhysFrame>` delegates to `Pmm::alloc_frame`. The trait surface is unchanged from [ADR-0009](../../../decisions/0009-mmu-trait.md).
 
@@ -51,7 +53,7 @@ T-017 is the implementation of those decisions per the ADR's §Dependency chain:
   - `[__stack_top - 64K, __stack_top)` covers the boot stack.
   - The kernel image's `.text` / `.rodata` / `.data` lives in PA `0x4008_0000..__bss_start`; this is also reserved.
   - Total: 1 to 3 `PhysFrameRange` entries depending on linker-script layout (ranges may merge if contiguous).
-- [ ] **`PMM` `StaticCell`** — published before any `Mmu::map`-using code path. Initialised in `kernel_entry` immediately after `mmu_bootstrap()` returns and before GIC init (so PMM-allocated frames are usable for any post-bootstrap mapping). Order:
+- [ ] **`PMM` `StaticCell`** — published before any `Mmu::map`-using code path. Initialised in `kernel_entry` immediately after `mmu_bootstrap()` returns and before GIC init (so PMM-allocated frames are usable for any post-bootstrap mapping). The `Pmm::new` call uses `.expect("reserved-range list exceeds MAX_RESERVED_RANGES")` because the BSP-side reservation list is statically known at compile time; the `expect` is structurally unreachable in v1 (3 ranges < 8 limit) but documents the kernel-discipline contract. Order:
   ```
   cpu.now_ns() snapshot
   → mmu_bootstrap()
@@ -74,6 +76,8 @@ T-017 is the implementation of those decisions per the ADR's §Dependency chain:
 - [ ] **`alloc_frame_recovers_after_free_under_exhaustion`** — interleave: allocate-all → free-one → alloc-one returns the just-freed frame (the rewind discipline prevents the wrap from re-handing-out a different frame).
 - [ ] **`stats_parity_with_bitmap_bit_count`** — for a fully-instantiated PMM under randomised alloc / free patterns, `Pmm::stats().free_frames` matches the bitmap's 0-bit count. Cross-check against the cached counter.
 - [ ] **`alloc_frame_implements_frame_provider`** — exercise the trait method via `&mut dyn FrameProvider` to confirm the impl integration.
+- [ ] **`new_rejects_too_many_reserved_ranges`** — `Pmm::new(extent, &[range × (MAX_RESERVED_RANGES + 1)])` returns `Err(TooManyReservedRanges)`; the bitmap is not partially mutated.
+- [ ] **`free_frame_rejects_pa_in_reserved_range`** — pin the [§Simulation §Step 2 Critical row](../../../decisions/0035-physical-memory-manager.md#simulation) defence: `free_frame(PhysFrame whose PA falls in a reserved range)` returns `Err(PmmError::DoubleFree)` and leaves the bitmap unchanged (the Reserved bit stays set).
 
 ### Audit-log update (`docs/audits/unsafe-log.md`)
 
@@ -91,7 +95,7 @@ T-017 is the implementation of those decisions per the ADR's §Dependency chain:
 - [ ] `cargo fmt --all -- --check` clean.
 - [ ] `cargo host-clippy` clean (`-D warnings`).
 - [ ] `cargo kernel-clippy` clean (`-D warnings`).
-- [ ] `cargo host-test` passes — expected ~193 (current 185 + ~8 new PMM tests).
+- [ ] `cargo host-test` passes — expected ~195 (current 185 + 10 new PMM tests: 8 core scenarios + 2 reserved-range guards added per ADR-0035 §Simulation §Step 2 Critical row).
 - [ ] `cargo +nightly miri test` passes on the same set.
 - [ ] `cargo kernel-build` clean.
 - [ ] **QEMU smoke unchanged plus one new line.** The post-T-017 trace adds `tyrne: pmm initialized (N frames available; M reserved)` immediately after `tyrne: mmu activated` and before `tyrne: timer ready (...)`. Concrete numbers for QEMU virt's 128 MiB layout: total = 32 768 frames; reserved = ~30 frames (kernel image ~6 frames + `.boot_pt` 4 frames + `.bss` non-`.boot_pt` ~4 frames + 64 KiB stack = 16 frames + alignment); free = ~32 738. Exact numbers depend on linker-script layout — pin the expected values in a host test that mocks the BSP's reserved list.
