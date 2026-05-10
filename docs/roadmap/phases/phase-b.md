@@ -141,7 +141,7 @@ B3 builds per-task address spaces on top of this. B5 (syscall trap) reuses the e
 
 Multiple per-task translation tables. Capability-gated map / unmap. Activation on context switch (tie-in to A5's context switch, now post-B0 with raw-pointer scheduler API).
 
-**Status: B3 prep active 2026-05-09 — ADR-0035 (PMM bitmap allocator) `Accepted`; T-017 (PMM bring-up) `Draft` (moves to `In Progress` post-PR-merge).** PMM is the prerequisite layer below the address-space abstraction (B3 §3 "Map / unmap operations" and B3 §2 "`AddressSpace` kernel object" both consume frames). [ADR-0035](../../decisions/0035-physical-memory-manager.md) settles the PMM design (bitmap allocator with hint pointer, 4 KiB metadata for QEMU virt's 32 K frames, reservation-list at init); T-017 implements it. ADR-0028 (address-space data structure) + T-018 follow once PMM lands.
+**Status: B3 §1 closed 2026-05-10 — T-017 (PMM bring-up) `Done` per ADR-0035. Next: ADR-0028 + T-018 (AddressSpace data structure + kernel object + capability-gated `Mmu::map` wrappers).** PMM is the prerequisite layer below the address-space abstraction (B3 §3 "Map / unmap operations" and B3 §2 "`AddressSpace` kernel object" both consume frames). [ADR-0035](../../decisions/0035-physical-memory-manager.md) settles the PMM design (bitmap allocator with hint pointer, 4 KiB metadata for QEMU virt's 32 K frames, reservation-list at init); T-017 implements it. ADR-0028 (address-space data structure) + T-018 follow once PMM lands.
 
 ### Sub-breakdown
 
@@ -155,7 +155,7 @@ Multiple per-task translation tables. Capability-gated map / unmap. Activation o
 
 ### Tasks under B3
 
-- [T-017 — Physical Memory Manager (PMM): bitmap allocator + reservation tracking + `FrameProvider` impl](../../analysis/tasks/phase-b/T-017-physical-memory-manager.md) — Draft (2026-05-09; opens with ADR-0035 Propose per [ADR-0025 §Rule 1](../../decisions/0025-adr-governance-amendments.md))
+- [T-017 — Physical Memory Manager (PMM): bitmap allocator + reservation tracking + `FrameProvider` impl](../../analysis/tasks/phase-b/T-017-physical-memory-manager.md) — Done (2026-05-10; 4 bisectable commits on branch `t-017-physical-memory-manager`; UNSAFE-2026-0026 introduced as new entry)
 
 ### Acceptance criteria
 

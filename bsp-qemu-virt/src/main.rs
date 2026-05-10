@@ -32,8 +32,10 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
 use tyrne_hal::{Console, Cpu, FmtWriter, Timer};
+use tyrne_hal::{PhysAddr, PAGE_SIZE};
 use tyrne_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
 use tyrne_kernel::ipc::{IpcQueues, Message, RecvOutcome};
+use tyrne_kernel::mm::{PhysFrameRange, Pmm};
 use tyrne_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
 use tyrne_kernel::obj::task::{create_task, Task, TaskArena};
 use tyrne_kernel::sched::{
@@ -50,6 +52,53 @@ mod mmu_bootstrap;
 use console::Pl011Uart;
 use cpu::QemuVirtCpu;
 use gic::{QemuVirtGic, QEMU_VIRT_GIC_CPU_INTERFACE_BASE, QEMU_VIRT_GIC_DISTRIBUTOR_BASE};
+
+// ─── Physical memory layout (T-017 / ADR-0035) ────────────────────────────────
+//
+// Per [ADR-0012] the QEMU virt machine ships 128 MiB of RAM at PA
+// `0x4000_0000..0x4800_0000`; the kernel image is loaded by `-kernel` at
+// `0x4008_0000` (i.e. the first 512 KiB of RAM is QEMU-firmware-reserved).
+// The PMM manages this entire 128 MiB extent via a bitmap of one bit per
+// `PAGE_SIZE` (4 KiB) frame: 32 768 frames → 4 096 bitmap bytes.
+//
+// At init time the BSP reserves: (1) the QEMU firmware region
+// `[0x4000_0000, 0x4008_0000)`; (2) the kernel-image + `.bss` (which
+// contains `.boot_pt` per T-016 / ADR-0027 §Decision outcome (a)) +
+// boot-stack region `[0x4008_0000, __stack_top_aligned)`. Two
+// reservations cover everything that must never be handed to a
+// runtime caller.
+//
+// [ADR-0012]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0012-boot-flow-qemu-virt.md
+
+/// PMM-managed extent base PA. Matches `linker.ld` `MEMORY` `RAM`
+/// `ORIGIN` for QEMU virt.
+const PMM_EXTENT_START: usize = 0x4000_0000;
+/// PMM-managed extent end PA (exclusive). 128 MiB above the start.
+const PMM_EXTENT_END: usize = 0x4800_0000;
+/// Kernel image load address (per linker.ld `.text.boot` placement and
+/// QEMU virt's `-kernel` discipline).
+const KERNEL_IMAGE_START: usize = 0x4008_0000;
+
+/// PMM bitmap byte count: 32 768 frames / 8 bits = 4 096 bytes.
+/// Sized at compile time per the BSP's static RAM extent; if the
+/// extent changes (future Pi 4 BSP), this const grows accordingly
+/// per the per-BSP-const-generic discipline of ADR-0035.
+///
+/// **Ceiling division** ensures the last byte is allocated even
+/// when the managed frame count is not a multiple of 8 (per PR #26
+/// round-1 review). For QEMU virt's 32 768 frames the result is
+/// 4 096 bytes either way (32 768 is a multiple of 8); the ceiling
+/// form is forward-defensive for future BSPs with non-multiple-of-8
+/// frame counts.
+const PMM_BITMAP_BYTES: usize = ((PMM_EXTENT_END - PMM_EXTENT_START) / PAGE_SIZE).div_ceil(8);
+/// Reserved-range cache capacity. v1 has 2 ranges (firmware + kernel
+/// image+bss+stack); 8 provides headroom for future BSP layouts
+/// (DTB / ATF / ACPI / initrd / framebuffer reservations) without
+/// forcing a recompile when more arrive.
+const PMM_RESERVED_RANGES: usize = 8;
+
+/// Concrete BSP-side PMM type alias.
+type BspPmm = Pmm<PMM_BITMAP_BYTES, PMM_RESERVED_RANGES>;
 
 /// MMIO base of the QEMU `virt` machine's PL011 UART.
 ///
@@ -198,6 +247,17 @@ static CONSOLE: StaticCell<Pl011Uart> = StaticCell::new();
 /// instrumentation surface when the first hypothesis-driven performance
 /// review is conducted.
 static BOOT_NS: StaticCell<u64> = StaticCell::new();
+
+/// Physical Memory Manager (T-017 / ADR-0035). Constructed once in
+/// `kernel_entry` immediately after `mmu_bootstrap()` returns, before
+/// GIC init, so any post-bootstrap `Mmu::map` caller can pull frames
+/// for intermediate page tables. v1's cooperative IPC demo never
+/// calls `alloc_frame`, but the PMM is published so future B3+ work
+/// (`AddressSpace` bring-up — ADR-0028 placeholder + T-018) can layer
+/// on top without further BSP-side change. The static is sized
+/// 4 KiB bitmap + 8 reserved-range slots + cached counters ≈ 4.1 KiB
+/// of `.bss` per ADR-0035 §Consequences §Bounded metadata.
+static PMM: StaticCell<BspPmm> = StaticCell::new();
 
 // ─── IPC infrastructure ───────────────────────────────────────────────────────
 
@@ -493,6 +553,14 @@ extern "C" {
     /// base of the EL1 vector table. Written to `VBAR_EL1` once at
     /// boot.
     static tyrne_vectors: u8;
+
+    /// Symbol exported by `linker.ld`; resolves to one byte past the
+    /// top of the boot stack (i.e. the highest PA the kernel image
+    /// occupies in `.bss` + 64 KiB stack). Used by T-017's PMM-init
+    /// to compute the kernel-reserved range. Per `linker.ld` the
+    /// symbol is 16-byte-aligned (post-`ALIGN(16); . = . + 64K`),
+    /// so the BSP rounds it up to 4 KiB at PMM-init time.
+    static __stack_top: u8;
 }
 
 /// First Rust entry after the assembly stub.
@@ -612,6 +680,62 @@ pub extern "C" fn kernel_entry() -> ! {
         mmu_bootstrap::mmu_bootstrap();
     }
     console.write_bytes(b"tyrne: mmu activated\n");
+
+    // ── PMM init — T-017 / ADR-0035 ──────────────────────────────────────────
+    //
+    // Activates the Physical Memory Manager over the 128 MiB QEMU virt
+    // RAM extent with two reserved ranges (firmware region + kernel
+    // image / .bss / .boot_pt / boot stack). After this call returns
+    // any future Mmu::map call (none in v1's cooperative demo; first
+    // caller is B3+ AddressSpace bring-up via T-018) can pull frames
+    // by passing `&mut PMM` as `&mut dyn FrameProvider`. The PMM stays
+    // unused at runtime in v1; init is verified end-to-end by the
+    // smoke trace's `tyrne: pmm initialized (...)` line and the
+    // host-test coverage of `Pmm::new` + `Pmm::stats`.
+    //
+    // `__stack_top` is 16-byte-aligned per linker.ld (post-`ALIGN(16); . = . + 64K`).
+    // Round up to 4 KiB so `PhysFrameRange::is_aligned` passes; the
+    // few-byte slack at the tail falls into the kernel-reserved range
+    // (already off-limits for the PMM) so the round-up cannot collide
+    // with a valid runtime allocation.
+    //
+    // SAFETY: `addr_of!(__stack_top)` reads the linker symbol's
+    // address without dereferencing the (zero-byte) extern static;
+    // single-core boot-time, no concurrent observer. Same discipline
+    // as the pre-existing `addr_of!(tyrne_vectors)` site.
+    // Audit: UNSAFE-2026-0001 (StaticCell pattern for `PMM`).
+    let stack_top_addr = core::ptr::addr_of!(__stack_top) as usize;
+    let stack_top_aligned_up = stack_top_addr.saturating_add(PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+    let pmm_extent = PhysFrameRange::new(PhysAddr(PMM_EXTENT_START), PhysAddr(PMM_EXTENT_END));
+    let pmm_reserved = [
+        // (1) QEMU firmware-reserved region: PMM extent start
+        // through the kernel image's load address.
+        PhysFrameRange::new(PhysAddr(PMM_EXTENT_START), PhysAddr(KERNEL_IMAGE_START)),
+        // (2) Kernel image (.text + .rodata + .data) + .bss
+        // (which contains .boot_pt) + boot-stack region.
+        PhysFrameRange::new(PhysAddr(KERNEL_IMAGE_START), PhysAddr(stack_top_aligned_up)),
+    ];
+    let pmm_value = BspPmm::new(pmm_extent, &pmm_reserved)
+        .expect("Pmm::new — BSP-static config; reservation list is well-formed by construction");
+
+    // SAFETY: single-core; no concurrent writer exists before `start()`.
+    // Audit: UNSAFE-2026-0001.
+    unsafe {
+        (*PMM.0.get()).write(pmm_value);
+    }
+
+    // Banner with stats. SAFETY: PMM was just written above; the
+    // `&` reference does not outlive the `writeln!` borrow.
+    // Audit: UNSAFE-2026-0001.
+    let pmm_stats = unsafe { (*PMM.0.get()).assume_init_ref().stats() };
+    {
+        let mut w = FmtWriter(console);
+        let _ = writeln!(
+            w,
+            "tyrne: pmm initialized ({} frames available; {} reserved)",
+            pmm_stats.free_frames, pmm_stats.reserved_frames
+        );
+    }
 
     // ── GIC init + DAIF unmask — T-012 (now post-MMU) ─────────────────────────
     //
