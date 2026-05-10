@@ -1,6 +1,6 @@
 # 0028 — Address-space data structure (B3 — kernel-object + capability-gated `Mmu::map` wrappers + activation-on-context-switch)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-05-11
 - **Deciders:** @cemililik
 
@@ -11,19 +11,19 @@ Phase B3's milestone goal is **address-space abstraction**: per-task translation
 The kernel needs a typed object that:
 
 1. **Owns the root translation-table frame** that [`Mmu::create_address_space`](../../hal/src/mmu/mod.rs) constructed from a [`PhysFrame`](../../hal/src/mmu/mod.rs).
-2. **Lives in an arena alongside [`TaskHandle`](../../kernel/src/task/mod.rs) / [`EndpointHandle`](../../kernel/src/ipc/mod.rs) / [`NotificationHandle`](../../kernel/src/ipc/mod.rs)** so capabilities (per [ADR-0014](0014-capability-representation.md)) can grant access to it the same way they grant access to other kernel objects.
+2. **Lives in an arena alongside [`TaskHandle`](../../kernel/src/obj/task.rs) / [`EndpointHandle`](../../kernel/src/obj/endpoint.rs) / [`NotificationHandle`](../../kernel/src/obj/notification.rs)** so capabilities (per [ADR-0014](0014-capability-representation.md)) can grant access to it the same way they grant access to other kernel objects.
 3. **Plugs into the [`Mmu`](../../hal/src/mmu/mod.rs) trait's [`AddressSpace`](../../hal/src/mmu/mod.rs) associated type** — the BSP defines what an `AddressSpace` *contains* (page-table topology), the kernel defines what an `AddressSpace` *is* as a kernel-object (capability-bearing arena slot with a generation tag).
 4. **Activates on context switch** — when [`yield_now`](../../kernel/src/sched/mod.rs) dispatches a task whose `AddressSpace` differs from the outgoing task's, the kernel invokes [`Mmu::activate`](../../hal/src/mmu/mod.rs) before the architectural context-switch instruction sequence.
 
-The HAL trait surface already crosses the BSP boundary at four call sites that take a `Mmu::AddressSpace` value: [`Mmu::create_address_space`](../../hal/src/mmu/mod.rs#L325), [`Mmu::address_space_root`](../../hal/src/mmu/mod.rs#L328), [`Mmu::activate`](../../hal/src/mmu/mod.rs#L331), and [`Mmu::map`](../../hal/src/mmu/mod.rs#L354) / [`Mmu::unmap`](../../hal/src/mmu/mod.rs#L375) (post-T-016 with [`MapperFlush`](../../hal/src/mmu/mod.rs)). The associated type is constrained only by `Send` — its inline shape is BSP-defined. The kernel must decide **how to wrap this associated type into a typed kernel-object** that participates in the capability system without leaking BSP details into capability-handling code.
+The HAL trait surface already crosses the BSP boundary at five `Mmu::AddressSpace`-related call sites: [`Mmu::create_address_space`](../../hal/src/mmu/mod.rs#L325) (constructs an `Mmu::AddressSpace` value from a `PhysFrame`), [`Mmu::address_space_root`](../../hal/src/mmu/mod.rs#L328) (takes `&Mmu::AddressSpace`, returns the root frame), [`Mmu::activate`](../../hal/src/mmu/mod.rs#L331) (takes `&Mmu::AddressSpace`), and [`Mmu::map`](../../hal/src/mmu/mod.rs#L354) / [`Mmu::unmap`](../../hal/src/mmu/mod.rs#L375) (take `&mut Mmu::AddressSpace`; post-T-016 with [`MapperFlush`](../../hal/src/mmu/mod.rs)). The associated type is constrained only by `Send` — its inline shape is BSP-defined. The kernel must decide **how to wrap this associated type into a typed kernel-object** that participates in the capability system without leaking BSP details into capability-handling code.
 
-The decision is load-bearing for the rest of B3 (items 3–7 in [phase-b.md §B3](../roadmap/phases/phase-b.md#milestone-b3--address-space-abstraction)) and for the future ADR-0033 (high-half kernel migration; placeholder per [ADR-0027 §Decision outcome](0027-kernel-virtual-memory-layout.md#decision-outcome)). The shape chosen here is the **first kernel object the BSP and the kernel share by type** (Endpoint / Notification / Task have no BSP-side analogue), so the precedent extends to future BSP-tied kernel objects (e.g., a hypothetical InterruptCap that wraps a GIC-specific [`IrqController`](../../hal/src/irq.rs) per-line state).
+The decision is load-bearing for the rest of B3 (items 3–7 in [phase-b.md §B3](../roadmap/phases/phase-b.md#milestone-b3--address-space-abstraction)) and for the future ADR-0033 (high-half kernel migration; placeholder per [ADR-0027 §Decision outcome](0027-kernel-virtual-memory-layout.md#decision-outcome)). The shape chosen here is the **first kernel object the BSP and the kernel share by type** (Endpoint / Notification / Task have no BSP-side analogue), so the precedent extends to future BSP-tied kernel objects (e.g., a hypothetical InterruptCap that wraps a GIC-specific [`IrqController`](../../hal/src/irq_controller.rs) per-line state).
 
 The constraints v1 imposes:
 
 1. **Capability-gated.** Every `Mmu::map` / `Mmu::unmap` / `Mmu::activate` call site must resolve a capability first. No ambient authority — the kernel never holds an `&mut AddressSpace` without a capability invocation that minted it. (Per CLAUDE.md non-negotiable #1.)
 2. **Generic over `M: Mmu`.** The kernel is already generic over `M: Mmu` at the scheduler surface (per [ADR-0019](0019-scheduler-shape.md) / [ADR-0020](0020-cpu-trait-v2-context-switch.md)); extending that to the address-space object is consistent rather than novel.
-3. **No allocation during context switch.** Activation on the hottest path must be a pointer dereference + `Mmu::activate` call — no arena resize, no capability resolution beyond the just-dequeued [`TaskHandle`](../../kernel/src/task/mod.rs)'s pre-cached `AddressSpaceHandle`.
+3. **No allocation during context switch.** Activation on the hottest path must be a pointer dereference + `Mmu::activate` call — no arena resize, no capability resolution beyond the just-dequeued [`TaskHandle`](../../kernel/src/obj/task.rs)'s pre-cached `AddressSpaceHandle`.
 4. **One bootstrap AddressSpace.** [T-016](../analysis/tasks/phase-b/T-016-mmu-activation.md) activated the MMU using bootstrap page-table frames in [`.boot_pt`](../../bsp-qemu-virt/linker.ld) (per [ADR-0027](0027-kernel-virtual-memory-layout.md) §Decision outcome). The kernel must **wrap the already-active topology** into the first arena slot at boot — no `Mmu::create_address_space` call for slot 0 (the topology is live; we name what already exists).
 5. **Forward-compat to ADR-0033 (high-half).** When B5+ surfaces per-task `TTBR0_EL1` swap, the kernel needs to track per-AS metadata (ASID, possibly per-AS table-walk bookkeeping). The chosen shape must accommodate additive fields without a HAL trait surface change.
 6. **Bounded `unsafe` surface.** The arena + capability layer is safe Rust; the only `unsafe` is the existing [`Mmu`](../../hal/src/mmu/mod.rs) trait-surface contract (UNSAFE-2026-0023 / 0024 / 0025) which this ADR consumes without extending. The `Mmu::create_address_space` zero-fill of the root frame is already covered by [UNSAFE-2026-0026](../audits/unsafe-log.md) (T-018 is its first runtime exerciser per [T-017 §Review history](../analysis/tasks/phase-b/T-017-physical-memory-manager.md#review-history)).
@@ -113,7 +113,7 @@ For this decision to be fully in effect:
    `AddressSpaceArena<QemuVirtMmu>` `StaticCell` publication, in the
    order: `pmm initialized → address-space-arena ready → ...` per
    the §Simulation row-0 banner expectation. — T-018
-7. `kernel/src/task/mod.rs::Task` struct — gains an
+7. `kernel/src/obj/task.rs::Task` struct — gains an
    `address_space_handle: AddressSpaceHandle` field. Existing tasks
    on the bootstrap AS get `AddressSpaceHandle { index: 0, generation: 0 }`
    at construction. — T-018
