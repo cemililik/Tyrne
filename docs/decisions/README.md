@@ -56,6 +56,7 @@ Each ADR contains:
 | 0025 | [ADR governance amendments: forward-reference contract, rider hygiene](0025-adr-governance-amendments.md) | Accepted | 2026-04-27 |
 | 0026 | [Idle dispatch via separate fallback slot](0026-idle-dispatch-fallback.md) | Accepted | 2026-05-06 |
 | 0027 | [Kernel virtual memory layout (B2 — identity-mapped MMU activation)](0027-kernel-virtual-memory-layout.md) | Accepted | 2026-05-08 |
+| 0028 | [Address-space data structure (B3 — kernel-object + capability-gated `Mmu::map` wrappers + activation-on-context-switch)](0028-address-space-data-structure.md) | Proposed | 2026-05-11 |
 | 0032 | [Endpoint state rollback on `ipc_recv_and_yield` Deadlock + `ipc_cancel_recv` primitive](0032-endpoint-rollback-and-cancel-recv.md) | Accepted | 2026-05-07 |
 | 0035 | [Physical Memory Manager (B3 prerequisite — bitmap allocator)](0035-physical-memory-manager.md) | Accepted | 2026-05-09 |
 

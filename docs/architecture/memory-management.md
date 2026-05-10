@@ -191,7 +191,7 @@ The PMM is **live as of [T-017](../analysis/tasks/phase-b/T-017-physical-memory-
 
 Plus `Pmm::extent()` / `Pmm::stats()` accessors and `impl FrameProvider for Pmm<N, R>`.
 
-**`FrameProvider` integration.** `Mmu::map`'s `&mut dyn FrameProvider` parameter is satisfied by the PMM at runtime; v1 has no `Mmu::map` caller post-bootstrap (the cooperative IPC demo rides the bootstrap mappings), so the integration is verified through host tests + the smoke trace's clean completion. The first runtime exercise lands with B3+ AddressSpace work (T-018; ADR-0028 placeholder).
+**`FrameProvider` integration.** `Mmu::map`'s `&mut dyn FrameProvider` parameter is satisfied by the PMM at runtime; v1 has no `Mmu::map` caller post-bootstrap (the cooperative IPC demo rides the bootstrap mappings), so the integration is verified through host tests + the smoke trace's clean completion. The first runtime exercise lands with B3+ AddressSpace work ([T-018](../analysis/tasks/phase-b/T-018-address-space-kernel-object.md) implementing [ADR-0028](../decisions/0028-address-space-data-structure.md); T-018's `cap_create_address_space` is the first `PMM.alloc_frame()` caller whose returned frame is consumed by code that depends on its zero-filled state — that's UNSAFE-2026-0026's first runtime exerciser).
 
 **Smoke trace.** Boot output gains exactly one new line immediately after `tyrne: mmu activated`:
 
