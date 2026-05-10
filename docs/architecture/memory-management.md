@@ -176,9 +176,36 @@ The critical correctness moment is **Step 3**: the `ISB` after `MSR SCTLR_EL1` d
 
 [ADR-0009](../decisions/0009-mmu-trait.md) §Decision drivers requires "frame allocation is the kernel's responsibility" — the `Mmu::map` API receives a `&mut dyn FrameProvider`; the trait never calls a global allocator. v1 satisfies this for the bootstrap moment via static reservation (`.boot_pt`); for post-MMU mappings the kernel needs an actual physical-frame allocator (PMM).
 
-The PMM is **not** part of T-016. T-016 lands the bootstrap (statically-reserved frames) and the trait surface (which accepts a `FrameProvider`); the follow-on B-phase task is [T-017](../analysis/tasks/phase-b/T-017-physical-memory-manager.md) (B3 prerequisite, opened with [ADR-0035](../decisions/0035-physical-memory-manager.md) on 2026-05-09). Until T-017 lands, the kernel does not need to call `Mmu::map` post-bootstrap (the bootstrap covers everything v1 needs), so the `FrameProvider` parameter is exercised only by host tests with a `VecFrameProvider` implementation.
+The PMM is **live as of [T-017](../analysis/tasks/phase-b/T-017-physical-memory-manager.md) (Done 2026-05-10)** per [ADR-0035](../decisions/0035-physical-memory-manager.md). The implementation lives in [`kernel/src/mm/pmm.rs`](../../kernel/src/mm/pmm.rs) and is wired into `bsp-qemu-virt`'s `kernel_entry` boot sequence between `mmu_bootstrap()` and the GIC init step.
 
-When the PMM lands (T-017), the discipline stays unchanged: the PMM's `alloc_frame` is the `FrameProvider` impl; the MMU subsystem stays decoupled from where the frames come from. The PMM design is settled by [ADR-0035](../decisions/0035-physical-memory-manager.md): bitmap allocator with hint pointer, 4 KiB metadata for QEMU virt's 32 K frames, reservation list at init covering the kernel image + `.boot_pt` + boot stack. Forward-portable to the future high-half kernel ([ADR-0033 placeholder](../decisions/0027-kernel-virtual-memory-layout.md)) without algorithm rewrite.
+**Design.** Bitmap allocator with hint pointer; one bit per [`PAGE_SIZE`](../../hal/src/mmu/mod.rs) frame; reservation list at init. The `Pmm<const N: usize, const R: usize>` type is parameterised over bitmap byte count (`N`) and reserved-range cache capacity (`R`); each BSP picks the consts at instantiation time:
+
+- `bsp-qemu-virt`: `N = 4096` (32 768 frames × 1 bit / 8 = 4 KiB) and `R = 8`. The 128 MiB QEMU virt RAM extent (`0x4000_0000..0x4800_0000`) is managed; two reservations land at init — `[0x4000_0000, 0x4008_0000)` (QEMU firmware-reserved) and `[0x4008_0000, __stack_top_aligned)` (kernel image + `.bss` containing `.boot_pt` + boot stack).
+- Future BSPs (Pi 4 with 4 GiB RAM): `N` grows linearly with extent size; `R` may grow to cover DTB / ATF / ACPI / initrd / framebuffer reservations.
+
+**API.** Three public methods:
+
+- `Pmm::new(extent, reserved) -> Result<Self, PmmError>` — one-shot at boot; three fail-fast validations (extent page-aligned, reserved-ranges-within-extent, reserved-list-fits-in-`R`) before any bitmap mutation. Pure safe Rust.
+- `Pmm::alloc_frame() -> Option<PhysFrame>` — forward-from-hint linear bitmap scan + zero-fill via `core::ptr::write_bytes` ([UNSAFE-2026-0026](../audits/unsafe-log.md); the only `unsafe` in the PMM body). Returns `None` on bitmap-full; the caller propagates as `MmuError::OutOfFrames` per the [`FrameProvider`](../../hal/src/mmu/mod.rs) contract.
+- `Pmm::free_frame(frame) -> Result<(), PmmError>` — three-stage validation (extent-bounds, defensive reserved-range scan, bitmap-bit check) then bit-clear + hint rewind. Returns `OutOfRange` or `DoubleFree` on misuse; each error path leaves bitmap state byte-stable.
+
+Plus `Pmm::extent()` / `Pmm::stats()` accessors and `impl FrameProvider for Pmm<N, R>`.
+
+**`FrameProvider` integration.** `Mmu::map`'s `&mut dyn FrameProvider` parameter is satisfied by the PMM at runtime; v1 has no `Mmu::map` caller post-bootstrap (the cooperative IPC demo rides the bootstrap mappings), so the integration is verified through host tests + the smoke trace's clean completion. The first runtime exercise lands with B3+ AddressSpace work (T-018; ADR-0028 placeholder).
+
+**Smoke trace.** Boot output gains exactly one new line immediately after `tyrne: mmu activated`:
+
+```text
+tyrne: pmm initialized (32604 frames available; 164 reserved)
+```
+
+The 32 604 + 164 = 32 768 frames sanity-check is built into the test fixture (`stats_parity_with_bitmap_bit_count`); the 164 reserved frames decompose as 128 (firmware region, 512 KiB) + 36 (kernel image + `.bss` + `.boot_pt` 16 KiB + 64 KiB stack + alignment slack).
+
+**Audit-log surface.** [UNSAFE-2026-0026](../audits/unsafe-log.md) covers the single `core::ptr::write_bytes` site in `Pmm::alloc_frame`. The entry's safety argument names five invariants: page-alignment of the target (propagates from `Pmm::new`'s validation (i)), exclusive ownership at write time (the just-set bitmap bit), identity mapping post-MMU (per ADR-0027 §Decision outcome (a)), bitmap-math overflow-freedom (all `saturating_*` / `wrapping_div`), and `write_bytes` ordering (single-core; no peer reader). A new entry rather than an Amendment of UNSAFE-2026-0001 per [ADR-0035 §Dependency chain step 5][adr-0035-dep5]'s adjudication-deferred caveat — PL011 MMIO base blessing and PMM RAM zero-fill share surface shape but differ on what they touch and what proves ownership.
+
+Forward-portable to the future high-half kernel ([ADR-0033 placeholder](../decisions/0027-kernel-virtual-memory-layout.md)) without algorithm rewrite: the bitmap is stored in `.bss`, addressed by frame index; the high-half migration relocates the bitmap base address but does not require a `PA → VA` translation discipline at the algorithm level. The frame-zeroing step itself remains identity-mapping-dependent in v1 and will need a `phys_to_virt` helper post-high-half — a one-line helper that the high-half ADR introduces alongside the migration step.
+
+[adr-0035-dep5]: ../decisions/0035-physical-memory-manager.md#dependency-chain
 
 ## TLB-invalidation scope
 
