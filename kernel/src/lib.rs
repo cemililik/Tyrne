@@ -52,5 +52,6 @@
 
 pub mod cap;
 pub mod ipc;
+pub mod mm;
 pub mod obj;
 pub mod sched;

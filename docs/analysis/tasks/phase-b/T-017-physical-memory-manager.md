@@ -2,7 +2,7 @@
 
 - **Phase:** B
 - **Milestone:** B3 — Address space abstraction (PMM is the prerequisite layer; opens with this task, AddressSpace data structure follows in ADR-0028 + T-018)
-- **Status:** Draft
+- **Status:** In Progress
 - **Created:** 2026-05-09
 - **Author:** @cemililik (+ Claude Opus 4.7 agent)
 - **Dependencies:** [ADR-0035](../../../decisions/0035-physical-memory-manager.md) — must be `Accepted` before code lands.
