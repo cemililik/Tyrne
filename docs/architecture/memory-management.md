@@ -176,9 +176,9 @@ The critical correctness moment is **Step 3**: the `ISB` after `MSR SCTLR_EL1` d
 
 [ADR-0009](../decisions/0009-mmu-trait.md) §Decision drivers requires "frame allocation is the kernel's responsibility" — the `Mmu::map` API receives a `&mut dyn FrameProvider`; the trait never calls a global allocator. v1 satisfies this for the bootstrap moment via static reservation (`.boot_pt`); for post-MMU mappings the kernel needs an actual physical-frame allocator (PMM).
 
-The PMM is **not** part of T-016. T-016 lands the bootstrap (statically-reserved frames) and the trait surface (which accepts a `FrameProvider`); a follow-on B-phase task introduces a real PMM. Until then the kernel does not need to call `Mmu::map` post-bootstrap (the bootstrap covers everything v1 needs), so the `FrameProvider` parameter is exercised only by host tests with a `TestFrameProvider` implementation.
+The PMM is **not** part of T-016. T-016 lands the bootstrap (statically-reserved frames) and the trait surface (which accepts a `FrameProvider`); the follow-on B-phase task is [T-017](../analysis/tasks/phase-b/T-017-physical-memory-manager.md) (B3 prerequisite, opened with [ADR-0035](../decisions/0035-physical-memory-manager.md) on 2026-05-09). Until T-017 lands, the kernel does not need to call `Mmu::map` post-bootstrap (the bootstrap covers everything v1 needs), so the `FrameProvider` parameter is exercised only by host tests with a `VecFrameProvider` implementation.
 
-When the PMM lands, the discipline stays unchanged: the PMM's `alloc_frame` is the `FrameProvider` impl; the MMU subsystem stays decoupled from where the frames come from.
+When the PMM lands (T-017), the discipline stays unchanged: the PMM's `alloc_frame` is the `FrameProvider` impl; the MMU subsystem stays decoupled from where the frames come from. The PMM design is settled by [ADR-0035](../decisions/0035-physical-memory-manager.md): bitmap allocator with hint pointer, 4 KiB metadata for QEMU virt's 32 K frames, reservation list at init covering the kernel image + `.boot_pt` + boot stack. Forward-portable to the future high-half kernel ([ADR-0033 placeholder](../decisions/0027-kernel-virtual-memory-layout.md)) without algorithm rewrite.
 
 ## TLB-invalidation scope
 
