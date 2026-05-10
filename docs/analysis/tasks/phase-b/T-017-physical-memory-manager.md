@@ -132,13 +132,13 @@ The implementation lands in roughly four independently-bisectable commits. Each 
 - [ ] QEMU smoke trace matches the post-T-016 baseline plus one new `tyrne: pmm initialized (N frames available; M reserved)` line.
 - [ ] `cargo +nightly miri test` is green.
 - [ ] No new `unsafe` block lacks a `// SAFETY:` comment naming the audit reference (UNSAFE-2026-0026) with inline rejected-alternatives per [unsafe-policy.md §1](../../../standards/unsafe-policy.md).
-- [ ] [`docs/audits/unsafe-log.md`](../../../audits/unsafe-log.md) UNSAFE-2026-0001 gains the PMM frame-zeroing Amendment.
-- [ ] No new audit-log entry — confirms ADR-0035's "zero new audit entries" promise byte-for-byte.
+- [ ] [`docs/audits/unsafe-log.md`](../../../audits/unsafe-log.md) UNSAFE-2026-0026 introduced as a new entry (NOT a UNSAFE-2026-0001 Amendment) per [ADR-0035 §Dependency chain](../../../decisions/0035-physical-memory-manager.md#dependency-chain) step 5's adjudication-deferred verdict.
+- [ ] One new audit-log entry (UNSAFE-2026-0026) — ADR-0035 §Positive consequence "Zero new unsafe audits" flips to "one new entry" per the same adjudication caveat.
 - [ ] [`docs/architecture/memory-management.md`](../../../architecture/memory-management.md) §"Frame allocation discipline" reflects the post-T-017 reality (PMM live; bitmap; reservation list).
 - [ ] [`docs/architecture/boot.md`](../../../architecture/boot.md) Stage-3 sequence diagram extended with the new PMM-init step.
 - [ ] [`docs/roadmap/current.md`](../../../roadmap/current.md) updated: T-017 → Done; ADR-0035 → Accepted; B3 status → "PMM live; AddressSpace abstraction (T-018) next".
 - [ ] [`docs/roadmap/phases/phase-b.md`](../../../roadmap/phases/phase-b.md) ADR ledger row for ADR-0035 → Accepted; T-017 marked Done; B3 §1 (PMM) flipped to ✅.
-- [ ] Commit messages follow [`commit-style.md`](../../../standards/commit-style.md) with `Refs: ADR-0035, T-017` trailers and `Audit: UNSAFE-2026-0001` trailer where applicable.
+- [ ] Commit messages follow [`commit-style.md`](../../../standards/commit-style.md) with `Refs: ADR-0035, T-017` trailers and `Audit: UNSAFE-2026-0026` trailer for commits that introduce or extend the PMM frame-zeroing site.
 - [ ] PR description includes the §Simulation table from [ADR-0035 §Decision outcome / §Simulation](../../../decisions/0035-physical-memory-manager.md#simulation) and the post-PMM smoke trace verbatim.
 
 ## Design notes
@@ -158,7 +158,7 @@ The implementation lands in roughly four independently-bisectable commits. Each 
 - [ADR-0012 — Boot flow and memory layout for `bsp-qemu-virt`](../../../decisions/0012-boot-flow-qemu-virt.md) — the static image layout this task's reservation list inherits.
 - [ADR-0027 — Kernel virtual memory layout (B2 — identity-mapped MMU activation)](../../../decisions/0027-kernel-virtual-memory-layout.md) — the MMU layer above this PMM; identity mapping is what makes the frame-zeroing safe (PA is identity-mapped to a kernel-readable VA).
 - [`docs/architecture/memory-management.md`](../../../architecture/memory-management.md) — companion architecture chapter; §"Frame allocation discipline" is the section this task resolves an open question for.
-- [`docs/audits/unsafe-log.md`](../../../audits/unsafe-log.md) — UNSAFE-2026-0001 gains the PMM frame-zeroing Amendment.
+- [`docs/audits/unsafe-log.md`](../../../audits/unsafe-log.md) — UNSAFE-2026-0026 covers the PMM frame-zeroing site (new entry per the §Dependency-chain-step-5 adjudication).
 - [`docs/standards/unsafe-policy.md`](../../../standards/unsafe-policy.md) — audit-discipline contract.
 - [`hal/src/mmu/mod.rs`](../../../../hal/src/mmu/mod.rs) — `FrameProvider` trait the PMM implements.
 - [T-016 — Activate MMU with identity-mapped kernel + `MapperFlush` token discipline](T-016-mmu-activation.md) — task-shape precedent for bundling multiple-concern work in one task.

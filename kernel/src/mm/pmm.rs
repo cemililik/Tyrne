@@ -133,22 +133,33 @@ pub struct Pmm<const N: usize, const R: usize> {
 impl<const N: usize, const R: usize> Pmm<N, R> {
     /// Construct a PMM over `extent` with the given reserved ranges.
     ///
-    /// Performs three **fail-fast** validations before any bitmap
+    /// Performs five **fail-fast** validations before any bitmap
     /// mutation, so partial-mutation states are structurally
     /// impossible:
     ///
     /// 1. `extent.start` and `extent.end` are [`PAGE_SIZE`]-aligned —
     ///    returns [`PmmError::MisalignedAddress`] otherwise.
-    /// 2. Every reserved range fits inside `[extent.start, extent.end)`
-    ///    — returns [`PmmError::OutOfRange`] otherwise.
+    /// 2. The bitmap covers the extent (`extent.frame_count() <= N * 8`)
+    ///    — returns [`PmmError::OutOfRange`] otherwise (BSP picked too
+    ///    small an `N` for its extent).
     /// 3. `reserved.len() <= R` — returns [`PmmError::TooManyReservedRanges`]
     ///    otherwise.
+    /// 4. Each reserved range is page-aligned, fits inside
+    ///    `[extent.start, extent.end)`, and is non-inverted
+    ///    (`range.end >= range.start`) — returns
+    ///    [`PmmError::MisalignedAddress`] or [`PmmError::OutOfRange`]
+    ///    otherwise.
+    /// 5. No two reserved ranges overlap (pairwise half-open check) —
+    ///    returns [`PmmError::OverlappingReservedRanges`] otherwise.
+    ///    Touching boundaries (`[a, b)` + `[b, c)`) are accepted.
     ///
-    /// Per [ADR-0035 §Simulation §Step 0][adr-0035].
+    /// Per [ADR-0035 §Simulation §Step 0][adr-0035]. The overlap check
+    /// (step 5) was added in PR #26 round-1 review to prevent bitmap-
+    /// vs-counter drift when two ranges share frames.
     ///
     /// # Errors
     ///
-    /// Per the three validations above. On any error the constructor
+    /// Per the five validations above. On any error the constructor
     /// returns without partial state; the caller's `[u8; N]` storage
     /// is unobservably affected (a fresh `[0u8; N]` is constructed
     /// inside the function).
@@ -401,17 +412,26 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
             core::ptr::write_bytes(pa_ptr, 0u8, PAGE_SIZE);
         }
 
-        // Return the page-aligned PhysFrame. The from_aligned
-        // contract is satisfied by construction; if it ever returns
-        // None here we'd hit a kernel-discipline panic (which
-        // `clippy::unwrap_used` would forbid in production code, so
-        // we route through a defined error using
-        // `Option::and_then`-style fallback). In practice the alloc
-        // path is provably-correct; a None return would indicate
-        // either a Pmm::new validation bug or a memory-corruption
-        // event and warrants the "kernel programming error" panic
-        // class — but we keep the path total via `?` chaining on
-        // an Option to avoid an unwrap.
+        // Return the page-aligned PhysFrame. `from_aligned` is
+        // provably-Some here: validation (i) on Pmm::new guarantees
+        // `extent.start` is page-aligned, and `idx * PAGE_SIZE`
+        // preserves that alignment. Returning the Option directly
+        // (rather than unwrap / expect) keeps `clippy::unwrap_used`
+        // happy without adding a panic path.
+        //
+        // **Unreachable-leak caveat.** Mutation of the bitmap, hint,
+        // and counters above happens BEFORE this call. If a future
+        // change ever weakens the alignment proof (e.g., a BSP whose
+        // extent.start is not page-aligned and the validation is
+        // bypassed), `from_aligned` could return `None` and this
+        // function would return `None` to the caller while the
+        // bitmap state has already moved — the frame would be
+        // permanently leaked (bit set, no PhysFrame handed out). The
+        // path is structurally unreachable in v1; a future
+        // maintainer who alters Pmm::new's validation set must
+        // either preserve the alignment proof or move the mutation
+        // block below this call to keep the leak structurally
+        // impossible.
         PhysFrame::from_aligned(PhysAddr(pa_usize))
     }
 
@@ -534,11 +554,11 @@ mod tests {
     use crate::mm::PhysFrameRange;
     use tyrne_hal::{PhysAddr, PhysFrame};
 
-    /// Test fixture: 16 frames (16 KiB), starting at `0x4000_0000`.
-    /// Bitmap holds 16 bits → 2 bytes; we use `N = 2` to test the
-    /// smallest non-trivial PMM. `R = 4` for the reserved-range
-    /// capacity.
-    fn extent_16f() -> PhysFrameRange {
+    /// Test fixture: 4 frames (16 KiB), starting at `0x4000_0000`.
+    /// Bitmap holds 4 bits → 1 byte (rounded up); `N = 2` is the
+    /// smallest non-trivial PMM with headroom for the sanity check.
+    /// `R = 4` for the reserved-range capacity.
+    fn extent_4f() -> PhysFrameRange {
         PhysFrameRange::new(PhysAddr(0x4000_0000), PhysAddr(0x4000_4000))
     }
 
@@ -675,9 +695,9 @@ mod tests {
     }
 
     #[test]
-    fn extent_16f_fixture_sanity() {
+    fn extent_4f_fixture_sanity() {
         // Sanity-check the test fixture itself.
-        let e = extent_16f();
+        let e = extent_4f();
         assert_eq!(e.frame_count(), 4);
         assert!(e.is_aligned());
         assert!(e.contains(PhysAddr(0x4000_0000)));

@@ -185,7 +185,7 @@ The PMM is **live as of [T-017](../analysis/tasks/phase-b/T-017-physical-memory-
 
 **API.** Three public methods:
 
-- `Pmm::new(extent, reserved) -> Result<Self, PmmError>` — one-shot at boot; three fail-fast validations (extent page-aligned, reserved-ranges-within-extent, reserved-list-fits-in-`R`) before any bitmap mutation. Pure safe Rust.
+- `Pmm::new(extent, reserved) -> Result<Self, PmmError>` — one-shot at boot; five fail-fast validations (extent page-aligned; bitmap covers extent; reserved-list fits in `R`; each reserved range is page-aligned, in-extent, and non-inverted; no two reserved ranges overlap) before any bitmap mutation. Pure safe Rust.
 - `Pmm::alloc_frame() -> Option<PhysFrame>` — forward-from-hint linear bitmap scan + zero-fill via `core::ptr::write_bytes` ([UNSAFE-2026-0026](../audits/unsafe-log.md); the only `unsafe` in the PMM body). Returns `None` on bitmap-full; the caller propagates as `MmuError::OutOfFrames` per the [`FrameProvider`](../../hal/src/mmu/mod.rs) contract.
 - `Pmm::free_frame(frame) -> Result<(), PmmError>` — three-stage validation (extent-bounds, defensive reserved-range scan, bitmap-bit check) then bit-clear + hint rewind. Returns `OutOfRange` or `DoubleFree` on misuse; each error path leaves bitmap state byte-stable.
 
