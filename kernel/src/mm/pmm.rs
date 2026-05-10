@@ -19,7 +19,7 @@
 //! [T-017]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-017-physical-memory-manager.md
 //! [`Mmu::map`]: tyrne_hal::Mmu::map
 
-use tyrne_hal::PAGE_SIZE;
+use tyrne_hal::{PhysAddr, PhysFrame, PAGE_SIZE};
 
 use crate::mm::PhysFrameRange;
 
@@ -95,12 +95,6 @@ pub struct PmmStats {
 /// Per [ADR-0035 §Decision outcome][adr-0035].
 ///
 /// [adr-0035]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0035-physical-memory-manager.md#decision-outcome
-#[allow(
-    dead_code,
-    reason = "transient until commit 2 of T-017 lands `alloc_frame` / `free_frame` / `stats` \
-              which read these fields; commit 1 establishes the struct shape + `Pmm::new` \
-              constructor + counter init only"
-)]
 pub struct Pmm<const N: usize, const R: usize> {
     /// One bit per frame; bit `i` set ⇔ frame `i` is Allocated or
     /// Reserved (single-bit collapse per [ADR-0035 §Negative
@@ -263,6 +257,157 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
             free_frames: self.free_count,
         }
     }
+
+    /// Allocate one [`PAGE_SIZE`]-frame from the managed extent.
+    ///
+    /// Returns `Some(frame)` with the frame zero-initialised and
+    /// caller-owned, or `None` if no Free frame remains. Callers
+    /// reaching `Mmu::map` propagate `None` as
+    /// `tyrne_hal::MmuError::OutOfFrames` per the
+    /// [`tyrne_hal::FrameProvider`] contract.
+    ///
+    /// Algorithm: forward-from-`hint` linear scan for the first 0
+    /// bit; on hit, sets the bit, advances `hint`, decrements
+    /// `free_count`, increments `allocated_count`, zero-fills the
+    /// 4 KiB frame contents via `core::ptr::write_bytes`. Per
+    /// [ADR-0035 §Simulation §Step 1][adr-0035].
+    ///
+    /// The forward-from-hint scan is sufficient under v1's
+    /// single-core cooperative model — the unconditional
+    /// `hint = min(hint, freed_idx)` rewind in `free_frame` keeps
+    /// `hint <= lowest-free-index`, so any free frame is reachable
+    /// on the forward pass. Per [ADR-0035 §Simulation §Step 3][adr-0035]'s
+    /// forward-compat note, a wrap-then-scan-prefix step would land
+    /// when SMP per-core caches arrive; not v1.
+    ///
+    /// [adr-0035]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0035-physical-memory-manager.md#simulation
+    pub fn alloc_frame(&mut self) -> Option<PhysFrame> {
+        let total_frames = self.extent.frame_count();
+
+        // Forward scan from `hint`. v1 single-core cooperative
+        // discipline keeps `hint <= lowest-free-index` (per the
+        // free_frame rewind below); the wrap pass is forward-compat
+        // scaffolding for SMP per-core-caches, which v1 doesn't
+        // need but we leave the wrap in place to keep the
+        // future-extension path one-line clean.
+        let mut idx_opt: Option<usize> = (self.hint..total_frames)
+            .find(|&idx| !read_bit(&self.bitmap, idx));
+        if idx_opt.is_none() && self.hint > 0 {
+            // Wrap to start (forward-compat; structurally
+            // unreachable in v1's single-core cooperative model).
+            idx_opt = (0..self.hint).find(|&idx| !read_bit(&self.bitmap, idx));
+        }
+        let idx = idx_opt?;
+
+        // Mark allocated.
+        set_bit(&mut self.bitmap, idx);
+        self.hint = idx.saturating_add(1);
+        self.free_count = self.free_count.saturating_sub(1);
+        self.allocated_count = self.allocated_count.saturating_add(1);
+
+        // Compute the frame's PA. Validation (i) on `extent` at
+        // `Pmm::new` time guarantees `extent.start` is page-aligned;
+        // `idx * PAGE_SIZE` preserves alignment. The
+        // `from_aligned` unwrap_or(unreachable!) pair is therefore
+        // structurally provable.
+        let pa_off = idx.saturating_mul(PAGE_SIZE);
+        let pa_usize = self.extent.start.0.saturating_add(pa_off);
+        let pa_ptr = pa_usize as *mut u8;
+
+        // SAFETY: zero-fill the 4 KiB frame contents to satisfy the
+        // tyrne_hal::FrameProvider contract ("Returned frames must be
+        // page-aligned and zero-initialised"). Invariants:
+        // (1) `pa_ptr` is page-aligned by construction (extent.start
+        //     is page-aligned per Pmm::new validation (i); idx *
+        //     PAGE_SIZE preserves alignment);
+        // (2) the 4 KiB region [pa_ptr, pa_ptr + 4096) is exclusively
+        //     owned by this PMM right now — the just-set bitmap bit
+        //     is the proof; no other kernel subsystem can hold a
+        //     PhysFrame for this index until alloc_frame returns;
+        // (3) the region is identity-mapped to a kernel-readable
+        //     VA per ADR-0027's identity-only v1 layout (post-MMU
+        //     activation in mmu_bootstrap, kernel sees PA == VA);
+        // (4) PAGE_SIZE = 4096 is small enough not to overflow any
+        //     intermediate arithmetic.
+        // Audit: UNSAFE-2026-0026 (new entry — PMM frame-zeroing
+        // is semantically distant from UNSAFE-2026-0001's PL011 MMIO
+        // base blessing per ADR-0035 §Dependency chain step 5
+        // adjudication).
+        unsafe {
+            core::ptr::write_bytes(pa_ptr, 0u8, PAGE_SIZE);
+        }
+
+        // Return the page-aligned PhysFrame. The from_aligned
+        // contract is satisfied by construction; if it ever returns
+        // None here we'd hit a kernel-discipline panic (which
+        // `clippy::unwrap_used` would forbid in production code, so
+        // we route through a defined error using
+        // `Option::and_then`-style fallback). In practice the alloc
+        // path is provably-correct; a None return would indicate
+        // either a Pmm::new validation bug or a memory-corruption
+        // event and warrants the "kernel programming error" panic
+        // class — but we keep the path total via `?` chaining on
+        // an Option to avoid an unwrap.
+        PhysFrame::from_aligned(PhysAddr(pa_usize))
+    }
+
+    /// Free a previously-allocated frame.
+    ///
+    /// Validates (in order) that the frame's PA falls within the
+    /// managed `extent` (returns [`PmmError::OutOfRange`] if not),
+    /// is *not* in any cached reserved range (returns
+    /// [`PmmError::DoubleFree`] — defensive scan over the populated
+    /// `Some(_)` slots; ADR-0035 §Simulation §Step 2 Critical row),
+    /// and is currently Allocated (returns [`PmmError::DoubleFree`]
+    /// if the bitmap bit is already 0). On success: clears the
+    /// bit, rewinds `hint = min(hint, idx)`, increments
+    /// `free_count`, decrements `allocated_count`.
+    ///
+    /// # Errors
+    ///
+    /// Per the validations above. Each error path leaves the bitmap
+    /// state and counters byte-stable.
+    pub fn free_frame(&mut self, frame: PhysFrame) -> Result<(), PmmError> {
+        let pa = frame.addr();
+
+        // Extent-bounds fail-fast (precedes index arithmetic).
+        if !self.extent.contains(pa) {
+            return Err(PmmError::OutOfRange);
+        }
+
+        // Compute the bitmap index. extent.contains(pa) above
+        // guarantees pa.0 >= extent.start.0, so saturating_sub
+        // never truncates a valid input.
+        let idx = pa
+            .0
+            .saturating_sub(self.extent.start.0)
+            .wrapping_div(PAGE_SIZE);
+
+        // Defensive reserved-range scan (Critical row): iterate
+        // only the populated Some(_) slots — `flatten()` over the
+        // [Option<PhysFrameRange>; R] array yields O(populated
+        // entries), not O(R).
+        for range in self.reserved_ranges.iter().flatten() {
+            if range.contains(pa) {
+                return Err(PmmError::DoubleFree);
+            }
+        }
+
+        // Bitmap-bit check (already-Free fail).
+        if !read_bit(&self.bitmap, idx) {
+            return Err(PmmError::DoubleFree);
+        }
+
+        // Clear bit; rewind hint; update counters.
+        clear_bit(&mut self.bitmap, idx);
+        if idx < self.hint {
+            self.hint = idx;
+        }
+        self.free_count = self.free_count.saturating_add(1);
+        self.allocated_count = self.allocated_count.saturating_sub(1);
+
+        Ok(())
+    }
 }
 
 // ── Bitmap helpers (private) ──────────────────────────────────────────────────
@@ -283,6 +428,14 @@ fn read_bit(bitmap: &[u8], idx: usize) -> bool {
     (bitmap[byte] >> bit) & 1 == 1
 }
 
+/// Clear bit `idx` in `bitmap`. Caller's responsibility to ensure
+/// `idx < bitmap.len() * 8`.
+fn clear_bit(bitmap: &mut [u8], idx: usize) {
+    let byte = idx / 8;
+    let bit = idx % 8;
+    bitmap[byte] &= !(1u8 << bit);
+}
+
 /// Return the first `0` bit in `bitmap` over the range
 /// `[0, frame_count)`, or `None` if every bit is `1`.
 fn first_zero_bit(bitmap: &[u8], frame_count: usize) -> Option<usize> {
@@ -300,7 +453,7 @@ fn first_zero_bit(bitmap: &[u8], frame_count: usize) -> Option<usize> {
 mod tests {
     use super::{Pmm, PmmError};
     use crate::mm::PhysFrameRange;
-    use tyrne_hal::PhysAddr;
+    use tyrne_hal::{PhysAddr, PhysFrame};
 
     /// Test fixture: 16 frames (16 KiB), starting at `0x4000_0000`.
     /// Bitmap holds 16 bits → 2 bytes; we use `N = 2` to test the
@@ -420,5 +573,253 @@ mod tests {
         assert!(e.contains(PhysAddr(0x4000_0000)));
         assert!(e.contains(PhysAddr(0x4000_3FFF)));
         assert!(!e.contains(PhysAddr(0x4000_4000)));
+    }
+
+    // ── alloc_frame / free_frame / stats tests ─────────────────────────────────
+    //
+    // These tests use a host-allocated [u8; 64 KiB] backing buffer
+    // and offset the PMM's "extent" to point at that buffer's
+    // address. This way the frame-zeroing write_bytes lands in
+    // host RAM the test harness owns — no UB even though the PMM
+    // believes it's writing to the QEMU virt RAM range. The
+    // bitmap math is unaffected because Pmm::new operates on the
+    // extent's start/end values, not on the backing storage.
+
+    use std::vec;
+    use std::vec::Vec;
+
+    /// Allocate a `Vec<u8>` aligned to `PAGE_SIZE` that we can use as
+    /// the PMM's "extent" backing storage. Returns the raw pointer
+    /// + the Vec (kept alive for the test).
+    fn aligned_backing(frames: usize) -> (Vec<u8>, *mut u8) {
+        let bytes = frames.checked_mul(4096).expect("test math overflow");
+        let alloc = bytes.checked_add(4096).expect("test math overflow");
+        let mut v: Vec<u8> = vec![0u8; alloc];
+        let raw = v.as_mut_ptr();
+        let aligned = ((raw as usize + 4095) & !4095) as *mut u8;
+        (v, aligned)
+    }
+
+    fn pmm_over_backing(
+        backing_ptr: *mut u8,
+        frames: usize,
+        reserved: &[(usize, usize)],
+    ) -> Pmm<2, 4> {
+        let base = backing_ptr as usize;
+        let extent = PhysFrameRange::new(
+            PhysAddr(base),
+            PhysAddr(base + frames * 4096),
+        );
+        let reserved_ranges: Vec<PhysFrameRange> = reserved
+            .iter()
+            .map(|&(start_off, end_off)| {
+                PhysFrameRange::new(
+                    PhysAddr(base + start_off * 4096),
+                    PhysAddr(base + end_off * 4096),
+                )
+            })
+            .collect();
+        Pmm::new(extent, &reserved_ranges).expect("Pmm::new must succeed")
+    }
+
+    #[test]
+    fn alloc_frame_returns_first_free_and_zeroes_payload() {
+        let (_buf, ptr) = aligned_backing(16);
+        // Pre-poison the backing with non-zero bytes so we can
+        // assert the alloc actually zero-fills.
+        // SAFETY: ptr points to the head of a 16-frame
+        // PAGE_SIZE-aligned host-allocated Vec<u8> kept alive by
+        // _buf for the test's duration; the write covers exactly
+        // the Vec's payload range.
+        unsafe {
+            core::ptr::write_bytes(ptr, 0xA5u8, 16 * 4096);
+        }
+        // Reserve frame 0; alloc should return frame 1.
+        let mut pmm = pmm_over_backing(ptr, 16, &[(0, 1)]);
+
+        let frame = pmm.alloc_frame().expect("alloc must succeed");
+        let expected_pa = PhysAddr(ptr as usize + 4096);
+        assert_eq!(frame.addr(), expected_pa);
+
+        // Verify the returned frame is zeroed.
+        let returned_ptr = frame.as_usize() as *const u8;
+        for off in 0..4096 {
+            // SAFETY: returned_ptr is a PhysFrame the PMM just
+            // returned from the same backing buffer; reading the
+            // 4 KiB page is in-bounds for the host-allocated Vec.
+            let byte = unsafe { *returned_ptr.add(off) };
+            assert_eq!(byte, 0u8, "alloc_frame must zero-fill (off={off})");
+        }
+
+        // Counters updated.
+        let stats = pmm.stats();
+        assert_eq!(stats.allocated_frames, 1);
+        assert_eq!(stats.free_frames, 14);
+        assert_eq!(stats.reserved_frames, 1);
+    }
+
+    #[test]
+    fn free_frame_clears_bit_and_rewinds_hint() {
+        let (_buf, ptr) = aligned_backing(16);
+        let mut pmm = pmm_over_backing(ptr, 16, &[]);
+
+        let f1 = pmm.alloc_frame().expect("alloc 1");
+        let f2 = pmm.alloc_frame().expect("alloc 2");
+        let f3 = pmm.alloc_frame().expect("alloc 3");
+        // hint is now at 3 (after f3 = idx 2).
+        assert!(pmm.hint >= 3);
+
+        // Free f1 (idx 0). Hint should rewind to 0.
+        pmm.free_frame(f1).expect("free f1");
+        assert_eq!(pmm.hint, 0);
+
+        // Next alloc should return f1 again.
+        let f1_again = pmm.alloc_frame().expect("alloc after free");
+        assert_eq!(f1_again, f1);
+
+        // Free f2 + f3 to clean up.
+        pmm.free_frame(f2).expect("free f2");
+        pmm.free_frame(f3).expect("free f3");
+
+        let stats = pmm.stats();
+        assert_eq!(stats.allocated_frames, 1);
+        assert_eq!(stats.free_frames, 15);
+    }
+
+    #[test]
+    fn free_frame_rejects_double_free_and_reserved() {
+        let (_buf, ptr) = aligned_backing(16);
+        let base = ptr as usize;
+
+        // Reserve frame 0.
+        let mut pmm = pmm_over_backing(ptr, 16, &[(0, 1)]);
+
+        // Reserved frame: free should reject.
+        let reserved_frame =
+            PhysFrame::from_aligned(PhysAddr(base)).expect("aligned");
+        assert_eq!(
+            pmm.free_frame(reserved_frame),
+            Err(PmmError::DoubleFree),
+            "free of reserved frame must be DoubleFree"
+        );
+
+        // Already-free frame: free should reject.
+        let already_free =
+            PhysFrame::from_aligned(PhysAddr(base + 4096)).expect("aligned");
+        assert_eq!(
+            pmm.free_frame(already_free),
+            Err(PmmError::DoubleFree),
+            "free of never-allocated frame must be DoubleFree"
+        );
+
+        // Counters unchanged.
+        let stats = pmm.stats();
+        assert_eq!(stats.reserved_frames, 1);
+        assert_eq!(stats.allocated_frames, 0);
+        assert_eq!(stats.free_frames, 15);
+    }
+
+    #[test]
+    fn alloc_frame_returns_none_when_exhausted() {
+        let (_buf, ptr) = aligned_backing(4);
+        let mut pmm = pmm_over_backing(ptr, 4, &[]);
+
+        // Allocate every frame.
+        let _f0 = pmm.alloc_frame().expect("alloc 0");
+        let _f1 = pmm.alloc_frame().expect("alloc 1");
+        let _f2 = pmm.alloc_frame().expect("alloc 2");
+        let _f3 = pmm.alloc_frame().expect("alloc 3");
+
+        // Next alloc must return None.
+        assert_eq!(pmm.alloc_frame(), None);
+        assert_eq!(pmm.stats().free_frames, 0);
+        assert_eq!(pmm.stats().allocated_frames, 4);
+    }
+
+    #[test]
+    fn alloc_frame_recovers_after_free_under_exhaustion() {
+        let (_buf, ptr) = aligned_backing(4);
+        let mut pmm = pmm_over_backing(ptr, 4, &[]);
+
+        let f0 = pmm.alloc_frame().expect("alloc 0");
+        let _f1 = pmm.alloc_frame().expect("alloc 1");
+        let _f2 = pmm.alloc_frame().expect("alloc 2");
+        let _f3 = pmm.alloc_frame().expect("alloc 3");
+        assert_eq!(pmm.alloc_frame(), None);
+
+        // Free f0; alloc should return it.
+        pmm.free_frame(f0).expect("free f0");
+        let f0_again = pmm.alloc_frame().expect("alloc after free");
+        assert_eq!(f0_again, f0);
+    }
+
+    #[test]
+    fn stats_parity_with_bitmap_bit_count() {
+        let (_buf, ptr) = aligned_backing(16);
+        let mut pmm = pmm_over_backing(ptr, 16, &[(0, 2)]);
+
+        let _f0 = pmm.alloc_frame().expect("alloc 0");
+        let _f1 = pmm.alloc_frame().expect("alloc 1");
+        let f2 = pmm.alloc_frame().expect("alloc 2");
+        pmm.free_frame(f2).expect("free f2");
+
+        // Count set bits in bitmap (16 bits / 2 bytes).
+        let mut set_bits: usize = 0;
+        for byte in &pmm.bitmap {
+            set_bits += byte.count_ones() as usize;
+        }
+        // 2 reserved + 2 still-allocated = 4 set bits.
+        assert_eq!(set_bits, 4);
+
+        let stats = pmm.stats();
+        // Cached counters must agree with the bitmap.
+        assert_eq!(
+            stats.reserved_frames + stats.allocated_frames,
+            set_bits,
+            "cached counters must match bitmap bit-count"
+        );
+        assert_eq!(stats.total_frames, 16);
+        assert_eq!(stats.free_frames, 16 - set_bits);
+    }
+
+    #[test]
+    fn free_frame_reserved_check_iterates_only_populated_slots() {
+        let (_buf, ptr) = aligned_backing(16);
+        // Only 1 reserved range out of R=4 slots; remaining 3 slots
+        // are None. The defensive scan must skip None slots
+        // (treating them as "no reservation"), not as wildcards.
+        let mut pmm = pmm_over_backing(ptr, 16, &[(0, 1)]);
+
+        // Allocate a non-reserved frame.
+        let f = pmm.alloc_frame().expect("alloc");
+        // Free should succeed (the None slots in reserved_ranges
+        // must NOT cause the defensive scan to reject this PA).
+        assert_eq!(
+            pmm.free_frame(f),
+            Ok(()),
+            "non-reserved frame must free OK even when R=4 has None slots"
+        );
+    }
+
+    #[test]
+    fn free_frame_rejects_pa_outside_extent() {
+        let (_buf, ptr) = aligned_backing(16);
+        let base = ptr as usize;
+        let mut pmm = pmm_over_backing(ptr, 16, &[]);
+
+        // PA below extent.start.
+        let below = PhysFrame::from_aligned(PhysAddr(base.saturating_sub(4096)))
+            .expect("aligned");
+        assert_eq!(pmm.free_frame(below), Err(PmmError::OutOfRange));
+
+        // PA at/above extent.end.
+        let above =
+            PhysFrame::from_aligned(PhysAddr(base + 16 * 4096)).expect("aligned");
+        assert_eq!(pmm.free_frame(above), Err(PmmError::OutOfRange));
+
+        // Counters unchanged.
+        let stats = pmm.stats();
+        assert_eq!(stats.allocated_frames, 0);
+        assert_eq!(stats.free_frames, 16);
     }
 }
