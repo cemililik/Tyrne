@@ -19,7 +19,7 @@
 //! [T-017]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-017-physical-memory-manager.md
 //! [`Mmu::map`]: tyrne_hal::Mmu::map
 
-use tyrne_hal::{PhysAddr, PhysFrame, PAGE_SIZE};
+use tyrne_hal::{FrameProvider, PhysAddr, PhysFrame, PAGE_SIZE};
 
 use crate::mm::PhysFrameRange;
 
@@ -407,6 +407,22 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
         self.allocated_count = self.allocated_count.saturating_sub(1);
 
         Ok(())
+    }
+}
+
+/// Implements [`tyrne_hal::FrameProvider`] so the PMM can be passed
+/// directly to [`tyrne_hal::Mmu::map`] as `&mut dyn FrameProvider`.
+///
+/// The `Mmu::map` contract returns `MmuError::OutOfFrames` when the
+/// `FrameProvider` returns `None`. Per [ADR-0009][adr-0009] and
+/// [ADR-0035 §Decision drivers][adr-0035], this is the canonical
+/// surface the PMM layer satisfies.
+///
+/// [adr-0009]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md
+/// [adr-0035]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0035-physical-memory-manager.md
+impl<const N: usize, const R: usize> FrameProvider for Pmm<N, R> {
+    fn alloc_frame(&mut self) -> Option<PhysFrame> {
+        Pmm::alloc_frame(self)
     }
 }
 
@@ -799,6 +815,27 @@ mod tests {
             Ok(()),
             "non-reserved frame must free OK even when R=4 has None slots"
         );
+    }
+
+    #[test]
+    fn alloc_frame_implements_frame_provider() {
+        // Exercise the trait method via &mut dyn FrameProvider so the
+        // impl integration is pinned (catches accidental signature
+        // drift between Pmm::alloc_frame and FrameProvider::alloc_frame).
+        use tyrne_hal::FrameProvider;
+
+        let (_buf, ptr) = aligned_backing(4);
+        let mut pmm = pmm_over_backing(ptr, 4, &[]);
+
+        let provider: &mut dyn FrameProvider = &mut pmm;
+        let f0 = provider.alloc_frame().expect("alloc via dyn trait");
+        let f1 = provider.alloc_frame().expect("alloc 2 via dyn trait");
+        assert_ne!(f0, f1);
+
+        // Three more allocs (total 4 = capacity) then None.
+        let _f2 = provider.alloc_frame().expect("alloc 3");
+        let _f3 = provider.alloc_frame().expect("alloc 4");
+        assert_eq!(provider.alloc_frame(), None);
     }
 
     #[test]
