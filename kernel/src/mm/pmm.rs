@@ -46,6 +46,16 @@ pub enum PmmError {
     /// per-BSP `R` const-generic capacity of the cached
     /// `[Option<PhysFrameRange>; R]` array.
     TooManyReservedRanges,
+    /// `Pmm::new` rejected a reserved-list whose entries overlap
+    /// pairwise. Overlap is detected as `a.start < b.end && b.start
+    /// < a.end` over every (i, j) pair with `i < j`. Without this
+    /// check, overlapping ranges would double-count `reserved_count`
+    /// vs. the bitmap (each overlapping frame contributes once to
+    /// the bit-set but twice to the cached counter), leaving
+    /// `stats()` inconsistent with the bitmap and risking
+    /// `free_count = 0` while `alloc_frame()` still has free
+    /// frames. See [PR #26 review-round 1](https://github.com/cemililik/Tyrne/pull/26).
+    OverlappingReservedRanges,
     /// `free_frame` rejected an attempt to free a frame that is
     /// already Free, or whose PA falls in a Reserved range (the
     /// bitmap collapses Reserved + Allocated into a single bit;
@@ -151,10 +161,7 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
     /// [`PmmError::OutOfRange`] (no kernel-static panic).
     ///
     /// [adr-0035]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0035-physical-memory-manager.md#simulation
-    pub fn new(
-        extent: PhysFrameRange,
-        reserved: &[PhysFrameRange],
-    ) -> Result<Self, PmmError> {
+    pub fn new(extent: PhysFrameRange, reserved: &[PhysFrameRange]) -> Result<Self, PmmError> {
         // Validation (i): extent page-aligned.
         if !extent.is_aligned() {
             return Err(PmmError::MisalignedAddress);
@@ -191,6 +198,22 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
             }
             if range.end.0 < range.start.0 {
                 return Err(PmmError::OutOfRange);
+            }
+        }
+
+        // Validation (iv): pairwise overlap check. Two half-open
+        // ranges `[a, b)` and `[c, d)` overlap iff `a < d && c <
+        // b`. O(R²) but R ≤ 8 in v1 → ≤ 28 comparisons; trivial cost
+        // and prevents the bitmap-vs-counter drift PR #26 review-
+        // round 1 flagged (overlapping ranges would each increment
+        // `reserved_count` while sharing bitmap bits — `stats()` ends
+        // up inconsistent with the bitmap, and `free_count` can
+        // report 0 while `alloc_frame()` still finds free frames).
+        for (i, range_a) in reserved.iter().enumerate() {
+            for range_b in reserved.iter().skip(i.saturating_add(1)) {
+                if range_a.start.0 < range_b.end.0 && range_b.start.0 < range_a.end.0 {
+                    return Err(PmmError::OverlappingReservedRanges);
+                }
             }
         }
 
@@ -245,13 +268,17 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
 
     /// Return a diagnostic snapshot of the PMM's frame-state
     /// counters.
+    ///
+    /// `total_frames` is anchored against [`PhysFrameRange::frame_count`]
+    /// on the managed extent (rather than the sum of the three
+    /// cached state counters) so a counter-drift bug surfaces as a
+    /// stats-vs-extent disagreement rather than silently
+    /// re-establishing internal consistency. The `stats_parity_with_bitmap_bit_count`
+    /// host test pins the relationship.
     #[must_use]
     pub fn stats(&self) -> PmmStats {
         PmmStats {
-            total_frames: self
-                .free_count
-                .saturating_add(self.reserved_count)
-                .saturating_add(self.allocated_count),
+            total_frames: self.extent.frame_count(),
             reserved_frames: self.reserved_count,
             allocated_frames: self.allocated_count,
             free_frames: self.free_count,
@@ -290,8 +317,8 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
         // scaffolding for SMP per-core-caches, which v1 doesn't
         // need but we leave the wrap in place to keep the
         // future-extension path one-line clean.
-        let mut idx_opt: Option<usize> = (self.hint..total_frames)
-            .find(|&idx| !read_bit(&self.bitmap, idx));
+        let mut idx_opt: Option<usize> =
+            (self.hint..total_frames).find(|&idx| !read_bit(&self.bitmap, idx));
         if idx_opt.is_none() && self.hint > 0 {
             // Wrap to start (forward-compat; structurally
             // unreachable in v1's single-core cooperative model).
@@ -314,25 +341,62 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
         let pa_usize = self.extent.start.0.saturating_add(pa_off);
         let pa_ptr = pa_usize as *mut u8;
 
-        // SAFETY: zero-fill the 4 KiB frame contents to satisfy the
-        // tyrne_hal::FrameProvider contract ("Returned frames must be
-        // page-aligned and zero-initialised"). Invariants:
+        // SAFETY:
+        // **Why unsafe is needed.** The FrameProvider contract
+        // ("Returned frames must be page-aligned and
+        // zero-initialised") requires us to write zeros to a 4 KiB
+        // region whose only handle is a freshly-minted PhysFrame
+        // (a wrapped PhysAddr, not a Rust-owned slice). Safe Rust
+        // has no way to express "write zeros to this PA range"
+        // without first materialising a `&mut [u8; PAGE_SIZE]`
+        // from the raw pointer — and that materialisation step is
+        // itself `unsafe` (`core::slice::from_raw_parts_mut`).
+        // The raw `core::ptr::write_bytes` form is the minimum-
+        // surface expression of what we're doing.
+        //
+        // **Invariants upheld.**
         // (1) `pa_ptr` is page-aligned by construction (extent.start
         //     is page-aligned per Pmm::new validation (i); idx *
-        //     PAGE_SIZE preserves alignment);
-        // (2) the 4 KiB region [pa_ptr, pa_ptr + 4096) is exclusively
-        //     owned by this PMM right now — the just-set bitmap bit
-        //     is the proof; no other kernel subsystem can hold a
-        //     PhysFrame for this index until alloc_frame returns;
-        // (3) the region is identity-mapped to a kernel-readable
-        //     VA per ADR-0027's identity-only v1 layout (post-MMU
+        //     PAGE_SIZE preserves alignment).
+        // (2) the 4 KiB region [pa_ptr, pa_ptr + PAGE_SIZE) is
+        //     exclusively owned by this PMM right now — the just-set
+        //     bitmap bit is the proof; no other kernel subsystem can
+        //     hold a PhysFrame for this index until alloc_frame
+        //     returns ownership to the caller.
+        // (3) the region is identity-mapped to a kernel-readable VA
+        //     per ADR-0027's identity-only v1 layout (post-MMU
         //     activation in mmu_bootstrap, kernel sees PA == VA);
-        // (4) PAGE_SIZE = 4096 is small enough not to overflow any
-        //     intermediate arithmetic.
+        //     the high-half migration (ADR-0033 placeholder) will
+        //     introduce a `phys_to_virt` helper at this site.
+        // (4) PAGE_SIZE = 4096 is well within isize::MAX on aarch64;
+        //     `write_bytes` cannot overflow any intermediate
+        //     arithmetic.
+        // (5) v1 is single-core + cooperative; no peer reader can
+        //     observe the partially-written frame. SMP extension
+        //     keeps this invariant via the set_bit atomicity that
+        //     precedes the write.
+        //
+        // **Why safer alternatives were rejected.**
+        // - `core::slice::from_raw_parts_mut(pa_ptr, PAGE_SIZE)` +
+        //   `slice.fill(0)`: the slice construction is itself
+        //   unsafe; safe-looking syntax wrapping the same operation
+        //   would obscure the audit point without removing it.
+        // - Lazy zero-fill on first page-fault: v1 has no page-fault
+        //   routing into the capability system; eager zero is
+        //   simpler and ~sub-microsecond on Cortex-A72.
+        // - Skip zero-fill: violates the FrameProvider contract and
+        //   leaks previous frame contents — a B5+ userspace-
+        //   isolation hazard.
+        // - `volatile_set_memory`: no peer observer in single-core
+        //   v1; volatile semantics would buy nothing.
+        //
         // Audit: UNSAFE-2026-0026 (new entry — PMM frame-zeroing
         // is semantically distant from UNSAFE-2026-0001's PL011 MMIO
         // base blessing per ADR-0035 §Dependency chain step 5
-        // adjudication).
+        // adjudication). The audit-log entry carries the full
+        // Rejected-alternatives discussion (5 alternatives walked);
+        // the SAFETY block above summarises the four most-asked at
+        // the call site.
         unsafe {
             core::ptr::write_bytes(pa_ptr, 0u8, PAGE_SIZE);
         }
@@ -378,10 +442,9 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
         // Compute the bitmap index. extent.contains(pa) above
         // guarantees pa.0 >= extent.start.0, so saturating_sub
         // never truncates a valid input.
-        let idx = pa
-            .0
-            .saturating_sub(self.extent.start.0)
-            .wrapping_div(PAGE_SIZE);
+        let idx =
+            pa.0.saturating_sub(self.extent.start.0)
+                .wrapping_div(PAGE_SIZE);
 
         // Defensive reserved-range scan (Critical row): iterate
         // only the populated Some(_) slots — `flatten()` over the
@@ -525,20 +588,51 @@ mod tests {
     }
 
     #[test]
+    fn new_rejects_overlapping_reserved_ranges() {
+        // PR #26 round-1 review: overlapping reserved ranges would
+        // double-count `reserved_count` while sharing bitmap bits,
+        // leaving stats() inconsistent with the bitmap.
+        let extent = PhysFrameRange::new(PhysAddr(0x4000_0000), PhysAddr(0x4001_0000));
+
+        // Two ranges that overlap on frame 2 (0x4000_2000).
+        let overlapping = [
+            PhysFrameRange::new(PhysAddr(0x4000_0000), PhysAddr(0x4000_3000)),
+            PhysFrameRange::new(PhysAddr(0x4000_2000), PhysAddr(0x4000_5000)),
+        ];
+        let result: Result<Pmm<2, 4>, _> = Pmm::new(extent, &overlapping);
+        assert_eq!(result.err(), Some(PmmError::OverlappingReservedRanges));
+
+        // Duplicate ranges (a stricter overlap form).
+        let duplicate = [
+            PhysFrameRange::new(PhysAddr(0x4000_1000), PhysAddr(0x4000_2000)),
+            PhysFrameRange::new(PhysAddr(0x4000_1000), PhysAddr(0x4000_2000)),
+        ];
+        let result: Result<Pmm<2, 4>, _> = Pmm::new(extent, &duplicate);
+        assert_eq!(result.err(), Some(PmmError::OverlappingReservedRanges));
+
+        // Touching-but-not-overlapping ranges (`[a, b)` + `[b, c)`)
+        // must NOT be rejected — half-open ranges don't overlap at
+        // the boundary.
+        let touching = [
+            PhysFrameRange::new(PhysAddr(0x4000_0000), PhysAddr(0x4000_2000)),
+            PhysFrameRange::new(PhysAddr(0x4000_2000), PhysAddr(0x4000_4000)),
+        ];
+        let result: Result<Pmm<2, 4>, _> = Pmm::new(extent, &touching);
+        assert!(
+            result.is_ok(),
+            "touching half-open ranges must NOT trigger overlap rejection"
+        );
+    }
+
+    #[test]
     fn new_rejects_unaligned_extent() {
         // Unaligned start.
-        let extent_bad_start = PhysFrameRange::new(
-            PhysAddr(0x4000_0001),
-            PhysAddr(0x4001_0000),
-        );
+        let extent_bad_start = PhysFrameRange::new(PhysAddr(0x4000_0001), PhysAddr(0x4001_0000));
         let result: Result<Pmm<2, 4>, _> = Pmm::new(extent_bad_start, &[]);
         assert_eq!(result.err(), Some(PmmError::MisalignedAddress));
 
         // Unaligned end.
-        let extent_bad_end = PhysFrameRange::new(
-            PhysAddr(0x4000_0000),
-            PhysAddr(0x4001_0001),
-        );
+        let extent_bad_end = PhysFrameRange::new(PhysAddr(0x4000_0000), PhysAddr(0x4001_0001));
         let result: Result<Pmm<2, 4>, _> = Pmm::new(extent_bad_end, &[]);
         assert_eq!(result.err(), Some(PmmError::MisalignedAddress));
     }
@@ -622,10 +716,7 @@ mod tests {
         reserved: &[(usize, usize)],
     ) -> Pmm<2, 4> {
         let base = backing_ptr as usize;
-        let extent = PhysFrameRange::new(
-            PhysAddr(base),
-            PhysAddr(base + frames * 4096),
-        );
+        let extent = PhysFrameRange::new(PhysAddr(base), PhysAddr(base + frames * 4096));
         let reserved_ranges: Vec<PhysFrameRange> = reserved
             .iter()
             .map(|&(start_off, end_off)| {
@@ -711,8 +802,7 @@ mod tests {
         let mut pmm = pmm_over_backing(ptr, 16, &[(0, 1)]);
 
         // Reserved frame: free should reject.
-        let reserved_frame =
-            PhysFrame::from_aligned(PhysAddr(base)).expect("aligned");
+        let reserved_frame = PhysFrame::from_aligned(PhysAddr(base)).expect("aligned");
         assert_eq!(
             pmm.free_frame(reserved_frame),
             Err(PmmError::DoubleFree),
@@ -720,8 +810,7 @@ mod tests {
         );
 
         // Already-free frame: free should reject.
-        let already_free =
-            PhysFrame::from_aligned(PhysAddr(base + 4096)).expect("aligned");
+        let already_free = PhysFrame::from_aligned(PhysAddr(base + 4096)).expect("aligned");
         assert_eq!(
             pmm.free_frame(already_free),
             Err(PmmError::DoubleFree),
@@ -845,13 +934,11 @@ mod tests {
         let mut pmm = pmm_over_backing(ptr, 16, &[]);
 
         // PA below extent.start.
-        let below = PhysFrame::from_aligned(PhysAddr(base.saturating_sub(4096)))
-            .expect("aligned");
+        let below = PhysFrame::from_aligned(PhysAddr(base.saturating_sub(4096))).expect("aligned");
         assert_eq!(pmm.free_frame(below), Err(PmmError::OutOfRange));
 
         // PA at/above extent.end.
-        let above =
-            PhysFrame::from_aligned(PhysAddr(base + 16 * 4096)).expect("aligned");
+        let above = PhysFrame::from_aligned(PhysAddr(base + 16 * 4096)).expect("aligned");
         assert_eq!(pmm.free_frame(above), Err(PmmError::OutOfRange));
 
         // Counters unchanged.

@@ -83,7 +83,14 @@ const KERNEL_IMAGE_START: usize = 0x4008_0000;
 /// Sized at compile time per the BSP's static RAM extent; if the
 /// extent changes (future Pi 4 BSP), this const grows accordingly
 /// per the per-BSP-const-generic discipline of ADR-0035.
-const PMM_BITMAP_BYTES: usize = (PMM_EXTENT_END - PMM_EXTENT_START) / PAGE_SIZE / 8;
+///
+/// **Ceiling division** ensures the last byte is allocated even
+/// when the managed frame count is not a multiple of 8 (per PR #26
+/// round-1 review). For QEMU virt's 32 768 frames the result is
+/// 4 096 bytes either way (32 768 is a multiple of 8); the ceiling
+/// form is forward-defensive for future BSPs with non-multiple-of-8
+/// frame counts.
+const PMM_BITMAP_BYTES: usize = ((PMM_EXTENT_END - PMM_EXTENT_START) / PAGE_SIZE).div_ceil(8);
 /// Reserved-range cache capacity. v1 has 2 ranges (firmware + kernel
 /// image+bss+stack); 8 provides headroom for future BSP layouts
 /// (DTB / ATF / ACPI / initrd / framebuffer reservations) without
@@ -698,26 +705,15 @@ pub extern "C" fn kernel_entry() -> ! {
     // as the pre-existing `addr_of!(tyrne_vectors)` site.
     // Audit: UNSAFE-2026-0001 (StaticCell pattern for `PMM`).
     let stack_top_addr = core::ptr::addr_of!(__stack_top) as usize;
-    let stack_top_aligned_up = stack_top_addr
-        .saturating_add(PAGE_SIZE - 1)
-        & !(PAGE_SIZE - 1);
-    let pmm_extent = PhysFrameRange::new(
-        PhysAddr(PMM_EXTENT_START),
-        PhysAddr(PMM_EXTENT_END),
-    );
+    let stack_top_aligned_up = stack_top_addr.saturating_add(PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+    let pmm_extent = PhysFrameRange::new(PhysAddr(PMM_EXTENT_START), PhysAddr(PMM_EXTENT_END));
     let pmm_reserved = [
         // (1) QEMU firmware-reserved region: PMM extent start
         // through the kernel image's load address.
-        PhysFrameRange::new(
-            PhysAddr(PMM_EXTENT_START),
-            PhysAddr(KERNEL_IMAGE_START),
-        ),
+        PhysFrameRange::new(PhysAddr(PMM_EXTENT_START), PhysAddr(KERNEL_IMAGE_START)),
         // (2) Kernel image (.text + .rodata + .data) + .bss
         // (which contains .boot_pt) + boot-stack region.
-        PhysFrameRange::new(
-            PhysAddr(KERNEL_IMAGE_START),
-            PhysAddr(stack_top_aligned_up),
-        ),
+        PhysFrameRange::new(PhysAddr(KERNEL_IMAGE_START), PhysAddr(stack_top_aligned_up)),
     ];
     let pmm_value = BspPmm::new(pmm_extent, &pmm_reserved)
         .expect("Pmm::new — BSP-static config; reservation list is well-formed by construction");
