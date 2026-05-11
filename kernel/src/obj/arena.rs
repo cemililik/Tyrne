@@ -53,6 +53,24 @@ impl SlotId {
     pub(crate) const fn from_parts(index: Index, generation: Generation) -> Self {
         Self { index, generation }
     }
+
+    /// The canonical "first slot" identifier — index 0, generation 0.
+    ///
+    /// Production callers use this to *name* the first slot of an
+    /// arena (typically a bootstrap kernel-object slot — e.g., the
+    /// bootstrap address space) **before** the arena's first allocation
+    /// has run. The calling discipline is: the kernel-init path
+    /// allocates the bootstrap object first, which deterministically
+    /// produces a `SlotId` matching `first_slot()` (the empty arena's
+    /// head slot is index 0, generation 0; the first `allocate` consumes
+    /// it). Used by [`crate::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE`].
+    #[must_use]
+    pub const fn first_slot() -> Self {
+        Self {
+            index: 0,
+            generation: 0,
+        }
+    }
 }
 
 /// One storage cell of an [`Arena`]. Either populated or participating

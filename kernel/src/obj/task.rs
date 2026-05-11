@@ -10,28 +10,54 @@
 
 use super::arena::{Arena, SlotId};
 use super::{ObjError, TASK_ARENA_CAPACITY};
+use crate::mm::AddressSpaceHandle;
 
 /// The v1 `Task` kernel object.
 ///
-/// Minimal fields — enough for the capability-to-object wiring T-002
-/// delivers. Phase A5 adds scheduler state; Phase B adds address-space
-/// ownership.
+/// Carries the task's identifier and its [`AddressSpaceHandle`] (per
+/// [ADR-0028][adr-0028]; T-018 commit 4) — the scheduler reads the
+/// AS handle on every yield to decide whether to invoke
+/// [`Mmu::activate`][tyrne_hal::Mmu::activate] before the
+/// architectural context switch.
+///
+/// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
 #[derive(Debug)]
 pub struct Task {
     id: u32,
+    address_space_handle: AddressSpaceHandle,
 }
 
 impl Task {
-    /// Construct a task with the given identifier.
+    /// Construct a task with the given identifier and address-space handle.
+    ///
+    /// In v1 every task is created against the bootstrap address space
+    /// — callers pass [`crate::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE`].
+    /// B5+ userspace tasks will pass per-task AS handles obtained
+    /// from [`crate::mm::cap_create_address_space`].
     #[must_use]
-    pub const fn new(id: u32) -> Self {
-        Self { id }
+    pub const fn new(id: u32, address_space_handle: AddressSpaceHandle) -> Self {
+        Self {
+            id,
+            address_space_handle,
+        }
     }
 
     /// Return the task's identifier.
     #[must_use]
     pub const fn id(&self) -> u32 {
         self.id
+    }
+
+    /// Return the [`AddressSpaceHandle`] this task runs against.
+    ///
+    /// Used by the scheduler's activation hook in
+    /// [`yield_now`][crate::sched::yield_now] (and the IPC bridge's
+    /// context-switch paths) to compare against the outgoing task's
+    /// AS and decide whether [`Mmu::activate`][tyrne_hal::Mmu::activate]
+    /// must fire.
+    #[must_use]
+    pub const fn address_space_handle(&self) -> AddressSpaceHandle {
+        self.address_space_handle
     }
 }
 
@@ -110,19 +136,20 @@ pub fn get_task(arena: &TaskArena, handle: TaskHandle) -> Option<&Task> {
 )]
 mod tests {
     use super::{create_task, destroy_task, get_task, Task, TaskArena};
+    use crate::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE;
     use crate::obj::{ObjError, TASK_ARENA_CAPACITY};
 
     #[test]
     fn create_then_get_round_trip() {
         let mut arena = TaskArena::default();
-        let handle = create_task(&mut arena, Task::new(7)).unwrap();
+        let handle = create_task(&mut arena, Task::new(7, BOOTSTRAP_ADDRESS_SPACE_HANDLE)).unwrap();
         assert_eq!(get_task(&arena, handle).map(Task::id), Some(7));
     }
 
     #[test]
     fn destroy_invalidates_handle() {
         let mut arena = TaskArena::default();
-        let handle = create_task(&mut arena, Task::new(1)).unwrap();
+        let handle = create_task(&mut arena, Task::new(1, BOOTSTRAP_ADDRESS_SPACE_HANDLE)).unwrap();
         let removed = destroy_task(&mut arena, handle).unwrap();
         assert_eq!(removed.id(), 1);
         assert!(get_task(&arena, handle).is_none());
@@ -141,11 +168,21 @@ mod tests {
                 clippy::cast_possible_truncation,
                 reason = "bounded by TASK_ARENA_CAPACITY"
             )]
-            create_task(&mut arena, Task::new(i as u32)).unwrap();
+            create_task(
+                &mut arena,
+                Task::new(i as u32, BOOTSTRAP_ADDRESS_SPACE_HANDLE),
+            )
+            .unwrap();
         }
         assert_eq!(
-            create_task(&mut arena, Task::new(99)).unwrap_err(),
+            create_task(&mut arena, Task::new(99, BOOTSTRAP_ADDRESS_SPACE_HANDLE)).unwrap_err(),
             ObjError::ArenaFull
         );
+    }
+
+    #[test]
+    fn address_space_handle_round_trips() {
+        let task = Task::new(42, BOOTSTRAP_ADDRESS_SPACE_HANDLE);
+        assert_eq!(task.address_space_handle(), BOOTSTRAP_ADDRESS_SPACE_HANDLE);
     }
 }

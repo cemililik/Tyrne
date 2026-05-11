@@ -347,7 +347,7 @@ fn idle_entry() -> ! {
         // can only return `Err(NoCurrentTask)`, which is impossible once
         // the scheduler has started. Audit: UNSAFE-2026-0014.
         unsafe {
-            yield_now(SCHED.as_mut_ptr(), cpu).expect("idle: yield_now failed");
+            yield_now(SCHED.as_mut_ptr(), cpu, |_| {}).expect("idle: yield_now failed");
         }
     }
 }
@@ -389,6 +389,7 @@ fn task_b() -> ! {
             IPC_QUEUES.as_mut_ptr(),
             TABLE_B.as_mut_ptr(),
             *(*EP_CAP_B.0.get()).assume_init_ref(),
+            |_| {},
         )
         .expect("task B: ipc_recv failed")
     };
@@ -427,6 +428,7 @@ fn task_b() -> ! {
             *(*EP_CAP_B.0.get()).assume_init_ref(),
             reply,
             None,
+            |_| {},
         )
         .expect("task B: ipc_send reply failed");
 
@@ -435,7 +437,7 @@ fn task_b() -> ! {
         // run (cooperative scheduling; B never blocks again after the send).
         // `yield_now` only errors with `NoCurrentTask`, which cannot happen
         // once the scheduler has started.
-        yield_now(SCHED.as_mut_ptr(), (*CPU.0.get()).assume_init_ref())
+        yield_now(SCHED.as_mut_ptr(), (*CPU.0.get()).assume_init_ref(), |_| {})
             .expect("task B: yield_now after reply failed");
     }
 
@@ -481,6 +483,7 @@ fn task_a() -> ! {
             *(*EP_CAP_A.0.get()).assume_init_ref(),
             msg,
             None,
+            |_| {},
         )
         .expect("task A: ipc_send failed");
     }
@@ -499,6 +502,7 @@ fn task_a() -> ! {
             IPC_QUEUES.as_mut_ptr(),
             TABLE_A.as_mut_ptr(),
             *(*EP_CAP_A.0.get()).assume_init_ref(),
+            |_| {},
         )
         .expect("task A: ipc_recv (reply) failed")
     };
@@ -820,9 +824,21 @@ pub extern "C" fn kernel_entry() -> ! {
     // runs. Audit: UNSAFE-2026-0014.
     let (handle_a, handle_b, handle_idle) = unsafe {
         let arena = &mut *TASK_ARENA.as_mut_ptr();
-        let ha = create_task(arena, Task::new(0)).expect("create_task A failed");
-        let hb = create_task(arena, Task::new(1)).expect("create_task B failed");
-        let hi = create_task(arena, Task::new(2)).expect("create_task idle failed");
+        let ha = create_task(
+            arena,
+            Task::new(0, tyrne_kernel::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE),
+        )
+        .expect("create_task A failed");
+        let hb = create_task(
+            arena,
+            Task::new(1, tyrne_kernel::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE),
+        )
+        .expect("create_task B failed");
+        let hi = create_task(
+            arena,
+            Task::new(2, tyrne_kernel::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE),
+        )
+        .expect("create_task idle failed");
         (ha, hb, hi)
     };
 
@@ -886,15 +902,28 @@ pub extern "C" fn kernel_entry() -> ! {
     // [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
     unsafe {
         sched
-            .add_task(cpu, handle_b, task_b, TASK_B_STACK.top())
+            .add_task(
+                cpu,
+                handle_b,
+                tyrne_kernel::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                task_b,
+                TASK_B_STACK.top(),
+            )
             .expect("add_task B failed: queue full or arena exhausted");
         sched
-            .add_task(cpu, handle_a, task_a, TASK_A_STACK.top())
+            .add_task(
+                cpu,
+                handle_a,
+                tyrne_kernel::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                task_a,
+                TASK_A_STACK.top(),
+            )
             .expect("add_task A failed: queue full or arena exhausted");
         register_idle(
             core::ptr::from_mut(&mut sched),
             cpu,
             handle_idle,
+            tyrne_kernel::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE,
             idle_entry,
             TASK_IDLE_STACK.top(),
         );
@@ -923,7 +952,7 @@ pub extern "C" fn kernel_entry() -> ! {
     // `-> !` becomes a hard build error in every caller's return-type
     // analysis).
     unsafe {
-        start(SCHED.as_mut_ptr(), cpu);
+        start(SCHED.as_mut_ptr(), cpu, |_| {});
     }
 }
 

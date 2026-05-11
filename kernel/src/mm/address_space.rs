@@ -38,6 +38,25 @@ use tyrne_hal::{FrameProvider, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr}
 /// T-018's two-AS isolation tests; later BSPs may grow this.
 pub const ADDRESS_SPACE_ARENA_CAPACITY: usize = 8;
 
+/// The canonical [`AddressSpaceHandle`] for the bootstrap address space.
+///
+/// The bootstrap AS lives in arena slot 0 (kernel-init allocates it
+/// first per [ADR-0028 §Simulation row 0][adr-0028]). Code that needs
+/// to name the bootstrap AS **before** the arena allocation runs uses
+/// this constant — most notably the BSP-side `Task` constructors in
+/// `kernel_entry` (commit 4 lands the field on `Task`; commit 5's BSP
+/// wiring then ensures arena slot 0 holds the bootstrap AS that this
+/// handle names).
+///
+/// Calling discipline: the BSP MUST allocate the bootstrap AS first
+/// (before any other AS or any cap-table operation that consumes a
+/// slot) so this handle's `(index=0, generation=0)` deterministically
+/// matches the live arena slot.
+///
+/// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
+pub const BOOTSTRAP_ADDRESS_SPACE_HANDLE: AddressSpaceHandle =
+    AddressSpaceHandle::from_slot(SlotId::first_slot());
+
 /// Kernel-side `AddressSpace` kernel object — wraps the BSP-specific
 /// `<M as Mmu>::AddressSpace` value with kernel-side bookkeeping.
 ///
