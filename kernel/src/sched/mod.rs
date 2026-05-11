@@ -653,29 +653,42 @@ pub unsafe fn start<C: ContextSwitch + Cpu>(
     // across the `cpu.context_switch` below. Audit: UNSAFE-2026-0014.
     let next_idx = unsafe { start_prelude(sched) };
 
-    // Activate the first task's AddressSpace before the bootstrap-to-task
-    // context switch. Unlike `yield_now`'s hook this fires
-    // unconditionally — there is no "previous AS" to compare against
-    // (the bootstrap stack frame is being abandoned), so the activation
-    // closure receives the first task's AS handle if one is known. v1
-    // BSPs pass the bootstrap AS handle; future per-task AS work passes
-    // the task's own handle. If the slot has no recorded AS (e.g.,
-    // `add_task` was called before the AS-handle threading existed),
-    // the closure is dropped without firing.
     // SAFETY: caller satisfies the Shared safety contract for `sched`.
-    // The read happens after `start_prelude`'s &mut Scheduler borrow has
+    // The read happens after `start_prelude`'s `&mut Scheduler` borrow has
     // dropped and before the activate / context_switch sequence below;
     // no `&mut Scheduler<C>` is alive at this point. Audit: UNSAFE-2026-0014.
     let first_as: Option<AddressSpaceHandle> =
         unsafe { (*sched).task_address_space_handles[next_idx] };
+
+    let mut throwaway = <C::TaskContext as Default>::default();
+    let _guard = IrqGuard::new(cpu);
+
+    // Activate the first task's AddressSpace **inside** the `IrqGuard`
+    // scope, matching the discipline `yield_now` / `ipc_recv_and_yield`
+    // already follow per [ADR-0028 §Simulation row 3][adr-0028]. Unlike
+    // those hooks this fire is unconditional — there is no "previous
+    // AS" to compare against (the bootstrap stack frame is being
+    // abandoned), so the closure receives the first task's AS handle
+    // if one is known. v1 BSPs pass the bootstrap AS handle; future
+    // per-task AS work passes the task's own handle. If the slot has
+    // no recorded AS, the closure is dropped without firing.
+    //
+    // Holding `_guard` here closes the IRQ-window in which an
+    // interrupt taken between `activate` and `cpu.context_switch`
+    // would run the handler under the freshly-installed `TTBR0_EL1`
+    // — harmless in v1 (every task shares the bootstrap AS so the
+    // new TTBR's kernel mappings are identical), but a forward-
+    // defensive correctness gate for B5+ multi-AS userspace where a
+    // per-task AS without the kernel mapping would translation-fault
+    // any IRQ taken in this window.
+    //
+    // [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md#simulation
     if let Some(target) = first_as {
         activate_address_space(target);
     } else {
         drop(activate_address_space);
     }
 
-    let mut throwaway = <C::TaskContext as Default>::default();
-    let _guard = IrqGuard::new(cpu);
     // SAFETY: `next_idx` is in range (written by `add_task`); interrupts are
     // masked by `IrqGuard`; the throwaway current context lives on the
     // abandoned bootstrap stack frame and is never restored. No `&mut
