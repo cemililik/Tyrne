@@ -198,6 +198,20 @@ impl<T, const N: usize> Arena<T, N> {
     pub fn contains(&self, id: SlotId) -> bool {
         self.get(id).is_some()
     }
+
+    /// Return `true` when every slot is in use (the free list is empty).
+    ///
+    /// Useful for preflight capacity checks at composite operations
+    /// that allocate from multiple resources — e.g.,
+    /// `cap_create_address_space` checks both the arena and the
+    /// capability table for capacity before allocating a PMM frame,
+    /// so a downstream `ArenaFull` cannot leak the just-allocated
+    /// frame (the `FrameProvider` trait has no `free_frame` method
+    /// in v1; preflight + fail-fast is the structurally-safe path).
+    #[must_use]
+    pub const fn is_full(&self) -> bool {
+        self.free_head.is_none()
+    }
 }
 
 #[cfg(test)]

@@ -125,7 +125,7 @@ The implementation lands across several bisectable commits on a `t-018-address-s
 
 ## Definition of done
 
-- [x] All Acceptance criteria checked.
+- [x] All Acceptance criteria checked **or explicitly deferred per Review history** (5 items are `[ ]` and intentional: the optional second-AS smoke fixture at §"BSP wiring"; the `activation_hook_no_alloc` dedicated test at §"Host tests" — structurally guaranteed by `get_address_space` being a read-only accessor; the UNSAFE-2026-0025 + UNSAFE-2026-0026 `Pending QEMU smoke verification` lift Amendments at §"Audit-log updates" + §"Definition of done" — defer to B5+ first userspace AS creation when a real caller arms `cap_map` / `cap_create_address_space`).
 - [x] All bisectable commits land green (each ends with `cargo fmt --check`, `cargo host-clippy -D warnings`, `cargo kernel-clippy -D warnings`, `cargo test`, `cargo kernel-build` clean).
 - [x] QEMU smoke trace matches the post-T-017 baseline plus one (or two, with the second-AS fixture) new banner line.
 - [x] `cargo +nightly miri test` is green on the new AddressSpace module.

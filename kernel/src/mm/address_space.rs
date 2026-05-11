@@ -336,14 +336,26 @@ pub fn get_address_space_mut<M: Mmu>(
 /// commit 5).
 ///
 /// **Stale-handle behaviour.** Returns silently if `handle` is stale
-/// (the underlying [`Arena::get`] returns `None`). A stale handle on
-/// the context-switch path indicates a kernel programming error
-/// (scheduler's `task_address_space_handles` array points at a freed
-/// arena slot), but panicking inside the activation hook would abort
-/// the kernel from inside an `IrqGuard` scope which is worse than
-/// running the next task on the previously-active AS. The next
-/// `yield_now` may re-fire the activation if the handle slot becomes
-/// live again.
+/// (the underlying [`Arena::get`] returns `None`) **in release**.
+/// In debug builds a `debug_assert!` fires with the handle for
+/// diagnostics.
+///
+/// A stale handle on the context-switch path indicates a kernel
+/// programming error (the scheduler's `task_address_space_handles`
+/// array points at a freed arena slot — which is structurally
+/// unreachable in v1 because the scheduler only stores handles
+/// returned by live `create_address_space` calls and v1 has no
+/// `destroy_address_space` caller path that races with the
+/// activation hook). Panicking unconditionally would abort the
+/// kernel from inside an `IrqGuard` scope (the activation hook
+/// always runs under one — see `yield_now` /
+/// `ipc_recv_and_yield` / `start` in `kernel/src/sched/mod.rs`),
+/// which is worse than continuing on the previously-active AS:
+/// the panic handler may not be able to reach the console under
+/// interrupts-disabled discipline, leaving the kernel in a
+/// silent-halt state. The release-build silent no-op is the
+/// fail-soft trade-off; the debug-build assert catches
+/// development-time regressions.
 ///
 /// Crate-level (`pub`) because the BSP's activation closure invokes
 /// it; the kernel-side surface does not otherwise expose
@@ -360,6 +372,14 @@ pub fn activate_address_space_handle<M: Mmu>(
 ) {
     if let Some(as_) = get_address_space(arena, handle) {
         mmu.activate(as_.inner());
+    } else {
+        // Stale handle — see the doc-comment for the rationale of
+        // fail-soft (no-op in release) + debug-build assert.
+        debug_assert!(
+            false,
+            "activate_address_space_handle: stale handle {handle:?} — \
+             scheduler's task_address_space_handles invariant violated"
+        );
     }
 }
 
@@ -411,13 +431,23 @@ fn resolve_address_space_cap(
 ///    B4+ work introduces an `Untyped`-style frame ownership
 ///    discipline; v1 adopts the simplest "any AS cap grants AS
 ///    creation" shape.
-/// 2. Validates `new_rights ⊆ parent_cap.rights` per the
-///    no-widening discipline of [ADR-0014][adr-0014] (mirrors
-///    [`CapabilityTable::cap_copy`]).
-/// 3. Allocates a root frame via [`FrameProvider::alloc_frame`].
+/// 2. Rights checks: (2a) parent must hold [`CapRights::DERIVE`]
+///    to mint any child cap (mirrors [`CapabilityTable::cap_derive`]'s
+///    discipline; returns [`InsufficientRights`] on miss); (2b)
+///    `new_rights ⊆ parent_cap.rights` per the no-widening rule
+///    of [ADR-0014][adr-0014] (returns [`WidenedRights`] on miss).
+/// 3. **Preflight** the arena + cap-table for capacity. If either
+///    is full, return the matching error **before** PMM is
+///    touched. This keeps the leak paths (steps 6 / 7) structurally
+///    unreachable in **all** BSPs (not just v1's sized arenas) —
+///    [`FrameProvider`] has no `free_frame` method, so a downstream
+///    capacity failure could otherwise leak the just-allocated
+///    root frame. Single-core cooperative semantics make
+///    preflight+commit atomic.
+/// 4. Allocates a root frame via [`FrameProvider::alloc_frame`].
 ///    Returns [`OutOfFrames`] on PMM exhaustion; no other state
 ///    has been mutated at this point.
-/// 4. Calls `unsafe { mmu.create_address_space(root) }` to
+/// 5. Calls `unsafe { mmu.create_address_space(root) }` to
 ///    materialise the BSP-specific inner value. The trait method
 ///    is declared `unsafe fn` at the HAL trait surface (ADR-0009);
 ///    `root` is page-aligned (statically by [`PhysFrame`]) and
@@ -429,24 +459,29 @@ fn resolve_address_space_cap(
 ///    audit-log entry's operation field; the SAFETY comment at
 ///    the call site documents the invariants the HAL trait
 ///    contract requires.
-/// 5. Allocates an arena slot via [`create_address_space`].
-///    On [`ArenaFull`] the PMM root frame is leaked (v1
-///    limitation: [`FrameProvider`] has no `free_frame` method;
-///    direct PMM access would force the wrapper to take
-///    `&mut Pmm<N, R>` and lose BSP-agnosticism at the wrapper
-///    surface). This path is structurally unreachable in v1's
-///    sized-arena BSPs.
-/// 6. Mints the cap via [`CapabilityTable::insert_root`]. On
-///    cap-table failure, rolls back the arena slot via
-///    [`destroy_address_space`]; the PMM frame still leaks.
+/// 6. Allocates an arena slot via [`create_address_space`]. The
+///    preflight at step 3 guarantees this succeeds in v1.
+/// 7. Mints the cap via [`CapabilityTable::insert_root`]. The
+///    preflight at step 3 guarantees this succeeds in v1. The
+///    rollback arm (which would free the arena slot but leak the
+///    PMM frame) is retained for type honesty + forward-defensive
+///    coverage but is structurally unreachable when the preflight
+///    holds.
 ///
 /// # Errors
 ///
-/// - [`OutOfFrames`] — PMM exhausted at step 3.
-/// - [`ArenaFull`] — arena exhausted at step 5; PMM frame leaks.
-/// - [`CapError(CapError)`] — cap lookup / kind validation /
-///   widening check / table-mint failure (each preserves the
-///   underlying [`CapError`] discriminator).
+/// - [`OutOfFrames`] — PMM exhausted at step 4.
+/// - [`ArenaFull`] — preflight detected arena full at step 3.
+/// - [`CapError(InsufficientRights)`][`CapError(CapError)`] —
+///   parent cap lacks `DERIVE`.
+/// - [`CapError(WrongKind)`][`CapError(CapError)`] —
+///   parent cap is not `CapKind::AddressSpace`.
+/// - [`CapError(WidenedRights)`][`CapError(CapError)`] —
+///   `new_rights` exceeds parent's rights.
+/// - [`CapError(CapsExhausted)`][`CapError(CapError)`] —
+///   preflight detected cap-table full at step 3.
+/// - [`CapError(InvalidHandle)`][`CapError(CapError)`] —
+///   `parent_cap_handle` lookup failed at step 1.
 ///
 /// [adr-0014]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0014-capability-representation.md
 /// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
@@ -454,6 +489,8 @@ fn resolve_address_space_cap(
 /// [`OutOfFrames`]: AddressSpaceError::OutOfFrames
 /// [`ArenaFull`]: AddressSpaceError::ArenaFull
 /// [`CapError(CapError)`]: AddressSpaceError::CapError
+/// [`InsufficientRights`]: crate::cap::CapError::InsufficientRights
+/// [`WidenedRights`]: crate::cap::CapError::WidenedRights
 #[allow(
     clippy::too_many_arguments,
     reason = "cap-gated wrappers thread the full kernel-state surface \
@@ -478,13 +515,46 @@ pub fn cap_create_address_space<M: Mmu>(
         return Err(AddressSpaceError::CapError(CapError::WrongKind));
     }
 
-    // Step 2: no-widening check on rights.
+    // Step 2: rights checks.
+    //
+    // 2a — DERIVE authority: mirrors [`CapabilityTable::cap_derive`]'s
+    //      discipline. A parent cap that does not carry DERIVE cannot
+    //      mint a child of any kind, including an AddressSpace cap.
+    //      Forward-defensive: in v1 the kernel-init holds the
+    //      bootstrap AS cap with all four rights so this branch is
+    //      structurally unreachable, but future narrowed AS caps
+    //      (Phase-C `Untyped` discipline) will hit it correctly.
+    if !parent_cap.rights().contains(CapRights::DERIVE) {
+        return Err(AddressSpaceError::CapError(CapError::InsufficientRights));
+    }
+    // 2b — no-widening check on `new_rights`.
     if !parent_cap.rights().contains(new_rights) {
         return Err(AddressSpaceError::CapError(CapError::WidenedRights));
     }
 
-    // Step 3: PMM frame for the new root. Fail-fast before any
-    // arena / cap-table mutation.
+    // Step 3: preflight capacity checks for the arena and cap table.
+    //
+    // The PMM `alloc_frame` call below (step 4) cannot be rolled
+    // back — [`FrameProvider`] has no `free_frame` method in v1;
+    // direct `Pmm<N, R>` access would lose BSP-agnosticism at the
+    // wrapper surface. To keep the leak paths structurally
+    // unreachable in **all** BSPs (not just v1's sized arenas), we
+    // verify capacity here, **before** PMM is touched. Under v1's
+    // single-core cooperative model there is no race between
+    // preflight and the subsequent allocations (the function runs
+    // atomically; no peer can mutate `arena` or `table` between the
+    // checks below and the alloc/insert calls).
+    if arena.is_full() {
+        return Err(AddressSpaceError::ArenaFull);
+    }
+    if table.is_full() {
+        return Err(AddressSpaceError::CapError(CapError::CapsExhausted));
+    }
+
+    // Step 4: PMM frame for the new root. After the preflight above
+    // succeeds, the arena and cap-table allocations downstream
+    // (steps 6, 7) cannot fail with capacity errors — so the PMM
+    // frame is no longer at risk of leaking.
     let root = pmm.alloc_frame().ok_or(AddressSpaceError::OutOfFrames)?;
 
     // Step 4: materialise the BSP-specific inner value.
@@ -513,7 +583,7 @@ pub fn cap_create_address_space<M: Mmu>(
     // (3) Exclusive ownership: the `PhysFrame` value is owned by
     // this stack frame at the call site; no other code path has
     // (or will have) a reference to it until `arena.allocate`
-    // moves it into the arena slot at step 5.
+    // moves it into the arena slot at step 6.
     //
     // **Why safer alternatives were rejected.** The unsafe is on
     // [`Mmu::create_address_space`]'s trait declaration; the wrapper
@@ -527,11 +597,27 @@ pub fn cap_create_address_space<M: Mmu>(
     // [UNSAFE-2026-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
     let inner = unsafe { mmu.create_address_space(root) };
 
-    // Step 5: arena slot.
+    // Step 6: arena slot. Preflight at step 3 guarantees `arena`
+    // had a free slot at the start of this function; under the
+    // single-core cooperative model nothing has mutated the arena
+    // between then and now, so `create_address_space` returns
+    // `Ok(handle)` deterministically. The `?` propagation is
+    // retained for type honesty and to handle any future change in
+    // the arena's contract; it should not fire in v1.
     let handle = create_address_space(arena, AddressSpace::from_mmu_address_space(inner))?;
 
-    // Step 6: mint cap. On failure, rollback the arena slot. The
-    // PMM frame leaks (v1 limitation; documented above).
+    // Step 7: mint cap. Preflight at step 3 likewise guarantees the
+    // table had capacity; the `insert_root` call returns
+    // `Ok(cap_handle)` deterministically under v1. The `match`
+    // retains a rollback arm for type honesty + forward-defensive
+    // coverage: if a future change adds another `insert_root`
+    // failure mode (e.g., a per-slot validation that fires after
+    // the capacity check), the arena slot is rolled back via
+    // `destroy_address_space`. The PMM frame still leaks on the
+    // rollback path — the preflight makes this leak structurally
+    // unreachable in v1; documenting the rollback keeps the code
+    // honest about what would happen if the preflight invariant
+    // were ever violated.
     let cap = Capability::new(new_rights, CapObject::AddressSpace(handle));
     match table.insert_root(cap) {
         Ok(cap_handle) => Ok(cap_handle),
@@ -952,24 +1038,28 @@ mod tests {
 
     #[test]
     fn cap_create_address_space_rejects_widened_rights() {
-        // Parent has empty rights; child cannot request DUPLICATE.
+        // Parent has DERIVE but not DUPLICATE; child cannot request
+        // DUPLICATE (widening). Note: parent MUST have DERIVE to even
+        // attempt the widen check — the DERIVE check fires first per
+        // `cap_create_address_space`'s step 2a; this test isolates the
+        // widening-rights branch (step 2b).
         let mmu = FakeMmu::new();
         let mut arena: AddressSpaceArena<FakeMmu> = AddressSpaceArena::new();
         let mut table = CapabilityTable::new();
         let bootstrap_inner = fake_inner(&mmu, frame(0x4000_0000));
         let bootstrap_as = AddressSpace::wrap_bootstrap(bootstrap_inner);
         let as_handle = create_address_space(&mut arena, bootstrap_as).unwrap();
-        let narrow_cap = Capability::new(
-            CapRights::empty(), // parent has no rights to grant
+        let derive_only_cap = Capability::new(
+            CapRights::DERIVE, // can derive a child but cannot grant DUPLICATE
             CapObject::AddressSpace(as_handle),
         );
-        let narrow_cap_handle = table.insert_root(narrow_cap).unwrap();
+        let derive_only_cap_handle = table.insert_root(derive_only_cap).unwrap();
         let mut pmm = VecFrameProvider::new(vec![frame(0x5000_0000)]);
 
         let result = cap_create_address_space(
             &mut table,
-            narrow_cap_handle,
-            CapRights::DUPLICATE, // trying to widen
+            derive_only_cap_handle,
+            CapRights::DUPLICATE, // trying to widen — parent lacks DUPLICATE
             &mmu,
             &mut pmm,
             &mut arena,
@@ -979,6 +1069,38 @@ mod tests {
             result,
             Err(AddressSpaceError::CapError(CapError::WidenedRights))
         ));
+        assert_eq!(pmm.remaining(), 1);
+    }
+
+    #[test]
+    fn cap_create_address_space_rejects_missing_derive() {
+        // Parent has empty rights — no DERIVE authority. The wrapper
+        // must reject with InsufficientRights before touching PMM.
+        // Mirrors `CapabilityTable::cap_derive`'s discipline.
+        let mmu = FakeMmu::new();
+        let mut arena: AddressSpaceArena<FakeMmu> = AddressSpaceArena::new();
+        let mut table = CapabilityTable::new();
+        let bootstrap_inner = fake_inner(&mmu, frame(0x4000_0000));
+        let bootstrap_as = AddressSpace::wrap_bootstrap(bootstrap_inner);
+        let as_handle = create_address_space(&mut arena, bootstrap_as).unwrap();
+        let no_derive_cap = Capability::new(CapRights::empty(), CapObject::AddressSpace(as_handle));
+        let no_derive_cap_handle = table.insert_root(no_derive_cap).unwrap();
+        let mut pmm = VecFrameProvider::new(vec![frame(0x5000_0000)]);
+
+        let result = cap_create_address_space(
+            &mut table,
+            no_derive_cap_handle,
+            CapRights::empty(),
+            &mmu,
+            &mut pmm,
+            &mut arena,
+        );
+
+        assert!(matches!(
+            result,
+            Err(AddressSpaceError::CapError(CapError::InsufficientRights))
+        ));
+        // Preflight rejected before PMM was touched.
         assert_eq!(pmm.remaining(), 1);
     }
 

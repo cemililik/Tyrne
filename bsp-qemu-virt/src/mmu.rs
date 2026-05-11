@@ -94,14 +94,35 @@ impl QemuVirtAddressSpace {
     /// method (whose contract requires a *zero-filled* root — true for
     /// post-PMM-alloc frames, false for the live bootstrap root).
     ///
-    /// **Safe Rust** — the resulting `QemuVirtAddressSpace` is just a
-    /// `PhysFrame` wrapper. Subsequent operations on the value
-    /// (`Mmu::map` / `Mmu::activate`) carry their own safety
-    /// preconditions; this constructor adds none.
+    /// # Safety
+    ///
+    /// The caller must guarantee that `root` is a valid, **currently-
+    /// live** `VMSAv8` L0 translation table — i.e., a 4 KiB frame whose
+    /// 512 × 8-byte entries are correctly-encoded `VMSAv8` table /
+    /// block / page descriptors, with at least the kernel-half
+    /// mappings populated. Subsequent operations on the resulting
+    /// `QemuVirtAddressSpace` (e.g., [`Mmu::map`] / [`Mmu::unmap`])
+    /// perform `volatile` reads + writes through this root's descriptor
+    /// chain; passing an arbitrary `PhysFrame` would dereference
+    /// garbage bytes as descriptors and produce undefined behaviour at
+    /// the page-table walker level.
+    ///
+    /// This contract is **distinct** from [`Mmu::create_address_space`]'s:
+    /// `create_address_space` requires the root to be *zero-filled*
+    /// (and the kernel-half mappings to be populated by the caller
+    /// post-construction); `from_existing_root` requires the root to
+    /// be *already populated and live*. Both are caller-side
+    /// preconditions the type system cannot enforce.
+    ///
+    /// v1's only caller is `bsp-qemu-virt/src/main.rs::kernel_entry`,
+    /// which derives `root` from the `__boot_pt_l0` linker symbol —
+    /// the L0 frame `mmu_bootstrap` populated and wrote into
+    /// `TTBR0_EL1`. The bootstrap path is the only well-known
+    /// already-live root in v1.
     ///
     /// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
     #[must_use]
-    pub fn from_existing_root(root: PhysFrame) -> Self {
+    pub unsafe fn from_existing_root(root: PhysFrame) -> Self {
         Self { root }
     }
 }
