@@ -81,6 +81,29 @@ impl QemuVirtAddressSpace {
     pub fn root(self) -> PhysFrame {
         self.root
     }
+
+    /// Construct a `QemuVirtAddressSpace` naming an already-live root
+    /// translation table.
+    ///
+    /// Companion to [`Mmu::create_address_space`] for the bootstrap
+    /// case (per [ADR-0028 §Simulation row 0][adr-0028]). `mmu_bootstrap`
+    /// activates the L0/L1/L2 frames via `MSR TTBR0_EL1` before any
+    /// `AddressSpace<QemuVirtMmu>` value exists at the kernel layer;
+    /// this constructor lets `kernel_entry` wrap the already-live root
+    /// without going through the unsafe `create_address_space` trait
+    /// method (whose contract requires a *zero-filled* root — true for
+    /// post-PMM-alloc frames, false for the live bootstrap root).
+    ///
+    /// **Safe Rust** — the resulting `QemuVirtAddressSpace` is just a
+    /// `PhysFrame` wrapper. Subsequent operations on the value
+    /// (`Mmu::map` / `Mmu::activate`) carry their own safety
+    /// preconditions; this constructor adds none.
+    ///
+    /// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
+    #[must_use]
+    pub fn from_existing_root(root: PhysFrame) -> Self {
+        Self { root }
+    }
 }
 
 /// `Mmu` impl for QEMU `virt` (`VMSAv8` page-table format, 4 KiB granule,

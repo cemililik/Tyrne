@@ -88,8 +88,8 @@ impl PhysFrameRange {
 }
 
 pub use address_space::{
-    cap_create_address_space, cap_map, cap_unmap, AddressSpace, AddressSpaceArena,
-    AddressSpaceError, AddressSpaceHandle, ADDRESS_SPACE_ARENA_CAPACITY,
-    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+    activate_address_space_handle, cap_create_address_space, cap_map, cap_unmap,
+    create_address_space, get_address_space, AddressSpace, AddressSpaceArena, AddressSpaceError,
+    AddressSpaceHandle, ADDRESS_SPACE_ARENA_CAPACITY, BOOTSTRAP_ADDRESS_SPACE_HANDLE,
 };
 pub use pmm::{Pmm, PmmError, PmmStats};

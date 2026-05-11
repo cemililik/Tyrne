@@ -326,6 +326,43 @@ pub fn get_address_space_mut<M: Mmu>(
     arena.get_mut(handle.slot())
 }
 
+/// Activate the address space named by `handle` on the current CPU.
+///
+/// Looks up the [`AddressSpace<M>`] in `arena`, then invokes
+/// [`Mmu::activate`] on its inner BSP-specific value. Used by the
+/// scheduler activation hook (T-018 commit 4) — the BSP wraps a
+/// call to this function as the closure passed to [`yield_now`] /
+/// [`ipc_send_and_yield`] / [`ipc_recv_and_yield`] / [`start`] (T-018
+/// commit 5).
+///
+/// **Stale-handle behaviour.** Returns silently if `handle` is stale
+/// (the underlying [`Arena::get`] returns `None`). A stale handle on
+/// the context-switch path indicates a kernel programming error
+/// (scheduler's `task_address_space_handles` array points at a freed
+/// arena slot), but panicking inside the activation hook would abort
+/// the kernel from inside an `IrqGuard` scope which is worse than
+/// running the next task on the previously-active AS. The next
+/// `yield_now` may re-fire the activation if the handle slot becomes
+/// live again.
+///
+/// Crate-level (`pub`) because the BSP's activation closure invokes
+/// it; the kernel-side surface does not otherwise expose
+/// [`Mmu::activate`] outside the cap-gated `cap_*` wrappers.
+///
+/// [yield_now]: crate::sched::yield_now
+/// [ipc_send_and_yield]: crate::sched::ipc_send_and_yield
+/// [ipc_recv_and_yield]: crate::sched::ipc_recv_and_yield
+/// [start]: crate::sched::start
+pub fn activate_address_space_handle<M: Mmu>(
+    arena: &AddressSpaceArena<M>,
+    handle: AddressSpaceHandle,
+    mmu: &M,
+) {
+    if let Some(as_) = get_address_space(arena, handle) {
+        mmu.activate(as_.inner());
+    }
+}
+
 // ── Capability-gated wrappers (T-018 commit 3) ────────────────────────────────
 //
 // Per [ADR-0028 §Decision outcome][adr-0028]: every `Mmu::map` /

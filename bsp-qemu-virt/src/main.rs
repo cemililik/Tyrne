@@ -259,6 +259,45 @@ static BOOT_NS: StaticCell<u64> = StaticCell::new();
 /// of `.bss` per ADR-0035 §Consequences §Bounded metadata.
 static PMM: StaticCell<BspPmm> = StaticCell::new();
 
+// ─── AddressSpace infrastructure (T-018 / ADR-0028) ──────────────────────────
+
+/// The `QemuVirtMmu` instance the activation hook + future cap-gated
+/// `Mmu::map`/`unmap` paths invoke. `QemuVirtMmu` is zero-sized today
+/// (`QemuVirtMmu::new()` is `const`); storing it in a `StaticCell`
+/// here gives the activation closure a stable address it can reach
+/// from inside the scheduler's `IrqGuard` scope.
+static MMU: StaticCell<mmu::QemuVirtMmu> = StaticCell::new();
+
+/// The address-space arena. v1 capacity `ADDRESS_SPACE_ARENA_CAPACITY`
+/// (= 8) — bootstrap AS + headroom for future B5+ userspace ASes.
+static AS_ARENA: StaticCell<tyrne_kernel::mm::AddressSpaceArena<mmu::QemuVirtMmu>> =
+    StaticCell::new();
+
+/// The bootstrap "AS authority" cap. Kernel-init's parent cap for any
+/// future `cap_create_address_space` invocation that wants to mint a
+/// new AS. Stored as a `CapHandle` into [`BOOTSTRAP_AS_TABLE`] (the
+/// kernel-init's cap table; distinct from `TABLE_A`/`TABLE_B` which
+/// are the per-task tables for the IPC demo). Currently unused by the
+/// v1 demo (no second AS is created); reserved as scaffold for B5+
+/// userspace work.
+#[allow(
+    dead_code,
+    reason = "v1 demo creates no second AS; field reserved for B5+ userspace work \
+              that uses cap_create_address_space"
+)]
+static BOOTSTRAP_AS_CAP: StaticCell<CapHandle> = StaticCell::new();
+
+/// Kernel-init's capability table. Mirrors `TABLE_A`/`TABLE_B`'s
+/// pattern but for the kernel-init context — holds the bootstrap AS
+/// authority cap. Currently 1 entry (the bootstrap AS cap); B5+
+/// will grow this with the kernel-init's untyped / memory-region
+/// authority caps.
+#[allow(
+    dead_code,
+    reason = "v1 demo creates no second AS; table reserved for B5+ userspace work"
+)]
+static BOOTSTRAP_AS_TABLE: StaticCell<CapabilityTable> = StaticCell::new();
+
 // ─── IPC infrastructure ───────────────────────────────────────────────────────
 
 /// Endpoint arena — the kernel-object pool backing the IPC demo endpoint.
@@ -318,6 +357,38 @@ static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 /// the BSP did not register idle at all (i.e. `register_idle` was not
 /// called before `start`).
 ///
+/// Scheduler activation-hook callback for address-space changes.
+///
+/// Passed to [`yield_now`] / [`ipc_send_and_yield`] /
+/// [`ipc_recv_and_yield`] / [`start`] as the `activate_address_space`
+/// closure parameter (per T-018 commit 4's scheduler-side hook).
+/// Looks up `handle` in [`AS_ARENA`] and invokes [`tyrne_hal::Mmu::activate`]
+/// via [`tyrne_kernel::mm::activate_address_space_handle`]. Stale
+/// handles are silently ignored — the scheduler's
+/// `task_address_space_handles` array stores only handles minted
+/// through the AS arena, so a stale hit indicates a use-after-free
+/// in scheduler state that no recovery here can fix; logging /
+/// panic would compound the failure inside an `IrqGuard` scope.
+///
+/// In v1 every task runs on the bootstrap AS, so the scheduler's
+/// `address_space_activation_target` helper short-circuits before
+/// ever invoking this function. The wiring is in place so future
+/// B5+ multi-AS userspace tasks slot in additively.
+fn activate_address_space(handle: tyrne_kernel::mm::AddressSpaceHandle) {
+    // SAFETY: `AS_ARENA` and `MMU` are written exactly once in
+    // `kernel_entry` before `start()` is called; the activation hook
+    // runs inside the scheduler's `IrqGuard` scope (after the
+    // `&mut Scheduler<C>` borrow drops) so no peer can race. The
+    // shared `&` reborrows below do not alias any live `&mut`. Audit:
+    // UNSAFE-2026-0010 (StaticCell pattern) + UNSAFE-2026-0014
+    // (momentary `&` across cooperative switches).
+    unsafe {
+        let arena = (*AS_ARENA.0.get()).assume_init_ref();
+        let mmu = (*MMU.0.get()).assume_init_ref();
+        tyrne_kernel::mm::activate_address_space_handle(arena, handle, mmu);
+    }
+}
+
 /// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
 fn idle_entry() -> ! {
@@ -347,7 +418,8 @@ fn idle_entry() -> ! {
         // can only return `Err(NoCurrentTask)`, which is impossible once
         // the scheduler has started. Audit: UNSAFE-2026-0014.
         unsafe {
-            yield_now(SCHED.as_mut_ptr(), cpu, |_| {}).expect("idle: yield_now failed");
+            yield_now(SCHED.as_mut_ptr(), cpu, activate_address_space)
+                .expect("idle: yield_now failed");
         }
     }
 }
@@ -389,7 +461,7 @@ fn task_b() -> ! {
             IPC_QUEUES.as_mut_ptr(),
             TABLE_B.as_mut_ptr(),
             *(*EP_CAP_B.0.get()).assume_init_ref(),
-            |_| {},
+            activate_address_space,
         )
         .expect("task B: ipc_recv failed")
     };
@@ -428,7 +500,7 @@ fn task_b() -> ! {
             *(*EP_CAP_B.0.get()).assume_init_ref(),
             reply,
             None,
-            |_| {},
+            activate_address_space,
         )
         .expect("task B: ipc_send reply failed");
 
@@ -437,8 +509,12 @@ fn task_b() -> ! {
         // run (cooperative scheduling; B never blocks again after the send).
         // `yield_now` only errors with `NoCurrentTask`, which cannot happen
         // once the scheduler has started.
-        yield_now(SCHED.as_mut_ptr(), (*CPU.0.get()).assume_init_ref(), |_| {})
-            .expect("task B: yield_now after reply failed");
+        yield_now(
+            SCHED.as_mut_ptr(),
+            (*CPU.0.get()).assume_init_ref(),
+            activate_address_space,
+        )
+        .expect("task B: yield_now after reply failed");
     }
 
     // Unreachable in the v1 single-round demo — see the task_b doc comment.
@@ -483,7 +559,7 @@ fn task_a() -> ! {
             *(*EP_CAP_A.0.get()).assume_init_ref(),
             msg,
             None,
-            |_| {},
+            activate_address_space,
         )
         .expect("task A: ipc_send failed");
     }
@@ -502,7 +578,7 @@ fn task_a() -> ! {
             IPC_QUEUES.as_mut_ptr(),
             TABLE_A.as_mut_ptr(),
             *(*EP_CAP_A.0.get()).assume_init_ref(),
-            |_| {},
+            activate_address_space,
         )
         .expect("task A: ipc_recv (reply) failed")
     };
@@ -565,6 +641,16 @@ extern "C" {
     /// symbol is 16-byte-aligned (post-`ALIGN(16); . = . + 64K`),
     /// so the BSP rounds it up to 4 KiB at PMM-init time.
     static __stack_top: u8;
+
+    /// L0 root translation-table frame, reserved in `linker.ld`'s
+    /// `.bss` section by T-016. `mmu_bootstrap()` populates it with
+    /// the bootstrap kernel mappings + writes its address to
+    /// `TTBR0_EL1`. T-018 commit 5 reads its PA here to wrap the
+    /// already-live topology in an [`AddressSpace<QemuVirtMmu>`]
+    /// kernel object — per ADR-0028 §Simulation row 0, the wrap
+    /// must NOT call `Mmu::create_address_space` (which would
+    /// re-zero the L0 frame).
+    static __boot_pt_l0: [u64; 512];
 }
 
 /// First Rust entry after the assembly stub.
@@ -738,6 +824,98 @@ pub extern "C" fn kernel_entry() -> ! {
             w,
             "tyrne: pmm initialized ({} frames available; {} reserved)",
             pmm_stats.free_frames, pmm_stats.reserved_frames
+        );
+    }
+
+    // ── Address-space arena init — T-018 / ADR-0028 ───────────────────────────
+    //
+    // Materialise the BSP-specific `Mmu` instance, then wrap the
+    // already-active L0 root frame (written into `TTBR0_EL1` by
+    // `mmu_bootstrap` above) into a kernel-side `AddressSpace<QemuVirtMmu>`
+    // and publish it as arena slot 0 (the bootstrap AS). Mint the
+    // bootstrap AS authority cap in `BOOTSTRAP_AS_TABLE`. Order
+    // (per ADR-0028 §Simulation row 0): wrap_existing_root → wrap_bootstrap
+    // → arena.alloc → cap mint → banner. **No** `Mmu::create_address_space`
+    // call on the bootstrap root — that would re-zero the live L0 frame
+    // and break the running translation tables.
+
+    // SAFETY: MMU is a zero-sized type; writing through the StaticCell
+    // is bookkeeping only. Audit: UNSAFE-2026-0010.
+    unsafe {
+        (*MMU.0.get()).write(mmu::QemuVirtMmu::new());
+    }
+
+    // SAFETY: AS_ARENA is in `.bss` (zero-init'd by _start); the write
+    // here installs the default-constructed arena. Audit: UNSAFE-2026-0010.
+    unsafe {
+        (*AS_ARENA.0.get()).write(tyrne_kernel::mm::AddressSpaceArena::<mmu::QemuVirtMmu>::new());
+    }
+
+    // Compute the L0 root PA. The `__boot_pt_l0` linker symbol resolves
+    // to the PA of the bootstrap L0 frame (identity-mapped post-MMU per
+    // ADR-0027), already populated by `mmu_bootstrap` and written into
+    // TTBR0_EL1.
+    //
+    // SAFETY: `addr_of!` of an `extern "C"` static is itself safe — no
+    // load happens here, only the symbol's address is taken.
+    let l0_root = {
+        let pa = core::ptr::addr_of!(__boot_pt_l0) as usize;
+        tyrne_hal::PhysFrame::from_aligned(PhysAddr(pa))
+            .expect("L0 root must be 4 KiB-aligned per linker.ld `.boot_pt` reservation")
+    };
+
+    // Wrap the already-live root + publish in arena slot 0.
+    // SAFETY: AS_ARENA was just written above; mmu was just written above.
+    // Audit: UNSAFE-2026-0010 (StaticCell pattern) + UNSAFE-2026-0014
+    // (momentary &mut to the just-initialised arena).
+    let (bootstrap_as_handle, bootstrap_root_pa) = unsafe {
+        let arena = (*AS_ARENA.0.get()).assume_init_mut();
+        let inner = mmu::QemuVirtAddressSpace::from_existing_root(l0_root);
+        let address_space = tyrne_kernel::mm::AddressSpace::wrap_bootstrap(inner);
+        let handle = tyrne_kernel::mm::create_address_space(arena, address_space)
+            .expect("bootstrap AS allocation in empty arena cannot fail");
+        let mmu = (*MMU.0.get()).assume_init_ref();
+        let root_pa = tyrne_kernel::mm::get_address_space(arena, handle)
+            .expect("just-allocated handle resolves")
+            .root_frame(mmu)
+            .as_usize();
+        (handle, root_pa)
+    };
+
+    // Mint the bootstrap AS authority cap. The kernel-init holds full
+    // rights over the bootstrap AS; future per-AS caps land via
+    // cap_create_address_space with narrowed rights.
+    //
+    // SAFETY: BOOTSTRAP_AS_TABLE in `.bss`; write installs the
+    // default-constructed table. Audit: UNSAFE-2026-0010.
+    unsafe {
+        (*BOOTSTRAP_AS_TABLE.0.get()).write(CapabilityTable::new());
+    }
+    // SAFETY: BOOTSTRAP_AS_TABLE just written; momentary &mut for the
+    // insert_root call drops at scope end. Audit: UNSAFE-2026-0014.
+    let bootstrap_as_cap = unsafe {
+        let table = (*BOOTSTRAP_AS_TABLE.0.get()).assume_init_mut();
+        let cap = Capability::new(
+            CapRights::DUPLICATE | CapRights::DERIVE | CapRights::REVOKE | CapRights::TRANSFER,
+            CapObject::AddressSpace(bootstrap_as_handle),
+        );
+        table
+            .insert_root(cap)
+            .expect("bootstrap AS cap mint in empty table cannot fail")
+    };
+    // SAFETY: BOOTSTRAP_AS_CAP write installs the just-minted handle.
+    // Audit: UNSAFE-2026-0010.
+    unsafe {
+        (*BOOTSTRAP_AS_CAP.0.get()).write(bootstrap_as_cap);
+    }
+
+    {
+        let mut w = FmtWriter(console);
+        let _ = writeln!(
+            w,
+            "tyrne: address-space-arena ready (1 / {} slots used; bootstrap AS root = {:#x})",
+            tyrne_kernel::mm::ADDRESS_SPACE_ARENA_CAPACITY,
+            bootstrap_root_pa
         );
     }
 
@@ -952,7 +1130,7 @@ pub extern "C" fn kernel_entry() -> ! {
     // `-> !` becomes a hard build error in every caller's return-type
     // analysis).
     unsafe {
-        start(SCHED.as_mut_ptr(), cpu, |_| {});
+        start(SCHED.as_mut_ptr(), cpu, activate_address_space);
     }
 }
 
