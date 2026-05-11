@@ -418,11 +418,17 @@ fn resolve_address_space_cap(
 ///    Returns [`OutOfFrames`] on PMM exhaustion; no other state
 ///    has been mutated at this point.
 /// 4. Calls `unsafe { mmu.create_address_space(root) }` to
-///    materialise the BSP-specific inner value. The unsafe rides
-///    [UNSAFE-2026-0023]'s existing umbrella scope — `root` is
-///    page-aligned (statically by [`PhysFrame`]) and zero-filled
-///    ([UNSAFE-2026-0026], the PMM contract), satisfying
-///    `create_address_space`'s precondition.
+///    materialise the BSP-specific inner value. The trait method
+///    is declared `unsafe fn` at the HAL trait surface (ADR-0009);
+///    `root` is page-aligned (statically by [`PhysFrame`]) and
+///    zero-filled ([UNSAFE-2026-0026], the PMM contract), satisfying
+///    `create_address_space`'s precondition. For the
+///    [`bsp-qemu-virt::mmu::QemuVirtMmu`] impl the body is a trivial
+///    struct wrap — no MMIO, no system-register write, no memory
+///    write — so the call site does not extend any specific
+///    audit-log entry's operation field; the SAFETY comment at
+///    the call site documents the invariants the HAL trait
+///    contract requires.
 /// 5. Allocates an arena slot via [`create_address_space`].
 ///    On [`ArenaFull`] the PMM root frame is leaked (v1
 ///    limitation: [`FrameProvider`] has no `free_frame` method;
@@ -444,7 +450,6 @@ fn resolve_address_space_cap(
 ///
 /// [adr-0014]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0014-capability-representation.md
 /// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
-/// [UNSAFE-2026-0023]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
 /// [UNSAFE-2026-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
 /// [`OutOfFrames`]: AddressSpaceError::OutOfFrames
 /// [`ArenaFull`]: AddressSpaceError::ArenaFull
@@ -486,27 +491,40 @@ pub fn cap_create_address_space<M: Mmu>(
     //
     // SAFETY:
     // **Why unsafe is needed.** [`Mmu::create_address_space`] is
-    // `unsafe fn` per ADR-0009 + UNSAFE-2026-0023's existing umbrella
-    // — the trait method requires the caller to guarantee `root` is
-    // page-aligned and zero-filled before the BSP writes a fresh L0
-    // table descriptor set into it. The unsafety lives at the trait
-    // surface, not in this wrapper.
+    // declared `unsafe fn` at the HAL trait surface per [ADR-0009] —
+    // the trait method's contract requires the caller to guarantee
+    // `root` is page-aligned, zero-filled, and exclusively owned at
+    // the call site. The unsafety lives at the trait declaration;
+    // for the [`bsp-qemu-virt::mmu::QemuVirtMmu`] impl the body is
+    // a trivial struct wrap (`QemuVirtAddressSpace { root }`) with
+    // no MMIO, no system-register write, no memory write — so the
+    // call site does not extend any existing audit-log entry's
+    // operation field. Future BSP impls that perform real work in
+    // their `create_address_space` body (e.g., pre-populating
+    // kernel-half mappings) would introduce their own audit entry
+    // covering that work.
     //
     // **Invariants upheld.** (1) Page-alignment: the [`PhysFrame`]
     // type encodes alignment statically; `pmm.alloc_frame()` returns
-    // `Option<PhysFrame>` where the Some-case is page-aligned by
+    // `Option<PhysFrame>` where the `Some` case is page-aligned by
     // construction. (2) Zero-fill: PMM's `alloc_frame` zero-fills
-    // the returned frame per UNSAFE-2026-0026's contract; the
+    // the returned frame per [UNSAFE-2026-0026]'s contract; the
     // 4 KiB region is all zeros when this wrapper observes it.
+    // (3) Exclusive ownership: the `PhysFrame` value is owned by
+    // this stack frame at the call site; no other code path has
+    // (or will have) a reference to it until `arena.allocate`
+    // moves it into the arena slot at step 5.
     //
     // **Why safer alternatives were rejected.** The unsafe is on
-    // [`Mmu::create_address_space`]'s trait surface; the wrapper
-    // can't replace it with a safe alternative without changing the
+    // [`Mmu::create_address_space`]'s trait declaration; the wrapper
+    // cannot replace it with a safe alternative without changing the
     // HAL trait (rejected per ADR-0028 §Decision outcome's HAL
-    // stability driver). Audit: UNSAFE-2026-0023 (existing
-    // umbrella scope; first runtime exerciser per T-018 lifts the
-    // `Pending QEMU smoke verification` note when commit 6's smoke
-    // fixture lands).
+    // stability driver). The trait-level unsafe is the project's
+    // way of forcing every caller (not just BSPs with side-effecting
+    // bodies) through an audit-disciplined site.
+    //
+    // [ADR-0009]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md
+    // [UNSAFE-2026-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
     let inner = unsafe { mmu.create_address_space(root) };
 
     // Step 5: arena slot.
@@ -536,10 +554,15 @@ pub fn cap_create_address_space<M: Mmu>(
 /// `flush(mmu)` which invokes [`Mmu::invalidate_tlb_address`] per
 /// ADR-0027's flush-token discipline.
 ///
-/// First post-bootstrap runtime exerciser of [UNSAFE-2026-0025]
-/// (the `QemuVirtMmu::map` page-table-walker descriptor writes);
-/// T-018 commit 6's audit-log Amendment lifts its `Pending QEMU
-/// smoke verification` note.
+/// **Will be** the first post-bootstrap runtime exerciser of
+/// [UNSAFE-2026-0025] (the `QemuVirtMmu::map` page-table-walker
+/// descriptor writes) when a real caller arms it. The v1
+/// cooperative IPC demo never invokes `cap_map` (all tasks share
+/// `BOOTSTRAP_ADDRESS_SPACE_HANDLE` and ride the bootstrap
+/// mappings); host tests + Miri pin the path. UNSAFE-2026-0025's
+/// `Pending QEMU smoke verification` note lifts via Amendment
+/// when the first B5+ userspace task with a per-task `AddressSpace`
+/// arms a real `cap_map` call.
 ///
 /// # Errors
 ///

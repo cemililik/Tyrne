@@ -298,6 +298,38 @@ static BOOTSTRAP_AS_CAP: StaticCell<CapHandle> = StaticCell::new();
 )]
 static BOOTSTRAP_AS_TABLE: StaticCell<CapabilityTable> = StaticCell::new();
 
+/// Scheduler activation-hook callback for address-space changes.
+///
+/// Passed to [`yield_now`] / [`ipc_send_and_yield`] /
+/// [`ipc_recv_and_yield`] / [`start`] as the `activate_address_space`
+/// closure parameter (per T-018 commit 4's scheduler-side hook).
+/// Looks up `handle` in [`AS_ARENA`] and invokes [`tyrne_hal::Mmu::activate`]
+/// via [`tyrne_kernel::mm::activate_address_space_handle`]. Stale
+/// handles are silently ignored — the scheduler's
+/// `task_address_space_handles` array stores only handles minted
+/// through the AS arena, so a stale hit indicates a use-after-free
+/// in scheduler state that no recovery here can fix; logging /
+/// panic would compound the failure inside an `IrqGuard` scope.
+///
+/// In v1 every task runs on the bootstrap AS, so the scheduler's
+/// `address_space_activation_target` helper short-circuits before
+/// ever invoking this function. The wiring is in place so future
+/// B5+ multi-AS userspace tasks slot in additively.
+fn activate_address_space(handle: tyrne_kernel::mm::AddressSpaceHandle) {
+    // SAFETY: `AS_ARENA` and `MMU` are written exactly once in
+    // `kernel_entry` before `start()` is called; the activation hook
+    // runs inside the scheduler's `IrqGuard` scope (after the
+    // `&mut Scheduler<C>` borrow drops) so no peer can race. The
+    // shared `&` reborrows below do not alias any live `&mut`. Audit:
+    // UNSAFE-2026-0010 (StaticCell pattern) + UNSAFE-2026-0014
+    // (momentary `&` across cooperative switches).
+    unsafe {
+        let arena = (*AS_ARENA.0.get()).assume_init_ref();
+        let mmu = (*MMU.0.get()).assume_init_ref();
+        tyrne_kernel::mm::activate_address_space_handle(arena, handle, mmu);
+    }
+}
+
 // ─── IPC infrastructure ───────────────────────────────────────────────────────
 
 /// Endpoint arena — the kernel-object pool backing the IPC demo endpoint.
@@ -357,38 +389,6 @@ static TASK_ARENA: StaticCell<TaskArena> = StaticCell::new();
 /// the BSP did not register idle at all (i.e. `register_idle` was not
 /// called before `start`).
 ///
-/// Scheduler activation-hook callback for address-space changes.
-///
-/// Passed to [`yield_now`] / [`ipc_send_and_yield`] /
-/// [`ipc_recv_and_yield`] / [`start`] as the `activate_address_space`
-/// closure parameter (per T-018 commit 4's scheduler-side hook).
-/// Looks up `handle` in [`AS_ARENA`] and invokes [`tyrne_hal::Mmu::activate`]
-/// via [`tyrne_kernel::mm::activate_address_space_handle`]. Stale
-/// handles are silently ignored — the scheduler's
-/// `task_address_space_handles` array stores only handles minted
-/// through the AS arena, so a stale hit indicates a use-after-free
-/// in scheduler state that no recovery here can fix; logging /
-/// panic would compound the failure inside an `IrqGuard` scope.
-///
-/// In v1 every task runs on the bootstrap AS, so the scheduler's
-/// `address_space_activation_target` helper short-circuits before
-/// ever invoking this function. The wiring is in place so future
-/// B5+ multi-AS userspace tasks slot in additively.
-fn activate_address_space(handle: tyrne_kernel::mm::AddressSpaceHandle) {
-    // SAFETY: `AS_ARENA` and `MMU` are written exactly once in
-    // `kernel_entry` before `start()` is called; the activation hook
-    // runs inside the scheduler's `IrqGuard` scope (after the
-    // `&mut Scheduler<C>` borrow drops) so no peer can race. The
-    // shared `&` reborrows below do not alias any live `&mut`. Audit:
-    // UNSAFE-2026-0010 (StaticCell pattern) + UNSAFE-2026-0014
-    // (momentary `&` across cooperative switches).
-    unsafe {
-        let arena = (*AS_ARENA.0.get()).assume_init_ref();
-        let mmu = (*MMU.0.get()).assume_init_ref();
-        tyrne_kernel::mm::activate_address_space_handle(arena, handle, mmu);
-    }
-}
-
 /// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 /// [ADR-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0026-idle-dispatch-fallback.md
 fn idle_entry() -> ! {
