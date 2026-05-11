@@ -865,21 +865,23 @@ pub extern "C" fn kernel_entry() -> ! {
     };
 
     // Wrap the already-live root + publish in arena slot 0.
-    // SAFETY: AS_ARENA was just written above; mmu was just written above.
-    // Audit: UNSAFE-2026-0010 (StaticCell pattern) + UNSAFE-2026-0014
+    // Wrap the already-live root + publish in arena slot 0. The
+    // `bootstrap_root_pa` for the banner is read directly from
+    // `l0_root` — the wrapped `AddressSpace<QemuVirtMmu>` stores
+    // exactly this `PhysFrame` and the round-trip is pinned by
+    // `wrap_bootstrap_returns_address_space_with_root` in
+    // `kernel/src/mm/address_space.rs::tests`.
+    let bootstrap_root_pa = l0_root.as_usize();
+    // SAFETY: AS_ARENA was just written above; momentary &mut for the
+    // create_address_space call drops at scope end. Audit:
+    // UNSAFE-2026-0010 (StaticCell pattern) + UNSAFE-2026-0014
     // (momentary &mut to the just-initialised arena).
-    let (bootstrap_as_handle, bootstrap_root_pa) = unsafe {
+    let bootstrap_as_handle = unsafe {
         let arena = (*AS_ARENA.0.get()).assume_init_mut();
         let inner = mmu::QemuVirtAddressSpace::from_existing_root(l0_root);
         let address_space = tyrne_kernel::mm::AddressSpace::wrap_bootstrap(inner);
-        let handle = tyrne_kernel::mm::create_address_space(arena, address_space)
-            .expect("bootstrap AS allocation in empty arena cannot fail");
-        let mmu = (*MMU.0.get()).assume_init_ref();
-        let root_pa = tyrne_kernel::mm::get_address_space(arena, handle)
-            .expect("just-allocated handle resolves")
-            .root_frame(mmu)
-            .as_usize();
-        (handle, root_pa)
+        tyrne_kernel::mm::create_address_space(arena, address_space)
+            .expect("bootstrap AS allocation in empty arena cannot fail")
     };
 
     // Mint the bootstrap AS authority cap. The kernel-init holds full
