@@ -29,7 +29,9 @@
 //!
 //! [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
 
-use crate::cap::{CapError, CapHandle, CapKind, CapObject, CapRights, CapabilityTable};
+use crate::cap::{
+    CapError, CapHandle, CapKind, CapObject, CapRights, CapabilityTable, MAX_DERIVATION_DEPTH,
+};
 use crate::obj::arena::{Arena, SlotId};
 use tyrne_hal::{FrameProvider, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr};
 
@@ -439,11 +441,16 @@ fn resolve_address_space_cap(
 ///    B4+ work introduces an `Untyped`-style frame ownership
 ///    discipline; v1 adopts the simplest "any AS cap grants AS
 ///    creation" shape.
-/// 2. Rights checks: (2a) parent must hold [`CapRights::DERIVE`]
-///    to mint any child cap (mirrors [`CapabilityTable::cap_derive`]'s
-///    discipline; returns [`InsufficientRights`] on miss); (2b)
-///    `new_rights ⊆ parent_cap.rights` per the no-widening rule
-///    of [ADR-0014][adr-0014] (returns [`WidenedRights`] on miss).
+/// 2. Rights + depth checks (preflight, no state change):
+///    (2a) parent must hold [`CapRights::DERIVE`] to mint any child
+///    cap (mirrors [`CapabilityTable::cap_derive`]'s discipline;
+///    returns [`InsufficientRights`] on miss);
+///    (2b) `new_rights ⊆ parent_cap.rights` per the no-widening rule
+///    of [ADR-0014][adr-0014] (returns [`WidenedRights`] on miss);
+///    (2c) `parent_depth + 1 ≤ MAX_DERIVATION_DEPTH` — without this,
+///    step 7's `cap_derive` could surface `DerivationTooDeep` **after**
+///    the PMM frame has been allocated, leaking it ([`FrameProvider`]
+///    has no `free_frame` in v1).
 /// 3. **Preflight** the arena + cap-table for capacity. If either
 ///    is full, return the matching error **before** PMM is
 ///    touched. This keeps the leak paths (steps 6 / 7) structurally
@@ -473,9 +480,17 @@ fn resolve_address_space_cap(
 ///    **child** of `parent_cap_handle` in the derivation tree per
 ///    [ADR-0014][adr-0014]. This is the property that makes
 ///    revocation cascade: revoking the parent destroys this child.
-///    Preflight at step 3 guarantees table capacity; the rollback
-///    arm (which frees the arena slot but leaks the PMM frame — see
-///    the preflight comment) is structurally unreachable in v1.
+///    Preflights at steps 2c and 3 guarantee `cap_derive` cannot
+///    fail with `DerivationTooDeep` or `CapsExhausted` here; the
+///    remaining matchable arm is `InvalidHandle`, which would
+///    require the parent slot to be freed between steps 1 and 7 —
+///    impossible under v1's single-core cooperative model. The
+///    rollback arm (which frees the arena slot but leaks the PMM
+///    frame, since [`FrameProvider`] has no `free_frame` in v1)
+///    therefore is structurally unreachable in v1; it is retained
+///    for type honesty and to keep the call-site behaviour defined
+///    if a future change ever moves a check after step 4. A proper
+///    `free_frame` on the PMM lands in B4+ per ADR-0035.
 ///
 /// # Errors
 ///
@@ -487,6 +502,10 @@ fn resolve_address_space_cap(
 ///   parent cap is not `CapKind::AddressSpace`.
 /// - [`CapError(WidenedRights)`][`CapError(CapError)`] —
 ///   `new_rights` exceeds parent's rights.
+/// - [`CapError(DerivationTooDeep)`][`CapError(CapError)`] —
+///   preflight detected `parent_depth + 1 > MAX_DERIVATION_DEPTH`
+///   at step 2c. Unreachable in v1 (bootstrap is depth 0; no v1 caller
+///   chains AS caps anywhere near the cap).
 /// - [`CapError(CapsExhausted)`][`CapError(CapError)`] —
 ///   preflight detected cap-table full at step 3.
 /// - [`CapError(InvalidHandle)`][`CapError(CapError)`] —
@@ -539,6 +558,20 @@ pub fn cap_create_address_space<M: Mmu>(
     // 2b — no-widening check on `new_rights`.
     if !parent_cap.rights().contains(new_rights) {
         return Err(AddressSpaceError::CapError(CapError::WidenedRights));
+    }
+    // 2c — depth preflight. Without this, step 7's `cap_derive` could
+    //      surface `DerivationTooDeep` *after* the PMM frame and arena
+    //      slot are committed at steps 4–6, leaking the PMM frame
+    //      (FrameProvider has no `free_frame` in v1). Unreachable in
+    //      v1 (bootstrap is depth 0) but cheap to verify and keeps the
+    //      leak path structurally closed for any future deeply-chained
+    //      AS-cap caller. `depth_of` cannot fail here: parent_cap_handle
+    //      was just validated by `lookup` at step 1.
+    let parent_depth = table
+        .depth_of(parent_cap_handle)
+        .map_err(AddressSpaceError::CapError)?;
+    if (parent_depth as usize).saturating_add(1) > MAX_DERIVATION_DEPTH {
+        return Err(AddressSpaceError::CapError(CapError::DerivationTooDeep));
     }
 
     // Step 3: preflight capacity checks for the arena and cap table.
@@ -618,13 +651,17 @@ pub fn cap_create_address_space<M: Mmu>(
     // Step 7: mint cap as a *child* of parent_cap_handle. Using
     // cap_derive (not insert_root) wires the new cap into the
     // derivation tree so revoking the parent cascades to it per
-    // ADR-0014. cap_derive re-checks DERIVE + no-widening (steps
-    // 2a/2b already verified them; the double-check is harmless
-    // under single-core cooperative semantics). Preflight at step 3
-    // guarantees capacity so CapsExhausted cannot fire here. The
-    // rollback arm frees the arena slot; the PMM frame still leaks
-    // (see the preflight comment above) but that path is
-    // structurally unreachable in v1.
+    // ADR-0014. cap_derive re-checks DERIVE / no-widening / depth
+    // (steps 2a/2b/2c already verified them; the double-check is
+    // harmless under single-core cooperative semantics) and pops a
+    // free slot (preflight at step 3 guarantees this succeeds). The
+    // only remaining matchable arm is `InvalidHandle`, which would
+    // require the parent slot to have been freed between steps 1
+    // and 7 — impossible in v1's single-thread cooperative model.
+    // The rollback arm frees the arena slot; the PMM frame still
+    // leaks (FrameProvider has no `free_frame` in v1; a proper
+    // free path lands in B4+ per ADR-0035). The arm is retained for
+    // type honesty; structurally unreachable in v1.
     match table.cap_derive(
         parent_cap_handle,
         new_rights,
@@ -1267,6 +1304,77 @@ mod tests {
                 Err(AddressSpaceError::CapError(CapError::InvalidHandle))
             ),
             "child cap must be invalidated when parent is revoked"
+        );
+    }
+
+    #[test]
+    fn cap_create_rejects_too_deep_parent_without_consuming_pmm() {
+        // Pin Fix-1 review note: step 2c's depth preflight must fire
+        // *before* PMM is touched. Without it, cap_derive at step 7
+        // would return DerivationTooDeep after step 4 had already
+        // consumed the PMM frame — leaking it (`FrameProvider` has
+        // no `free_frame` in v1). The arena slot at step 6 is also
+        // committed pre-preflight in the buggy ordering, but
+        // `AddressSpaceArena` exposes no stable allocated-count
+        // observable to assert on directly today; PMM remaining is
+        // the load-bearing leak signature.
+        use crate::cap::MAX_DERIVATION_DEPTH;
+
+        let mmu = FakeMmu::new();
+        let mut arena: AddressSpaceArena<FakeMmu> = AddressSpaceArena::new();
+        let mut table = CapabilityTable::new();
+
+        // Bootstrap AS + root cap at depth 0.
+        let bootstrap_inner = fake_inner(&mmu, frame(0x4000_0000));
+        let bootstrap_as = AddressSpace::wrap_bootstrap(bootstrap_inner);
+        let as_handle = create_address_space(&mut arena, bootstrap_as).unwrap();
+        let root_cap = Capability::new(
+            CapRights::DUPLICATE | CapRights::DERIVE | CapRights::REVOKE | CapRights::TRANSFER,
+            CapObject::AddressSpace(as_handle),
+        );
+        let mut deep_handle = table.insert_root(root_cap).unwrap();
+
+        // Chain caps via cap_derive until the next derivation would
+        // overflow MAX_DERIVATION_DEPTH. The terminal handle sits at
+        // depth = MAX_DERIVATION_DEPTH (one off the cliff).
+        for _ in 0..MAX_DERIVATION_DEPTH {
+            deep_handle = table
+                .cap_derive(
+                    deep_handle,
+                    CapRights::DUPLICATE | CapRights::DERIVE | CapRights::REVOKE,
+                    CapObject::AddressSpace(as_handle),
+                )
+                .expect("derive within MAX_DERIVATION_DEPTH must succeed");
+        }
+
+        // Seed PMM with one frame: if the preflight is missing,
+        // step 4 will consume it before cap_derive trips
+        // DerivationTooDeep at step 7 — the frame is leaked.
+        let mut pmm = VecFrameProvider::new(vec![frame(0x6000_0000)]);
+
+        let result = cap_create_address_space(
+            &mut table,
+            deep_handle,
+            CapRights::empty(),
+            &mmu,
+            &mut pmm,
+            &mut arena,
+        );
+
+        assert!(
+            matches!(
+                result,
+                Err(AddressSpaceError::CapError(CapError::DerivationTooDeep))
+            ),
+            "deep parent must return DerivationTooDeep, got {result:?}"
+        );
+
+        // Load-bearing assertion: PMM is unchanged. If the preflight
+        // ever regresses, this assertion catches the leak.
+        assert_eq!(
+            pmm.remaining(),
+            1,
+            "PMM must be untouched on depth-preflight rejection"
         );
     }
 }

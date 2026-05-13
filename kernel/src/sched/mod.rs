@@ -176,15 +176,26 @@ pub enum SchedError {
     QueueFull,
     /// IPC operation failed.
     Ipc(IpcError),
-    /// The ready queue is empty AND no idle task is registered while the
-    /// current task has just blocked — every task in the system is waiting
-    /// on IPC and the dispatcher's fallback slot ([`Scheduler::idle`]) is
-    /// `None`. Per [ADR-0022] + [ADR-0026], registering a BSP idle task at
-    /// boot via [`register_idle`] makes this variant structurally
-    /// unreachable in the v1 cooperative workload; it is preserved as a
-    /// defensive return for preemption / SMP / "BSP forgot to call
-    /// `register_idle`" so the kernel never panics on a userspace-reachable
-    /// condition.
+    /// No dispatch candidate exists after the current task has just
+    /// blocked. Three shapes resolve to this error:
+    ///
+    /// 1. The ready queue is empty AND no idle task is registered —
+    ///    every task in the system is waiting on IPC and the
+    ///    dispatcher's fallback slot ([`Scheduler::idle`]) is `None`.
+    /// 2. The ready queue is empty AND the registered idle task **is
+    ///    the calling task itself**. Idle is structurally the bottom
+    ///    fallback per [ADR-0026], so dispatching to itself would
+    ///    self-context-switch (aliasing the same slot as `&mut` and
+    ///    `&` in the switch-window split borrow — release-mode UB).
+    ///    [`ipc_recv_and_yield`] rejects this and rolls back instead.
+    /// 3. Preemption / SMP edge cases (not v1).
+    ///
+    /// Per [ADR-0022] + [ADR-0026], registering a BSP idle task at
+    /// boot via [`register_idle`] makes shape (1) unreachable in the
+    /// v1 cooperative workload, and shape (2) requires the idle task
+    /// itself to call a blocking primitive — which the v1 idle body
+    /// does not do. The variant is preserved as a defensive return so
+    /// the kernel never panics on a userspace-reachable condition.
     ///
     /// # Rollback scope
     ///
@@ -1755,6 +1766,136 @@ mod tests {
             matches!(recv_outcome, RecvOutcome::Pending),
             "ADR-0032 rollback failed: endpoint observed {recv_outcome:?}, \
              want RecvOutcome::Pending (a clean Idle re-registration)"
+        );
+    }
+
+    /// R-Fix-3 regression: `ipc_recv_and_yield` called with no current
+    /// task must return `NoCurrentTask` **without** mutating endpoint
+    /// state (no `Idle → RecvWaiting` Phase-1 transition committed).
+    /// Pre-fix the early-return happened only at Phase 2, after Phase 1
+    /// had already mutated the endpoint — leaving it in `RecvWaiting`
+    /// with no rollback path.
+    #[test]
+    fn ipc_recv_and_yield_with_no_current_task_leaves_endpoint_idle() {
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let mut table = CapabilityTable::new();
+
+        // Mint an endpoint + RECV cap, but do NOT add_task or set
+        // sched.current. The scheduler has no running task.
+        let ep = create_endpoint(&mut ep_arena, Endpoint::new(0)).unwrap();
+        let ep_cap = table
+            .insert_root(Capability::new(CapRights::RECV, CapObject::Endpoint(ep)))
+            .unwrap();
+
+        assert_eq!(sched.current, None);
+
+        // SAFETY: pointers refer to stack-local test state; no aliasing.
+        let result = unsafe {
+            ipc_recv_and_yield(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                core::ptr::from_mut(&mut ep_arena),
+                core::ptr::from_mut(&mut queues),
+                core::ptr::from_mut(&mut table),
+                ep_cap,
+                |_| {},
+            )
+        };
+
+        assert!(
+            matches!(result, Err(SchedError::NoCurrentTask)),
+            "expected Err(NoCurrentTask), got {result:?}"
+        );
+
+        // Load-bearing assertion: endpoint must still be Idle (a fresh
+        // ipc_recv returns Pending — RecvWaiting would have produced
+        // QueueFull, the pre-fix-3 leak signature).
+        let recv_outcome =
+            crate::ipc::ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(
+            matches!(recv_outcome, RecvOutcome::Pending),
+            "endpoint must be Idle on NoCurrentTask return; got {recv_outcome:?}"
+        );
+    }
+
+    /// R-Fix-4 regression: when the registered idle task is itself the
+    /// current task (e.g. idle erroneously calls a blocking primitive),
+    /// the dispatcher must not pick idle as the next task — doing so
+    /// would self-context-switch and alias the same context slot as
+    /// `&mut` and `&` (release-mode UB; `debug_assert` tripwire fires).
+    /// The fix at the `or_else(|| s.idle.filter(...))` guard rejects
+    /// the self-dispatch and falls back to the Deadlock rollback.
+    #[test]
+    fn ipc_recv_and_yield_with_idle_as_current_returns_deadlock() {
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let mut table = CapabilityTable::new();
+        let mut s_idle = AlignedStack::<512>::new();
+        let h_idle = task_handle(0);
+
+        // Register idle, then promote idle to current (simulates idle
+        // having been dispatched and then somehow invoking the IPC
+        // blocking bridge — the latent path the guard closes).
+        // SAFETY: stack-local scheduler; FakeCpu::init_context is a no-op.
+        unsafe {
+            register_idle(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                h_idle,
+                BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                spin_entry(),
+                s_idle.top(),
+            );
+        }
+        sched.current = Some(h_idle);
+
+        // Endpoint + RECV cap so Phase 1 commits cleanly.
+        let ep = create_endpoint(&mut ep_arena, Endpoint::new(0)).unwrap();
+        let ep_cap = table
+            .insert_root(Capability::new(CapRights::RECV, CapObject::Endpoint(ep)))
+            .unwrap();
+
+        let prior_current = sched.current;
+        let prior_state = sched.task_states[0];
+        assert!(sched.ready.is_empty(), "ready queue must be empty");
+        assert_eq!(sched.idle, Some(h_idle));
+        assert_eq!(prior_current, Some(h_idle));
+
+        // SAFETY: pointers refer to stack-local test state; no aliasing.
+        // The self-dispatch guard rejects before context_switch.
+        let result = unsafe {
+            ipc_recv_and_yield(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                core::ptr::from_mut(&mut ep_arena),
+                core::ptr::from_mut(&mut queues),
+                core::ptr::from_mut(&mut table),
+                ep_cap,
+                |_| {},
+            )
+        };
+
+        assert!(
+            matches!(result, Err(SchedError::Deadlock)),
+            "idle-is-current must surface as Deadlock, got {result:?}"
+        );
+
+        // Scheduler state restored.
+        assert_eq!(sched.current, prior_current);
+        assert_eq!(sched.task_states[0], prior_state);
+        assert!(sched.ready.is_empty());
+
+        // Endpoint state restored (ADR-0032 symmetric rollback).
+        let recv_outcome =
+            crate::ipc::ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(
+            matches!(recv_outcome, RecvOutcome::Pending),
+            "ADR-0032 rollback failed on idle-self deadlock: got {recv_outcome:?}"
         );
     }
 

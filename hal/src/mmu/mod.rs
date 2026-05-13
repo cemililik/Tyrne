@@ -377,9 +377,13 @@ pub trait Mmu: Send + Sync {
     ///
     /// # Errors
     ///
-    /// Returns [`MmuError::NotMapped`] if `va` has no mapping, and
-    /// [`MmuError::MisalignedAddress`] if `va` is not
-    /// [`PAGE_SIZE`]-aligned.
+    /// - [`MmuError::NotMapped`] if `va` has no mapping.
+    /// - [`MmuError::MisalignedAddress`] if `va` is not
+    ///   [`PAGE_SIZE`]-aligned.
+    /// - [`MmuError::BlockMapped`] if `va` falls inside a large-block
+    ///   descriptor (e.g. a 2 MiB block at L1/L2 on `AArch64`).
+    ///   Block-splitting is deferred to B3+; until then `unmap` cannot
+    ///   express sub-block page-granularity removal.
     fn unmap(
         &self,
         as_: &mut Self::AddressSpace,
