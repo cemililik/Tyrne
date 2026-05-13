@@ -1021,6 +1021,18 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     ep_cap: CapHandle,
     activate_address_space: impl FnOnce(AddressSpaceHandle),
 ) -> Result<RecvOutcome, SchedError> {
+    // Pre-Phase-1 guard: verify a current task exists *before* Phase 1
+    // mutates endpoint state (Idle → RecvWaiting). If we deferred this
+    // check to Phase 2 (as the original code did), a NoCurrentTask
+    // early-return would leave the endpoint in RecvWaiting without a
+    // matching ipc_cancel_recv rollback — neither the Deadlock path
+    // nor any other recovery branch would clean it up.
+    // SAFETY: read-only snapshot; no `&mut` alive at this point.
+    // Audit: UNSAFE-2026-0014.
+    if unsafe { (*sched).current.is_none() } {
+        return Err(SchedError::NoCurrentTask);
+    }
+
     // Phase 1 — try non-blocking recv, momentary &muts.
     // SAFETY: caller contract — all pointers valid, distinct, and
     // exclusively-owned for this inner block. Each `&mut` materialised here
@@ -1068,6 +1080,9 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         // alternatives as above (Shared safety contract §Rejected safer
         // alternatives). Audit: UNSAFE-2026-0014.
         let s = unsafe { &mut *sched };
+        // Pre-Phase-1 guard (above) guarantees current is Some here;
+        // the ok_or is a defensive fallback for any future code path
+        // that bypasses the guard.
         let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
         let current_idx = current_handle.slot().index() as usize;
         let prior_state = s.task_states[current_idx];
@@ -1079,7 +1094,19 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         s.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
         s.current = None;
 
-        if let Some(next_handle) = s.ready.dequeue().or(s.idle) {
+        // Mirror yield_now's guard: fall back to idle only when it is a
+        // *distinct* task from current. If idle == current (e.g., the
+        // idle task somehow called ipc_recv_and_yield), treating it as
+        // a dispatch candidate would produce next_idx == current_idx —
+        // the split-borrow at the context-switch site would alias the
+        // same context slot as `&mut` and `&`, which is UB in release.
+        // The debug_assert at the switch site catches this in debug but
+        // not in release, so we reject the self-dispatch here.
+        if let Some(next_handle) = s
+            .ready
+            .dequeue()
+            .or_else(|| s.idle.filter(|&idle_h| idle_h != current_handle))
+        {
             let next_idx = next_handle.slot().index() as usize;
             s.task_states[next_idx] = TaskState::Ready;
             s.current = Some(next_handle);

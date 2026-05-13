@@ -182,6 +182,16 @@ pub enum MmuError {
     OutOfFrames,
     /// The requested [`MappingFlags`] are invalid for this operation.
     InvalidFlags,
+    /// The virtual address falls inside a large-block descriptor (e.g. a
+    /// 2 MiB block at L1/L2 on `AArch64`). Page-granularity `map`/`unmap`
+    /// inside a block requires block-splitting, which is deferred to B3+.
+    /// Callers must not conflate this with [`AlreadyMapped`]: a
+    /// [`BlockMapped`] region is large and may be only partially
+    /// "mapped" at the requested 4 KiB granularity.
+    ///
+    /// [`AlreadyMapped`]: MmuError::AlreadyMapped
+    /// [`BlockMapped`]: MmuError::BlockMapped
+    BlockMapped,
 }
 
 /// Callback by which [`Mmu::map`] obtains frames for intermediate translation

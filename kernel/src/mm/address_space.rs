@@ -29,7 +29,7 @@
 //!
 //! [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
 
-use crate::cap::{CapError, CapHandle, CapKind, CapObject, CapRights, Capability, CapabilityTable};
+use crate::cap::{CapError, CapHandle, CapKind, CapObject, CapRights, CapabilityTable};
 use crate::obj::arena::{Arena, SlotId};
 use tyrne_hal::{FrameProvider, MappingFlags, Mmu, MmuError, PhysFrame, VirtAddr};
 
@@ -402,6 +402,14 @@ pub fn activate_address_space_handle<M: Mmu>(
 /// [`cap_create_address_space`] (to validate parent-cap authority),
 /// [`cap_map`], and [`cap_unmap`] (to resolve the target AS).
 ///
+/// **v1 rights model:** this helper checks the cap *kind* only — not
+/// the specific rights bits. The v1 design accepts that any
+/// `CapKind::AddressSpace` cap grants full mapping authority (map,
+/// unmap, activate). Per-operation rights (`MAP`, `UNMAP`,
+/// `ACTIVATE`) are deferred to B5+ and will require an ADR. Until
+/// that ADR lands, callers must not assume that `CapRights::empty()`
+/// restricts what the holder can do with an AS cap.
+///
 /// # Errors
 ///
 /// - [`AddressSpaceError::CapError(CapError::InvalidHandle)`] when
@@ -461,12 +469,13 @@ fn resolve_address_space_cap(
 ///    contract requires.
 /// 6. Allocates an arena slot via [`create_address_space`]. The
 ///    preflight at step 3 guarantees this succeeds in v1.
-/// 7. Mints the cap via [`CapabilityTable::insert_root`]. The
-///    preflight at step 3 guarantees this succeeds in v1. The
-///    rollback arm (which would free the arena slot but leak the
-///    PMM frame) is retained for type honesty + forward-defensive
-///    coverage but is structurally unreachable when the preflight
-///    holds.
+/// 7. Mints the cap via [`CapabilityTable::cap_derive`], making it a
+///    **child** of `parent_cap_handle` in the derivation tree per
+///    [ADR-0014][adr-0014]. This is the property that makes
+///    revocation cascade: revoking the parent destroys this child.
+///    Preflight at step 3 guarantees table capacity; the rollback
+///    arm (which frees the arena slot but leaks the PMM frame — see
+///    the preflight comment) is structurally unreachable in v1.
 ///
 /// # Errors
 ///
@@ -606,25 +615,23 @@ pub fn cap_create_address_space<M: Mmu>(
     // the arena's contract; it should not fire in v1.
     let handle = create_address_space(arena, AddressSpace::from_mmu_address_space(inner))?;
 
-    // Step 7: mint cap. Preflight at step 3 likewise guarantees the
-    // table had capacity; the `insert_root` call returns
-    // `Ok(cap_handle)` deterministically under v1. The `match`
-    // retains a rollback arm for type honesty + forward-defensive
-    // coverage: if a future change adds another `insert_root`
-    // failure mode (e.g., a per-slot validation that fires after
-    // the capacity check), the arena slot is rolled back via
-    // `destroy_address_space`. The PMM frame still leaks on the
-    // rollback path — the preflight makes this leak structurally
-    // unreachable in v1; documenting the rollback keeps the code
-    // honest about what would happen if the preflight invariant
-    // were ever violated.
-    let cap = Capability::new(new_rights, CapObject::AddressSpace(handle));
-    match table.insert_root(cap) {
+    // Step 7: mint cap as a *child* of parent_cap_handle. Using
+    // cap_derive (not insert_root) wires the new cap into the
+    // derivation tree so revoking the parent cascades to it per
+    // ADR-0014. cap_derive re-checks DERIVE + no-widening (steps
+    // 2a/2b already verified them; the double-check is harmless
+    // under single-core cooperative semantics). Preflight at step 3
+    // guarantees capacity so CapsExhausted cannot fire here. The
+    // rollback arm frees the arena slot; the PMM frame still leaks
+    // (see the preflight comment above) but that path is
+    // structurally unreachable in v1.
+    match table.cap_derive(
+        parent_cap_handle,
+        new_rights,
+        CapObject::AddressSpace(handle),
+    ) {
         Ok(cap_handle) => Ok(cap_handle),
         Err(e) => {
-            // Best-effort rollback of the arena slot; ignore the
-            // unlikely double-free path (the slot was just allocated
-            // and we hold the only handle to it).
             let _ = destroy_address_space(arena, handle);
             Err(AddressSpaceError::CapError(e))
         }
@@ -1221,5 +1228,45 @@ mod tests {
             result,
             Err(AddressSpaceError::MmuUnmapError(MmuError::NotMapped))
         ));
+    }
+
+    // ── Revocation cascade regression (Fix 1) ────────────────────────────────
+
+    #[test]
+    fn cap_create_uses_cap_derive_so_revoke_parent_invalidates_child() {
+        // Pin ADR-0014 revocation semantics: a cap produced by
+        // cap_create_address_space must be a *child* of the parent cap
+        // in the derivation tree so that revoking the parent also
+        // destroys the child.  If cap_create were using insert_root the
+        // child would be a tree root and survive the parent's revocation.
+        let (mut table, parent_cap, _bootstrap_as, mmu, mut arena) = bootstrap_setup();
+        let mut pmm = VecFrameProvider::new(vec![frame(0x5000_0000)]);
+
+        let child_cap = cap_create_address_space(
+            &mut table,
+            parent_cap,
+            CapRights::DERIVE | CapRights::REVOKE,
+            &mmu,
+            &mut pmm,
+            &mut arena,
+        )
+        .expect("cap_create must succeed with healthy PMM + arena + table");
+
+        // The child cap resolves before revocation.
+        assert!(resolve_address_space_cap(&table, child_cap).is_ok());
+
+        // Revoking the parent must cascade and destroy the child.
+        table
+            .cap_revoke(parent_cap)
+            .expect("cap_revoke must succeed");
+
+        // The child cap must no longer resolve.
+        assert!(
+            matches!(
+                resolve_address_space_cap(&table, child_cap),
+                Err(AddressSpaceError::CapError(CapError::InvalidHandle))
+            ),
+            "child cap must be invalidated when parent is revoked"
+        );
     }
 }

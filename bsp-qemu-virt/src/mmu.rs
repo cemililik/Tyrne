@@ -482,16 +482,19 @@ unsafe fn walk_or_alloc_table(
         //   - Block descriptor (valid + table bit clear) — the v1
         //     bootstrap pre-mapped this region as a 2 MiB block (or
         //     larger at L0/L1). Splitting the block into 4 KiB pages
-        //     is deferred to the first B3+ caller per T-016 §Out of
-        //     scope, so both `map` and `unmap` return `AlreadyMapped`
-        //     here. (An `unmap` against a block-mapped region is
-        //     semantically asking "remove a sub-2-MiB page" inside a
-        //     block — which requires the same block-split logic;
-        //     a future `MmuError::BlockMapped` variant may
-        //     disambiguate when block-split lands.)
+        //     is deferred to B3+ per T-016 §Out of scope.
+        //     `map` into a block returns `AlreadyMapped` (the
+        //     4 KiB region is structurally occupied).
+        //     `unmap` returns `BlockMapped` — it is semantically asking
+        //     to remove a sub-block page, which needs block-splitting;
+        //     using `AlreadyMapped` for unmap would be misleading.
         let is_table = (existing & DESC_TABLE_OR_PAGE_BIT) != 0;
         if !is_table {
-            return Err(MmuError::AlreadyMapped);
+            return Err(if unmap {
+                MmuError::BlockMapped
+            } else {
+                MmuError::AlreadyMapped
+            });
         }
         let next_pa = existing & TABLE_NLA_MASK;
         return PhysFrame::from_aligned(PhysAddr(next_pa as usize))
