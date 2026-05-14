@@ -1,0 +1,126 @@
+# 0029 — Initial userspace image format
+
+- **Status:** Proposed
+- **Date:** 2026-05-14
+- **Deciders:** @cemililik
+
+## Context
+
+[Phase B § B4 — Task loader](../roadmap/phases/phase-b.md#milestone-b4--task-loader) opens once the [AddressSpace kernel object](0028-address-space-data-structure.md) lands (B3, 2026-05-14). B4 must define **how a userspace binary is represented inside the kernel image** before the loader (T-019) can read it: the byte-level layout the loader walks, the entry-point convention it follows, and how the loader knows where the code/data segments live in the embedded blob.
+
+For v1 the binary is statically embedded into the kernel via `include_bytes!` (per phase-b plan §B4 — "the binary is statically embedded in the kernel image; the filesystem / dynamic loading comes later"). No filesystem, no dynamic linking, no module loader. The format decision settles **what the bytes inside the `include_bytes!` literal mean** and how the loader interprets them.
+
+The stakes of getting this wrong are bounded but real. A maximalist choice (ELF subset) front-loads parser complexity into v1's loader before any userspace exists; a minimalist choice (raw flat) ships v1 quickly but locks B5+'s richer needs (per-section permissions, symbol info, debug data, runtime relocation) into a *second* format the loader will also have to support. The pattern matches the [ADR-0027 §"Bounded bootstrap frame budget"](0027-kernel-virtual-memory-layout.md) trade-off from B2 — keep v1 small, defer richness until a concrete need surfaces.
+
+## Decision drivers
+
+- **Loader simplicity.** The B4 loader runs in kernel mode at boot, with no allocator beyond [`Pmm`](../../kernel/src/mm/pmm.rs) and no parser primitives. Every parser line is kernel `.text` that must be panic-free per `kernel/src/lib.rs`'s `#![deny(clippy::panic)]` discipline. A simpler format means a smaller, easier-to-audit loader.
+- **Boot footprint.** The embedded binary's bytes live in the kernel's `.rodata` section (the only RX section in v1's kernel-image map per ADR-0027). Each byte costs kernel image size on every boot, even for the tiny v1 "hello" binary B6 will produce. Format overhead (ELF headers, section tables, symbol tables) is multiplicative across every future userspace image.
+- **Future extensibility.** v1's "hello" binary is ~100 bytes of `mov w0, #42; ret` shape. B5 brings syscalls; B6 brings the first real userspace. Eventually userspace will want symbol info for debugger attach, section permissions for `.rodata` R-only / `.text` RX-only enforcement, and possibly runtime relocation. Each of those needs the format to carry richer metadata; raw flat does not.
+- **Toolchain alignment.** Rust's `cargo build` produces ELF binaries by default. Going from ELF → raw flat is a single `objcopy -O binary` step (or a `cargo-binutils` step); going from raw flat → ELF requires a custom toolchain step the project does not have today. The default toolchain output is ELF; v1 should not fight this further than necessary.
+- **Test surface.** The format choice affects how host-side loader tests work. A raw flat blob is `&[u8]` the test can construct directly; an ELF blob requires either a real `cargo build` artefact or a synthetic ELF builder. The B3 closure trio §Adjustments item 5 already flagged that `bsp-qemu-virt` has no host-test infrastructure for fake page tables; adding ELF parsing on top would compound the testing-infra debt.
+- **Inspectability.** A raw flat blob produces no `objdump -d` symbols, no `addr2line` mapping, no DWARF info. Debugging a crashed userspace task in v1 means single-stepping in QEMU and matching addresses against the linker-script-defined layout. ELF would give symbols immediately. v1's "userspace" is a single 100-byte binary; the inspectability cost is small.
+
+## Considered options
+
+1. **Raw flat binary.** The embedded blob is the literal byte stream of the userspace `.text` (plus `.rodata` and `.data` if any), concatenated with no metadata. The loader treats offset 0 as the entry point and lays the blob out in memory at a fixed VA. A linker script controls the userspace VA / segment boundaries.
+2. **Minimal ELF subset.** The embedded blob is a valid ELF64 file with a small subset of headers honoured: `e_entry` (entry-point VA), `e_phoff` + `e_phnum` (program headers for `PT_LOAD` segments), plus the `PT_LOAD` headers themselves (offset, vaddr, filesz, memsz, flags). Other ELF features (sections, dynamic linking, relocations, symbols, notes) ignored.
+3. **Custom packed format.** A Tyrne-specific format defined in `docs/architecture/userspace-image.md`: a fixed-size header (magic, version, entry-point offset, segment count) followed by per-segment descriptors and the raw bytes. Designed to be exactly as rich as v1 needs and no richer.
+
+## Decision outcome
+
+Chosen option: **Option 1 — Raw flat binary** for v1.
+
+The minimalist option wins on the four most load-bearing decision drivers (loader simplicity, boot footprint, toolchain alignment, test surface) and pays the future-extensibility / inspectability costs as the deliberate v1 trade-off. The pattern matches how T-016 chose identity-mapping for B2 (ADR-0027) and how T-017 chose a bitmap allocator for B3 (ADR-0035) — pick the smallest shape that satisfies the v1 use case, and defer richness to a successor ADR when a concrete B5+ need surfaces.
+
+Specifically:
+
+- **Layout.** The loader treats the embedded blob as a single `PT_LOAD`-style segment: the bytes at offset 0 are the userspace entry point's first instruction; subsequent bytes are read-only data and (eventually) writable data in linker-script-defined order. The loader does **not** distinguish `.text` / `.rodata` / `.data` in v1; everything maps with the same flags (RW + NX initially — locked down once ADR-0034 §Kernel-image section permissions lands the per-section discipline that will extend to userspace too).
+- **Entry point.** Always at the start of the embedded blob (offset 0 ↔ VA = `<userspace-base>`). No `e_entry`-style indirection.
+- **VA placement.** A fixed userspace base VA is implementation-detail of T-019, not this ADR — the VA range scoping decision is owned by [T-019's Approach](../analysis/tasks/phase-b/T-019-task-loader.md) and bounded by [ADR-0027 §Decision outcome (a)](0027-kernel-virtual-memory-layout.md)'s `TTBR0_EL1` range. The loader maps the blob at a single contiguous VA range determined at compile time per the userspace linker script.
+- **Build pipeline.** The userspace binary (lands with T-019 and the future B6 "hello" crate) is built as an aarch64 ELF (`cargo build` default) and stripped to raw bytes via `objcopy -O binary` (or the equivalent `cargo-binutils` invocation) in the userspace crate's build script. The kernel embeds the resulting `.bin` via `include_bytes!("path/to/userspace.bin")`.
+
+### Simulation
+
+**Not applicable** — this ADR settles a single-shape format decision; no state machine to simulate. (T-019's loader implementation **is** multi-step state-machine work and its task user-story will carry the §Simulation table required by [`write-adr` skill §Procedure step 5 sub-bullet "Decision outcome → Simulation row-to-verification mapping"](../../.agents/skills/write-adr/SKILL.md) — but ADR-0029's subject is the format choice, not the loader sequence.)
+
+### Dependency chain
+
+For this decision to be fully in effect:
+
+```text
+1. Userspace binary build pipeline — userland/hello/ crate + objcopy -O binary
+   build step  — opens with B6 (separate task; B4's T-019 ships with a
+   placeholder blob)                                                — Phase B6 (deferred)
+2. Loader implementation that consumes the raw flat blob              — T-019 (Draft, opens with this ADR)
+3. Address-space scaffold the loader writes mappings into             — ADR-0028 + T-018 (Done 2026-05-14)
+4. Physical-frame allocator backing the loader's frame requests       — ADR-0035 + T-017 (Done 2026-05-10)
+5. Per-section userspace permissions (RX `.text` / R `.rodata` / RW
+   `.data` + NX/PXN bits)                                             — ADR-0034 (slot reserved; opens with
+                                                                        the first attacker-observable
+                                                                        execution context, likely B5+)
+6. Symbol info / debug data for userspace crashes                     — successor ADR if + when this v1
+                                                                        decision is revisited (no slot reserved)
+```
+
+Step 1 is the natural Phase B6 work and is **not** opened today; B4's T-019 ships with a placeholder embedded blob (a minimal hand-written sequence of bytes the loader can verify it maps correctly). Steps 3 + 4 are already grounded. Step 2 (T-019) opens at `Draft` in the same commit that lands this ADR per [ADR-0025 §Rule 1](0025-adr-governance-amendments.md). Steps 5 + 6 are explicit forward-flags, consistent with v1's "smallest shape that works now" discipline.
+
+## Consequences
+
+### Positive
+
+- **Loader fits in ~50 lines of kernel Rust.** The parser is `let entry = base_va; let blob_pa_range = pmm.alloc_contiguous(blob.len() / PAGE_SIZE); copy_bytes(blob, blob_pa_range); cap_map_range(as_cap, base_va, blob_pa_range, flags)`. Five lines of substance plus error handling. Trivially auditable; trivially Miri-clean.
+- **Boot footprint stays bounded.** No ELF header overhead (54 bytes header + 56 per program header in ELF64 = ~110 bytes minimum, doubling a 100-byte v1 binary). The kernel `.rodata` cost is exactly `blob.len()`.
+- **Host-side loader tests are trivial.** Tests construct a `&'static [u8]` directly (e.g., `static TEST_BLOB: &[u8] = &[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6]` = a real `mov w0, #42; ret` sequence). No fake-ELF builder; no toolchain-dependent test fixtures.
+- **Toolchain alignment.** Every aarch64 Rust crate's `cargo build` output is one `objcopy -O binary` away from a working raw flat binary.
+
+### Negative
+
+- **No per-section permissions for v1.** Every userspace page maps with the same flags. A future task that loads `.text` as RX-only and `.data` as RW-only is **not** reachable from raw flat alone — the loader has no information about section boundaries. *Mitigation:* defer to ADR-0034 (kernel-image section permissions) which expands to userspace section permissions when the threat model demands it (B5+ first attacker-observable execution context). Today's threat model has no userspace, so the "all pages have the same flags" property is non-exploitable.
+- **No symbols, no DWARF.** Crashing a userspace task in v1 produces a register dump and an architectural PC. Mapping that PC back to a Rust source line requires manually matching against the userspace linker script + the userspace crate's `objdump -d` output. *Mitigation:* v1's userspace is ~100 bytes; the cost is small. When symbols become valuable (B5+), the successor ADR that introduces ELF (or a richer custom format) lands the debug-data discipline alongside.
+- **Format-second-time tax.** When B5+ eventually needs richer metadata, the loader will support **two** formats during the transition: raw flat (legacy) + the chosen successor. This is a known cost of "ship v1 fast" vs "settle once". *Mitigation:* explicit cut-over in the successor ADR — old format deprecated at the same time the new format lands, with a migration window of one Phase-B milestone.
+- **Linker-script awareness leaks into the loader.** The userspace VA layout (where the blob is mapped, where the stack lives, where future heap goes) is encoded in the userspace linker script, **not** in the binary. The loader must hard-code or read-from-build-script the same VAs the linker script uses. *Mitigation:* T-019's Approach pins this with a `userland-layout.rs`-or-similar source-of-truth that both the userspace linker script and the kernel loader read.
+
+### Neutral
+
+- **The choice is reversible per the §Negative "Format-second-time tax" item.** Switching to ELF or a custom format in B5+ requires a new ADR + loader work, but does not invalidate any v1 code that this ADR enables.
+- **The format spec is *short*** — five sentences in §Decision outcome above + one diagram in the future [`docs/architecture/userspace-image.md`](../architecture/) (lands with T-019). The shortness is itself a feature: spec drift becomes less likely when the spec fits on one page.
+
+## Pros and cons of the options
+
+### Option 1 — Raw flat binary (chosen)
+
+- **Pro:** Smallest loader, smallest binary footprint, simplest tests, aligns with `objcopy` default toolchain step.
+- **Pro:** Reversible — successor ADR can introduce a richer format and run both in parallel during a one-milestone transition.
+- **Con:** No per-section permissions in v1.
+- **Con:** No symbols / no DWARF for userspace debugging.
+- **Con:** Loader must hard-code or build-script-derive the same VAs the userspace linker script uses; spec drift potential.
+
+### Option 2 — Minimal ELF subset
+
+- **Pro:** Native Rust toolchain output; no `objcopy` step needed.
+- **Pro:** `e_entry` + program headers give the loader the metadata to support per-section permissions, multiple `PT_LOAD` segments, and explicit `vaddr` placement without changing the format spec.
+- **Pro:** Standard format → standard tooling (`readelf`, `objdump`, GDB) works on the embedded blob.
+- **Con:** Loader complexity multiplies: parser must validate magic, endianness, machine class, segment table integrity, segment-bound checks, before laying out pages. Each validation step is kernel `.text` that must be panic-free.
+- **Con:** Boot footprint grows by ~110 bytes minimum (ELF64 header + 1 program header) plus per-segment overhead. Multiplies across every embedded userspace binary.
+- **Con:** Host-side loader tests need a real ELF builder or a baked test ELF; the latter creates a toolchain dependency in the test crate.
+- **Con:** v1 has no use for `PT_DYNAMIC`, relocations, symbols, sections, or notes — the ignored 95 % of ELF is unused-attack-surface in the parser.
+
+### Option 3 — Custom packed format
+
+- **Pro:** Sized exactly for v1's needs; no unused ELF surface, no missing-feature gap.
+- **Pro:** Format spec is one architecture doc the project fully owns; no external standard to diverge from.
+- **Con:** New format documented in *one* place is one cross-link drift away from being a project-only mystery to future contributors.
+- **Con:** No off-the-shelf tooling (`readelf`-equivalent) for inspection.
+- **Con:** Loader complexity sits between Options 1 and 2 — small parser, but the parser exists and must be panic-free.
+- **Con:** Test surface still needs a synthetic builder (the format isn't `objcopy`-producible).
+
+## References
+
+- [Phase B §B4 — Task loader](../roadmap/phases/phase-b.md#milestone-b4--task-loader) — milestone scope.
+- [ADR-0027 — Kernel virtual memory layout](0027-kernel-virtual-memory-layout.md) — VA range constraints for userspace per `TTBR0_EL1`.
+- [ADR-0028 — Address-space data structure](0028-address-space-data-structure.md) — the cap-gated `Mmu::map` surface the loader uses.
+- [ADR-0035 — Physical Memory Manager](0035-physical-memory-manager.md) — frame allocation primitive the loader consumes.
+- [ADR-0034 — Kernel-image section permissions (placeholder)](0027-kernel-virtual-memory-layout.md) — successor ADR for per-section permissions, slot reserved.
+- [ARM ARM §D5.2 "Translation regimes"](https://developer.arm.com/documentation/ddi0487/latest) — `TTBR0_EL1` VA range bounds.
+- [ELF-64 Object File Format (System V ABI)](https://refspecs.linuxfoundation.org/elf/gabi4+/contents.html) — the format Option 2 would adopt a subset of.
