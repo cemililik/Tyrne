@@ -1,6 +1,6 @@
 ---
 name: conduct-review
-description: Produce a review artifact in `docs/analysis/reviews/<type>/`, following that type's master plan. Works for business / code / security / performance-optimization reviews.
+description: Produce a review artifact in `docs/analysis/reviews/<type>-reviews/`, following that type's master plan. Works for business / code / security / performance-optimization reviews.
 when-to-use: When a trigger for any of the four review types fires — milestone completion (business), non-trivial change (code), security-sensitive change (security), or performance concern (performance-optimization). The review type is chosen by the trigger.
 ---
 
@@ -33,11 +33,11 @@ when-to-use: When a trigger for any of the four review types fires — milestone
 
 5. **Merge** per the master plan's merge step.
 
-6. **Write the artifact** at `docs/analysis/reviews/<type>/YYYY-MM-DD-<context>.md`.
+6. **Write the artifact** at `docs/analysis/reviews/<type>-reviews/YYYY-MM-DD-<context>.md`.
    - `<context>` is a short kebab-case slug: milestone id for business, PR or commit id for code / security, concern slug for performance.
    - Use the master plan's output template. Do not reshape sections.
 
-7. **Update the type's index** in `docs/analysis/reviews/<type>/README.md` with a new row for this review.
+7. **Update the type's index** in `docs/analysis/reviews/<type>-reviews/README.md` with a new row for this review.
 
 8. **Type-specific side-effects:**
    - **business** — update [`docs/roadmap/current.md`](../../../docs/roadmap/current.md) with the new active phase / milestone / task / next-review-trigger per the master plan's Pathfinder role.
@@ -46,7 +46,7 @@ when-to-use: When a trigger for any of the four review types fires — milestone
    - **performance-optimization** — if the verdict is Merge, the merge commit references this artifact.
 
 9. **Commit** per [`commit-style.md`](../../../docs/standards/commit-style.md):
-   - Scope: `roadmap` for business reviews (they touch `current.md` and the roadmap's forward motion); `analysis` for code / security / performance-optimization reviews (their artifact lives in `docs/analysis/reviews/<type>/`).
+   - Scope: `roadmap` for business reviews (they touch `current.md` and the roadmap's forward motion); `analysis` for code / security / performance-optimization reviews (their artifact lives in `docs/analysis/reviews/<type>-reviews/`).
    - Message: `docs(<scope>): <type>-review <slug>` — e.g. `docs(roadmap): business-review A2-completion`, `docs(analysis): code-review PR-42`, `docs(analysis): security-review cap-table-revoke`, `docs(analysis): performance-review ipc-hot-path`.
    - Body: one-paragraph summary of the verdict / adjustments.
    - Trailer: `Refs: ADR-0013` and any ADRs the review cites.
@@ -55,7 +55,7 @@ when-to-use: When a trigger for any of the four review types fires — milestone
 
 - [ ] Correct review type chosen for the trigger.
 - [ ] Master plan for that type followed — every role section present in the output.
-- [ ] Artifact at `docs/analysis/reviews/<type>/YYYY-MM-DD-<context>.md`.
+- [ ] Artifact at `docs/analysis/reviews/<type>-reviews/YYYY-MM-DD-<context>.md`.
 - [ ] Verdict stated in the artifact.
 - [ ] Type-specific side-effects applied (see step 8).
 - [ ] Type's index README updated.
