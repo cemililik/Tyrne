@@ -32,10 +32,12 @@ pub mod arena;
 pub mod endpoint;
 pub mod notification;
 pub mod task;
+pub mod task_loader;
 
 pub use endpoint::{Endpoint, EndpointArena, EndpointHandle};
 pub use notification::{Notification, NotificationArena, NotificationHandle};
 pub use task::{Task, TaskArena, TaskHandle};
+pub use task_loader::{LoadError, LoadedImage};
 
 /// Compile-time bound on the number of live `Task` kernel objects.
 /// Conservatively small for v1; revisit when a real deployment asks
