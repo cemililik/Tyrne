@@ -178,7 +178,7 @@ Load a userspace binary into an address space. For B4 the binary is statically e
 ### Sub-breakdown
 
 1. **ADR-0029 — Initial userspace image format.** Raw flat binary vs. minimal ELF subset. v1 favours raw flat (simplest).
-2. **Loader** — maps the embedded binary into a fresh address space under its `MemoryRegionCap`, sets up the initial stack, marks the entry point.
+2. **Loader** — maps the embedded binary into a fresh address space via `cap_create_address_space` + `cap_map` (the AddressSpace cap surface from [ADR-0028](../../decisions/0028-address-space-data-structure.md)), sets up the initial stack, marks the entry point. The `MemoryRegionCap` shape for per-frame ownership tracking is **deferred to B5+** per the [B3 closure §Adjustments](../../analysis/reviews/business-reviews/2026-05-14-B3-closure.md#adjustments); v1's loader operates with kernel-mode authority through the AS cap and accepts the rollback-leaks-frames v1 baseline T-019 documents.
 3. **Task creation from a binary** — `task_create_from_image(image, as_cap, initial_caps) -> TaskCap`.
 4. **Tests** — host-side loader correctness (given an image blob, produce the expected mapping); QEMU-side task creation without yet running the task (that's B6).
 
