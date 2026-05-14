@@ -1,6 +1,6 @@
 # 0029 — Initial userspace image format
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-05-14
 - **Deciders:** @cemililik
 
