@@ -35,8 +35,11 @@ The minimalist option wins on the four most load-bearing decision drivers (loade
 
 Specifically:
 
-- **Layout.** The loader treats the embedded blob as a single `PT_LOAD`-style segment: the bytes at offset 0 are the userspace entry point's first instruction; subsequent bytes are read-only data and (eventually) writable data in linker-script-defined order. The loader does **not** distinguish `.text` / `.rodata` / `.data` in v1; everything maps with the same flags (RW + NX initially — locked down once ADR-0034 §Kernel-image section permissions lands the per-section discipline that will extend to userspace too).
+- **Layout.** The loader treats the embedded blob as a single `PT_LOAD`-style segment: the bytes at offset 0 are the userspace entry point's first instruction; subsequent bytes are read-only data and (eventually) writable data in linker-script-defined order. The loader does **not** distinguish `.text` / `.rodata` / `.data` in v1.
+- **Mapping flags choice** is owned by **T-019**, not this ADR — this ADR settles the **format** (raw flat bytes), not how those bytes get mapped. T-019 §Approach pins the v1 flags as `MappingFlags::USER | MappingFlags::EXECUTE` for the image region and `MappingFlags::USER | MappingFlags::WRITE` for the stack region; the per-section R-only / RX-only / RW-only discipline is the future [ADR-0034 (kernel-image section permissions)][adr-0034-placeholder] placeholder's responsibility, gated on the first attacker-observable execution context (B5+).
 - **Entry point.** Always at the start of the embedded blob (offset 0 ↔ VA = `<userspace-base>`). No `e_entry`-style indirection.
+
+[adr-0034-placeholder]: 0027-kernel-virtual-memory-layout.md
 - **VA placement.** A fixed userspace base VA is implementation-detail of T-019, not this ADR — the VA range scoping decision is owned by [T-019's Approach](../analysis/tasks/phase-b/T-019-task-loader.md) and bounded by [ADR-0027 §Decision outcome (a)](0027-kernel-virtual-memory-layout.md)'s `TTBR0_EL1` range. The loader maps the blob at a single contiguous VA range determined at compile time per the userspace linker script.
 - **Build pipeline.** The userspace binary (lands with T-019 and the future B6 "hello" crate) is built as an aarch64 ELF (`cargo build` default) and stripped to raw bytes via `objcopy -O binary` (or the equivalent `cargo-binutils` invocation) in the userspace crate's build script. The kernel embeds the resulting `.bin` via `include_bytes!("path/to/userspace.bin")`.
 
@@ -69,10 +72,13 @@ Step 1 is the natural Phase B6 work and is **not** opened today; B4's T-019 ship
 
 ### Positive
 
-- **Loader fits in ~50 lines of kernel Rust.** The parser is `let entry = base_va; let blob_pa_range = pmm.alloc_contiguous(blob.len() / PAGE_SIZE); copy_bytes(blob, blob_pa_range); cap_map_range(as_cap, base_va, blob_pa_range, flags)`. Five lines of substance plus error handling. Trivially auditable; trivially Miri-clean.
+- **Loader complexity is bounded by the page-loop + intermediate-frame-budget pattern**, not by a parser. The actual loader sequence (per [T-019 §Approach][t-019-approach]) is: (1) preflight cap kind + image size + total PMM-frame budget (image pages + stack pages + worst-case intermediate page-table frames per [ADR-0027 §VMSAv8 4-level translation][adr-0027-vmsav8]); (2) `cap_create_address_space` for the new AS; (3) loop `pmm.alloc_frame` + `write_volatile` byte-copy + `cap_map` per image page (with tail zeroing on the partial page); (4) loop the same shape per stack page; (5) return `LoadedImage` metadata. The per-page mechanics are real (`Pmm::alloc_frame` is per-frame, not contiguous; `cap_map` is per-page, not range-mapped — see T-019 §Approach for the explicit loop) but the parser surface is *zero*. Compared to Option 2 (ELF subset) which adds ~80–120 lines of header / program-header / segment-table validation that **all** must be panic-free per `kernel/src/lib.rs`'s `#![deny(clippy::panic)]` discipline, Option 1's complexity sits in the *loop* (which can be table-driven, easily Miri-tested) rather than in *parsing* (which is an attacker-controllable input surface in B5+ when filesystem-loaded modules eventually land).
 - **Boot footprint stays bounded.** No ELF header overhead (54 bytes header + 56 per program header in ELF64 = ~110 bytes minimum, doubling a 100-byte v1 binary). The kernel `.rodata` cost is exactly `blob.len()`.
 - **Host-side loader tests are trivial.** Tests construct a `&'static [u8]` directly (e.g., `static TEST_BLOB: &[u8] = &[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6]` = a real `mov w0, #42; ret` sequence). No fake-ELF builder; no toolchain-dependent test fixtures.
 - **Toolchain alignment.** Every aarch64 Rust crate's `cargo build` output is one `objcopy -O binary` away from a working raw flat binary.
+
+[t-019-approach]: ../analysis/tasks/phase-b/T-019-task-loader.md#approach
+[adr-0027-vmsav8]: 0027-kernel-virtual-memory-layout.md
 
 ### Negative
 
@@ -84,7 +90,7 @@ Step 1 is the natural Phase B6 work and is **not** opened today; B4's T-019 ship
 ### Neutral
 
 - **The choice is reversible per the §Negative "Format-second-time tax" item.** Switching to ELF or a custom format in B5+ requires a new ADR + loader work, but does not invalidate any v1 code that this ADR enables.
-- **The format spec is *short*** — five sentences in §Decision outcome above + one diagram in the future [`docs/architecture/userspace-image.md`](../architecture/) (lands with T-019). The shortness is itself a feature: spec drift becomes less likely when the spec fits on one page.
+- **The format spec is *short*** — five sentences in §Decision outcome above + one diagram in the future `docs/architecture/task-loader.md` chapter (lands with T-019; file does not yet exist). The shortness is itself a feature: spec drift becomes less likely when the spec fits on one page.
 
 ## Pros and cons of the options
 
@@ -121,6 +127,6 @@ Step 1 is the natural Phase B6 work and is **not** opened today; B4's T-019 ship
 - [ADR-0027 — Kernel virtual memory layout](0027-kernel-virtual-memory-layout.md) — VA range constraints for userspace per `TTBR0_EL1`.
 - [ADR-0028 — Address-space data structure](0028-address-space-data-structure.md) — the cap-gated `Mmu::map` surface the loader uses.
 - [ADR-0035 — Physical Memory Manager](0035-physical-memory-manager.md) — frame allocation primitive the loader consumes.
-- [ADR-0034 — Kernel-image section permissions (placeholder)](0027-kernel-virtual-memory-layout.md) — successor ADR for per-section permissions, slot reserved.
+- ADR-0034 — Kernel-image section permissions (placeholder; named-but-unallocated forward-flag in [ADR-0027 §Decision outcome (a)](0027-kernel-virtual-memory-layout.md), no ADR-0034 file yet). Successor ADR for per-section permissions; slot reserved.
 - [ARM ARM §D5.2 "Translation regimes"](https://developer.arm.com/documentation/ddi0487/latest) — `TTBR0_EL1` VA range bounds.
 - [ELF-64 Object File Format (System V ABI)](https://refspecs.linuxfoundation.org/elf/gabi4+/contents.html) — the format Option 2 would adopt a subset of.
