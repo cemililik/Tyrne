@@ -178,7 +178,7 @@ Load a userspace binary into an address space. For B4 the binary is statically e
 ### Sub-breakdown
 
 1. **ADR-0029 — Initial userspace image format.** Raw flat binary vs. minimal ELF subset. v1 favours raw flat (simplest).
-2. **Loader** — maps the embedded binary into a fresh address space under its `MemoryRegionCap`, sets up the initial stack, marks the entry point.
+2. **Loader** — maps the embedded binary into a fresh address space via `cap_create_address_space` + `cap_map` (the AddressSpace cap surface from [ADR-0028](../../decisions/0028-address-space-data-structure.md)), sets up the initial stack, marks the entry point. The `MemoryRegionCap` shape for per-frame ownership tracking is **deferred to B5+** per the [B3 closure §Adjustments](../../analysis/reviews/business-reviews/2026-05-14-B3-closure.md#adjustments); v1's loader operates with kernel-mode authority through the AS cap and accepts the rollback-leaks-frames v1 baseline T-019 documents.
 3. **Task creation from a binary** — `task_create_from_image(image, as_cap, initial_caps) -> TaskCap`.
 4. **Tests** — host-side loader correctness (given an image blob, produce the expected mapping); QEMU-side task creation without yet running the task (that's B6).
 
@@ -186,6 +186,10 @@ Load a userspace binary into an address space. For B4 the binary is statically e
 
 - ADR-0029 Accepted.
 - A kernel test can load the embedded userspace image into an address space and report the entry point and initial stack pointer.
+
+### Revision notes
+
+- **2026-05-14 — `LoadedImage` / `task_create_from_image` split.** During the ADR-0029 propose + T-019 Draft cycle, the pre-Accept review surfaced that the §Sub-breakdown §3 wording (`task_create_from_image(image, as_cap, initial_caps) -> TaskCap`) overreaches what is achievable in B4 alone. The current `Task` struct ([`kernel/src/obj/task.rs`](../../../kernel/src/obj/task.rs)) carries only `id + address_space_handle` — no PC/SP context register file; `ContextSwitch::init_context` requires a stable entry-point function pointer + kernel-stack backing that userspace doesn't have until B5+ introduces EL0 entry. Beyond context shape, the loader's new AS contains only image + stack mappings — **no kernel mappings**, so any EL1 exception taken while the AS is active translation-faults on the vector fetch (the ADR-0033 high-half placeholder, gated on B5's per-task TTBR0 swap, addresses this). Accordingly: B4's load-bearing deliverable is now a [`LoadedImage` metadata struct](../../analysis/tasks/phase-b/T-019-task-loader.md) (`{ as_cap, entry_va, stack_top_va, image_bytes, stack_bytes }`); the `task_create_from_image` wrapper that turns it into a runnable `CapHandle{CapObject::Task(...)}` lands with B5 or B6 after kernel-mapping-in-userspace-AS + EL0 context-init + syscall ABI prerequisites are in place. The §Acceptance criteria above ("report the entry point and initial stack pointer") is exactly the `LoadedImage` shape; only the §Sub-breakdown §3 wording overreached. No structural change to B4's scope; the §Sub-breakdown §3 entry stays for forward-reference clarity but should be read as "the `task_create_from_image` surface lands incrementally across B4 → B6, not in T-019 alone".
 
 ---
 
