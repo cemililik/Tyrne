@@ -8,7 +8,7 @@ when-to-use: When one or more tasks, ADRs, or audit-log entries reach a waiting-
 
 ## Inputs
 
-- A **list of artefacts under review** — task files (`docs/analysis/tasks/<phase>/T-NNN-*.md`), ADRs (`docs/decisions/NNNN-*.md`), audit-log entries (`docs/audits/unsafe-log.md` UNSAFE-2026-NNNN), or review documents (`docs/analysis/reviews/<type>/YYYY-MM-DD-*.md`) in `Proposed` / `In Review` / similar waiting-for-promotion states.
+- A **list of artefacts under review** — task files (`docs/analysis/tasks/<phase>/T-NNN-*.md`), ADRs (`docs/decisions/NNNN-*.md`), audit-log entries (`docs/audits/unsafe-log.md` UNSAFE-2026-NNNN), or review documents (`docs/analysis/reviews/<type>-reviews/YYYY-MM-DD-*.md`) in `Proposed` / `In Review` / similar waiting-for-promotion states.
 - The **commit range or PR** that produced the artefacts.
 - Any **deliberate deferrals or settled-decision context** the maintainer has already established (e.g. settled items from prior review rounds; rejection rationales).
 

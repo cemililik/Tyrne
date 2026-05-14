@@ -81,6 +81,50 @@ impl QemuVirtAddressSpace {
     pub fn root(self) -> PhysFrame {
         self.root
     }
+
+    /// Construct a `QemuVirtAddressSpace` naming an already-live root
+    /// translation table.
+    ///
+    /// Companion to [`Mmu::create_address_space`] for the bootstrap
+    /// case (per [ADR-0028 §Simulation row 0][adr-0028]). `mmu_bootstrap`
+    /// activates the L0/L1/L2 frames via `MSR TTBR0_EL1` before any
+    /// `AddressSpace<QemuVirtMmu>` value exists at the kernel layer;
+    /// this constructor lets `kernel_entry` wrap the already-live root
+    /// without going through the unsafe `create_address_space` trait
+    /// method (whose contract requires a *zero-filled* root — true for
+    /// post-PMM-alloc frames, false for the live bootstrap root).
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee that `root` is a valid, **currently-
+    /// live** `VMSAv8` L0 translation table — i.e., a 4 KiB frame whose
+    /// 512 × 8-byte entries are correctly-encoded `VMSAv8` table /
+    /// block / page descriptors, with at least the kernel-half
+    /// mappings populated. Subsequent operations on the resulting
+    /// `QemuVirtAddressSpace` (e.g., [`Mmu::map`] / [`Mmu::unmap`])
+    /// perform `volatile` reads + writes through this root's descriptor
+    /// chain; passing an arbitrary `PhysFrame` would dereference
+    /// garbage bytes as descriptors and produce undefined behaviour at
+    /// the page-table walker level.
+    ///
+    /// This contract is **distinct** from [`Mmu::create_address_space`]'s:
+    /// `create_address_space` requires the root to be *zero-filled*
+    /// (and the kernel-half mappings to be populated by the caller
+    /// post-construction); `from_existing_root` requires the root to
+    /// be *already populated and live*. Both are caller-side
+    /// preconditions the type system cannot enforce.
+    ///
+    /// v1's only caller is `bsp-qemu-virt/src/main.rs::kernel_entry`,
+    /// which derives `root` from the `__boot_pt_l0` linker symbol —
+    /// the L0 frame `mmu_bootstrap` populated and wrote into
+    /// `TTBR0_EL1`. The bootstrap path is the only well-known
+    /// already-live root in v1.
+    ///
+    /// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
+    #[must_use]
+    pub unsafe fn from_existing_root(root: PhysFrame) -> Self {
+        Self { root }
+    }
 }
 
 /// `Mmu` impl for QEMU `virt` (`VMSAv8` page-table format, 4 KiB granule,
@@ -438,16 +482,19 @@ unsafe fn walk_or_alloc_table(
         //   - Block descriptor (valid + table bit clear) — the v1
         //     bootstrap pre-mapped this region as a 2 MiB block (or
         //     larger at L0/L1). Splitting the block into 4 KiB pages
-        //     is deferred to the first B3+ caller per T-016 §Out of
-        //     scope, so both `map` and `unmap` return `AlreadyMapped`
-        //     here. (An `unmap` against a block-mapped region is
-        //     semantically asking "remove a sub-2-MiB page" inside a
-        //     block — which requires the same block-split logic;
-        //     a future `MmuError::BlockMapped` variant may
-        //     disambiguate when block-split lands.)
+        //     is deferred to B3+ per T-016 §Out of scope.
+        //     `map` into a block returns `AlreadyMapped` (the
+        //     4 KiB region is structurally occupied).
+        //     `unmap` returns `BlockMapped` — it is semantically asking
+        //     to remove a sub-block page, which needs block-splitting;
+        //     using `AlreadyMapped` for unmap would be misleading.
         let is_table = (existing & DESC_TABLE_OR_PAGE_BIT) != 0;
         if !is_table {
-            return Err(MmuError::AlreadyMapped);
+            return Err(if unmap {
+                MmuError::BlockMapped
+            } else {
+                MmuError::AlreadyMapped
+            });
         }
         let next_pa = existing & TABLE_NLA_MASK;
         return PhysFrame::from_aligned(PhysAddr(next_pa as usize))

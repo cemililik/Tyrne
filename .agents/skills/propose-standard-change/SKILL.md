@@ -40,7 +40,7 @@ when-to-use: Whenever a rule in `docs/standards/` needs to change. Covers additi
 7. **Search for downstream effects.**
    - Other standards that cite the changed rule or principle.
    - ADRs whose outcome depended on the old rule.
-   - Skills (`.claude/skills/`) that invoke the changed rule as a step.
+   - Skills (`.agents/skills/`) that invoke the changed rule as a step.
    - Architecture documents that rested on the rule.
    - Update each one or open an issue to track the update if it is non-trivial.
 

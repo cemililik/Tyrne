@@ -27,7 +27,7 @@ These rules apply to every AI agent acting inside this repository, regardless of
 | High-level architecture | [docs/architecture/](docs/architecture/) |
 | Why we chose X | [docs/decisions/](docs/decisions/) |
 | How to write docs, code, commits | [docs/standards/](docs/standards/) |
-| **Step-by-step procedures for recurring tasks** | [.claude/skills/](.claude/skills/) |
+| **Step-by-step procedures for recurring tasks** | [.agents/skills/](.agents/skills/) |
 | **What work is active, and what's next** | [docs/roadmap/current.md](docs/roadmap/current.md) |
 | **Full phase plan (one file per phase)** | [docs/roadmap/phases/](docs/roadmap/phases/) |
 | **Individual task user stories (per-phase)** | [docs/analysis/tasks/](docs/analysis/tasks/) |
@@ -42,11 +42,11 @@ If a path referenced above does not yet exist, it is on the near-term roadmap �
 
 ## Skills
 
-When the maintainer asks for a recurring task — write an ADR, perform a code review, introduce an `unsafe` block, add a dependency — there is usually a **skill** at `.claude/skills/<slug>/SKILL.md` that describes the correct procedure step by step. Read the skill in full before executing; check the acceptance criteria at the end. Skills are not optional shortcuts; they are how the project keeps recurring work consistent.
+When the maintainer asks for a recurring task — write an ADR, perform a code review, introduce an `unsafe` block, add a dependency — there is usually a **skill** at `.agents/skills/<slug>/SKILL.md` that describes the correct procedure step by step. Read the skill in full before executing; check the acceptance criteria at the end. Skills are not optional shortcuts; they are how the project keeps recurring work consistent.
 
-Skills follow the Anthropic skill convention so Claude Code can auto-discover them. Non-Claude agents should treat the same files as their canonical procedure library.
+Skills follow the Anthropic skill-file shape (per-skill directory + `SKILL.md` with YAML frontmatter) under `.agents/` to keep the library agent-neutral; Claude Code and other agent runners can both read them. Non-Claude agents should treat these files as their canonical procedure library.
 
-See [.claude/skills/README.md](.claude/skills/README.md) for the full index.
+See [.agents/skills/README.md](.agents/skills/README.md) for the full index.
 
 ## Before starting work
 

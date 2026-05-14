@@ -52,6 +52,7 @@ use crate::cap::{CapHandle, CapObject, CapabilityTable};
 use crate::ipc::{
     ipc_cancel_recv, ipc_recv, ipc_send, IpcError, IpcQueues, Message, RecvOutcome, SendOutcome,
 };
+use crate::mm::AddressSpaceHandle;
 use crate::obj::endpoint::EndpointArena;
 use crate::obj::{EndpointHandle, TaskHandle, TASK_ARENA_CAPACITY};
 
@@ -175,15 +176,26 @@ pub enum SchedError {
     QueueFull,
     /// IPC operation failed.
     Ipc(IpcError),
-    /// The ready queue is empty AND no idle task is registered while the
-    /// current task has just blocked — every task in the system is waiting
-    /// on IPC and the dispatcher's fallback slot ([`Scheduler::idle`]) is
-    /// `None`. Per [ADR-0022] + [ADR-0026], registering a BSP idle task at
-    /// boot via [`register_idle`] makes this variant structurally
-    /// unreachable in the v1 cooperative workload; it is preserved as a
-    /// defensive return for preemption / SMP / "BSP forgot to call
-    /// `register_idle`" so the kernel never panics on a userspace-reachable
-    /// condition.
+    /// No dispatch candidate exists after the current task has just
+    /// blocked. Three shapes resolve to this error:
+    ///
+    /// 1. The ready queue is empty AND no idle task is registered —
+    ///    every task in the system is waiting on IPC and the
+    ///    dispatcher's fallback slot ([`Scheduler::idle`]) is `None`.
+    /// 2. The ready queue is empty AND the registered idle task **is
+    ///    the calling task itself**. Idle is structurally the bottom
+    ///    fallback per [ADR-0026], so dispatching to itself would
+    ///    self-context-switch (aliasing the same slot as `&mut` and
+    ///    `&` in the switch-window split borrow — release-mode UB).
+    ///    [`ipc_recv_and_yield`] rejects this and rolls back instead.
+    /// 3. Preemption / SMP edge cases (not v1).
+    ///
+    /// Per [ADR-0022] + [ADR-0026], registering a BSP idle task at
+    /// boot via [`register_idle`] makes shape (1) unreachable in the
+    /// v1 cooperative workload, and shape (2) requires the idle task
+    /// itself to call a blocking primitive — which the v1 idle body
+    /// does not do. The variant is preserved as a defensive return so
+    /// the kernel never panics on a userspace-reachable condition.
     ///
     /// # Rollback scope
     ///
@@ -230,6 +242,22 @@ pub struct Scheduler<C: ContextSwitch + Cpu> {
     /// Stored handles, indexed by slot index, so the scheduler can find
     /// a `TaskHandle` when unblocking without re-querying the arena.
     task_handles: [Option<TaskHandle>; TASK_ARENA_CAPACITY],
+    /// Per-task `AddressSpaceHandle`, parallel to `task_handles` and
+    /// indexed by the same slot index. Written by [`add_task`] /
+    /// [`register_idle`]; read by the activation-on-context-switch
+    /// hook in [`yield_now`] (and the IPC bridge's context-switch
+    /// paths) to decide whether [`Mmu::activate`] must fire before
+    /// the architectural switch.
+    ///
+    /// Per [ADR-0028 §Simulation row 3][adr-0028]. In v1 all tasks
+    /// share the bootstrap AS, so the activation hook short-circuits
+    /// (zero overhead). The field is populated unconditionally for
+    /// every registered task so B5+ multi-AS tasks slot in
+    /// additively.
+    ///
+    /// [ADR-0028 §Simulation row 3]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md#simulation
+    /// [`Mmu::activate`]: tyrne_hal::Mmu::activate
+    task_address_space_handles: [Option<AddressSpaceHandle>; TASK_ARENA_CAPACITY],
     current: Option<TaskHandle>,
     /// Idle-task fallback slot per [ADR-0026]. Written exclusively by
     /// [`register_idle`]; read by the dispatch sites
@@ -266,6 +294,7 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
             ready: SchedQueue::new(),
             task_states: [TaskState::Idle; TASK_ARENA_CAPACITY],
             task_handles: [None; TASK_ARENA_CAPACITY],
+            task_address_space_handles: [None; TASK_ARENA_CAPACITY],
             current: None,
             idle: None,
             contexts: core::array::from_fn(|_| C::TaskContext::default()),
@@ -292,6 +321,7 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
         &mut self,
         cpu: &C,
         handle: TaskHandle,
+        address_space_handle: AddressSpaceHandle,
         entry: fn() -> !,
         stack_top: *mut u8,
     ) -> Result<(), SchedError> {
@@ -309,6 +339,7 @@ impl<C: ContextSwitch + Cpu> Scheduler<C> {
             .map_err(|_| SchedError::QueueFull)?;
         self.task_states[idx] = TaskState::Ready;
         self.task_handles[idx] = Some(handle);
+        self.task_address_space_handles[idx] = Some(address_space_handle);
         Ok(())
     }
 
@@ -486,6 +517,7 @@ pub unsafe fn register_idle<C: ContextSwitch + Cpu>(
     sched: *mut Scheduler<C>,
     cpu: &C,
     handle: TaskHandle,
+    address_space_handle: AddressSpaceHandle,
     entry: fn() -> !,
     stack_top: *mut u8,
 ) {
@@ -522,6 +554,7 @@ pub unsafe fn register_idle<C: ContextSwitch + Cpu>(
 
     s.task_states[idx] = TaskState::Ready;
     s.task_handles[idx] = Some(handle);
+    s.task_address_space_handles[idx] = Some(address_space_handle);
     s.idle = Some(handle);
 }
 
@@ -620,15 +653,53 @@ unsafe fn start_prelude<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>) -> usi
 /// bootstrap frame is abandoned, this function also honours the "no `&mut`
 /// across the switch" rule — the throwaway context is constructed on a
 /// stack frame that `cpu.context_switch` never returns to.
-pub unsafe fn start<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>, cpu: &C) -> ! {
+pub unsafe fn start<C: ContextSwitch + Cpu>(
+    sched: *mut Scheduler<C>,
+    cpu: &C,
+    activate_address_space: impl FnOnce(AddressSpaceHandle),
+) -> ! {
     // SAFETY: caller satisfies the Shared safety contract for `sched`.
     // `start_prelude` materialises a momentary `&mut Scheduler<C>` inside
     // its own block and drops it before returning, so no `&mut` is alive
     // across the `cpu.context_switch` below. Audit: UNSAFE-2026-0014.
     let next_idx = unsafe { start_prelude(sched) };
 
+    // SAFETY: caller satisfies the Shared safety contract for `sched`.
+    // The read happens after `start_prelude`'s `&mut Scheduler` borrow has
+    // dropped and before the activate / context_switch sequence below;
+    // no `&mut Scheduler<C>` is alive at this point. Audit: UNSAFE-2026-0014.
+    let first_as: Option<AddressSpaceHandle> =
+        unsafe { (*sched).task_address_space_handles[next_idx] };
+
     let mut throwaway = <C::TaskContext as Default>::default();
     let _guard = IrqGuard::new(cpu);
+
+    // Activate the first task's AddressSpace **inside** the `IrqGuard`
+    // scope, matching the discipline `yield_now` / `ipc_recv_and_yield`
+    // already follow per [ADR-0028 §Simulation row 3][adr-0028]. Unlike
+    // those hooks this fire is unconditional — there is no "previous
+    // AS" to compare against (the bootstrap stack frame is being
+    // abandoned), so the closure receives the first task's AS handle
+    // if one is known. v1 BSPs pass the bootstrap AS handle; future
+    // per-task AS work passes the task's own handle. If the slot has
+    // no recorded AS, the closure is dropped without firing.
+    //
+    // Holding `_guard` here closes the IRQ-window in which an
+    // interrupt taken between `activate` and `cpu.context_switch`
+    // would run the handler under the freshly-installed `TTBR0_EL1`
+    // — harmless in v1 (every task shares the bootstrap AS so the
+    // new TTBR's kernel mappings are identical), but a forward-
+    // defensive correctness gate for B5+ multi-AS userspace where a
+    // per-task AS without the kernel mapping would translation-fault
+    // any IRQ taken in this window.
+    //
+    // [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md#simulation
+    if let Some(target) = first_as {
+        activate_address_space(target);
+    } else {
+        drop(activate_address_space);
+    }
+
     // SAFETY: `next_idx` is in range (written by `add_task`); interrupts are
     // masked by `IrqGuard`; the throwaway current context lives on the
     // abandoned bootstrap stack frame and is never restored. No `&mut
@@ -679,9 +750,10 @@ pub unsafe fn start<C: ContextSwitch + Cpu>(sched: *mut Scheduler<C>, cpu: &C) -
 pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
     sched: *mut Scheduler<C>,
     cpu: &C,
+    activate_address_space: impl FnOnce(AddressSpaceHandle),
 ) -> Result<(), SchedError> {
     // Pre-switch work — momentary &mut Scheduler, dropped before the switch.
-    let (current_idx, next_idx) = {
+    let (current_idx, next_idx, next_as) = {
         // SAFETY: caller contract — `sched` is valid, exclusively-owned for
         // the duration of this inner block, and this `&mut` does not cross
         // the `cpu.context_switch` call below because the block ends first.
@@ -750,7 +822,19 @@ pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
         s.task_states[next_idx] = TaskState::Ready;
         s.current = Some(next_handle);
 
-        (current_idx, next_idx)
+        // Compute the activation-hook decision under the &mut Scheduler
+        // borrow (which we're about to drop). We read both tasks' AS
+        // handles here; the actual `activate` call fires below, inside
+        // the IrqGuard scope and after the borrow ends, so the closure
+        // body can freely access BSP-side state (typically an
+        // `AddressSpaceArena<M>` `StaticCell`) without aliasing the
+        // scheduler's `&mut`.
+        let next_as = address_space_activation_target(
+            s.task_address_space_handles[current_idx],
+            s.task_address_space_handles[next_idx],
+        );
+
+        (current_idx, next_idx, next_as)
     }; // `s: &mut Scheduler<C>` drops here
 
     // Switch window — no `&mut Scheduler<C>` is live.
@@ -759,6 +843,15 @@ pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
         "split-borrow invariant: current and next task indices must differ"
     );
     let _guard = IrqGuard::new(cpu);
+
+    // Activation-on-context-switch hook per [ADR-0028 §Simulation row 3].
+    // Fires only when the outgoing and incoming tasks have distinct
+    // `AddressSpaceHandle`s (computed above under the dropped borrow).
+    // In v1 all tasks share the bootstrap AS, so this short-circuits.
+    if let Some(target) = next_as {
+        activate_address_space(target);
+    }
+
     // SAFETY: `current_idx != next_idx` by construction (the running task is
     // never in the ready queue, so `next_handle != current_handle` → distinct
     // indices). Both indices are within [0, TASK_ARENA_CAPACITY). Interrupts
@@ -775,6 +868,36 @@ pub unsafe fn yield_now<C: ContextSwitch + Cpu>(
     }
 
     Ok(())
+}
+
+/// Decide whether the activation-on-context-switch hook should fire,
+/// and what [`AddressSpaceHandle`] to activate if so.
+///
+/// Returns `Some(target)` when both tasks have known AS handles and
+/// the handles differ (the switch crosses an AS boundary). Returns
+/// `None` when:
+///
+/// - The handles match (both tasks share the same AS — most v1
+///   tasks). Zero overhead.
+/// - Either handle is `None` (an `add_task` / `register_idle` call
+///   that pre-dates the address-space-handle threading; defensive
+///   no-activate keeps such tasks running on whatever AS is
+///   currently active without forcing a [`Mmu::activate`] call into
+///   a slot that does not yet exist in the AS arena).
+///
+/// The function is pure / panic-free; the side-effecting
+/// [`Mmu::activate`] call lives at the [`yield_now`] (and
+/// [`ipc_recv_and_yield`]) call site that consumes this result.
+///
+/// [`Mmu::activate`]: tyrne_hal::Mmu::activate
+fn address_space_activation_target(
+    current_as: Option<AddressSpaceHandle>,
+    next_as: Option<AddressSpaceHandle>,
+) -> Option<AddressSpaceHandle> {
+    match (current_as, next_as) {
+        (Some(c), Some(n)) if c != n => Some(n),
+        _ => None,
+    }
 }
 
 /// Send a message; if the send delivers to a waiting receiver, unblock that
@@ -804,6 +927,7 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
     ep_cap: CapHandle,
     msg: Message,
     transfer: Option<CapHandle>,
+    activate_address_space: impl FnOnce(AddressSpaceHandle),
 ) -> Result<SendOutcome, SchedError> {
     // Pre-switch work — momentary &muts, dropped before the switch.
     // SAFETY: caller contract — all four pointers are valid, distinct, and
@@ -846,8 +970,14 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
         // (the callee's switch spans this frame); see §Rejected safer
         // alternatives above. Audit: UNSAFE-2026-0014.
         unsafe {
-            yield_now(sched, cpu)?;
+            yield_now(sched, cpu, activate_address_space)?;
         }
+    } else {
+        // No yield happened, so the activation closure is unused. The
+        // closure is `FnOnce` and consumed here by dropping; if the
+        // BSP captured `&Mmu` + `&AddressSpaceArena<M>` there is no
+        // side effect.
+        drop(activate_address_space);
     }
 
     Ok(outcome)
@@ -887,6 +1017,12 @@ pub unsafe fn ipc_send_and_yield<C: ContextSwitch + Cpu>(
 ///
 /// [ADR-0022]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0022-idle-task-and-typed-scheduler-deadlock.md
 /// [ADR-0032]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0032-endpoint-rollback-and-cancel-recv.md
+#[allow(
+    clippy::too_many_arguments,
+    reason = "IPC bridge must forward all parameters that ipc_recv requires \
+              plus the AS activation closure threaded into the Phase-2 \
+              context-switch path"
+)]
 pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     sched: *mut Scheduler<C>,
     cpu: &C,
@@ -894,7 +1030,20 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     queues: *mut IpcQueues,
     caller_table: *mut CapabilityTable,
     ep_cap: CapHandle,
+    activate_address_space: impl FnOnce(AddressSpaceHandle),
 ) -> Result<RecvOutcome, SchedError> {
+    // Pre-Phase-1 guard: verify a current task exists *before* Phase 1
+    // mutates endpoint state (Idle → RecvWaiting). If we deferred this
+    // check to Phase 2 (as the original code did), a NoCurrentTask
+    // early-return would leave the endpoint in RecvWaiting without a
+    // matching ipc_cancel_recv rollback — neither the Deadlock path
+    // nor any other recovery branch would clean it up.
+    // SAFETY: read-only snapshot; no `&mut` alive at this point.
+    // Audit: UNSAFE-2026-0014.
+    if unsafe { (*sched).current.is_none() } {
+        return Err(SchedError::NoCurrentTask);
+    }
+
     // Phase 1 — try non-blocking recv, momentary &muts.
     // SAFETY: caller contract — all pointers valid, distinct, and
     // exclusively-owned for this inner block. Each `&mut` materialised here
@@ -942,6 +1091,9 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         // alternatives as above (Shared safety contract §Rejected safer
         // alternatives). Audit: UNSAFE-2026-0014.
         let s = unsafe { &mut *sched };
+        // Pre-Phase-1 guard (above) guarantees current is Some here;
+        // the ok_or is a defensive fallback for any future code path
+        // that bypasses the guard.
         let current_handle = s.current.ok_or(SchedError::NoCurrentTask)?;
         let current_idx = current_handle.slot().index() as usize;
         let prior_state = s.task_states[current_idx];
@@ -953,11 +1105,30 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         s.task_states[current_idx] = TaskState::Blocked { on: ep_handle };
         s.current = None;
 
-        if let Some(next_handle) = s.ready.dequeue().or(s.idle) {
+        // Mirror yield_now's guard: fall back to idle only when it is a
+        // *distinct* task from current. If idle == current (e.g., the
+        // idle task somehow called ipc_recv_and_yield), treating it as
+        // a dispatch candidate would produce next_idx == current_idx —
+        // the split-borrow at the context-switch site would alias the
+        // same context slot as `&mut` and `&`, which is UB in release.
+        // The debug_assert at the switch site catches this in debug but
+        // not in release, so we reject the self-dispatch here.
+        if let Some(next_handle) = s
+            .ready
+            .dequeue()
+            .or_else(|| s.idle.filter(|&idle_h| idle_h != current_handle))
+        {
             let next_idx = next_handle.slot().index() as usize;
             s.task_states[next_idx] = TaskState::Ready;
             s.current = Some(next_handle);
-            Some((current_idx, next_idx))
+            // Compute activation-hook decision under the &mut borrow
+            // (mirrors yield_now's pattern; the `Mmu::activate` call
+            // fires after the borrow ends, inside the IrqGuard scope).
+            let next_as = address_space_activation_target(
+                s.task_address_space_handles[current_idx],
+                s.task_address_space_handles[next_idx],
+            );
+            Some((current_idx, next_idx, next_as))
         } else {
             // Restore so Err(Deadlock) leaves the scheduler unchanged.
             // The endpoint-side rollback runs after this block drops its
@@ -968,7 +1139,7 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
         }
     }; // `s: &mut Scheduler<C>` drops here.
 
-    let Some((current_idx, next_idx)) = dispatch else {
+    let Some((current_idx, next_idx, next_as)) = dispatch else {
         // Endpoint-side rollback per ADR-0032: reverse Phase 1's
         // `Idle → RecvWaiting` transition so the caller observes the
         // same endpoint state it had before the bridge was called.
@@ -1005,6 +1176,20 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
     );
     {
         let _guard = IrqGuard::new(cpu);
+
+        // Activation-on-context-switch hook per [ADR-0028 §Simulation
+        // row 3]. Mirrors yield_now's hook: fires only when the
+        // outgoing and incoming tasks have distinct AddressSpaceHandles
+        // (computed above under the dropped &mut Scheduler borrow). In
+        // v1 all tasks share the bootstrap AS, so this short-circuits.
+        if let Some(target) = next_as {
+            activate_address_space(target);
+        } else {
+            // No AS switch — drop the closure unused so its captures
+            // (typically &Mmu + &AddressSpaceArena) release cleanly.
+            drop(activate_address_space);
+        }
+
         // SAFETY: `current_idx != next_idx` (running task was removed from
         // the ready queue before dequeue); both indices in range. Rejected
         // alternatives: context-switch is register-save assembly, no safe
@@ -1058,6 +1243,7 @@ pub unsafe fn ipc_recv_and_yield<C: ContextSwitch + Cpu>(
 )]
 mod tests {
     use super::*;
+    use crate::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE;
     use crate::obj::arena::SlotId;
     use crate::obj::endpoint::EndpointHandle;
 
@@ -1198,7 +1384,17 @@ mod tests {
         let mut stack = AlignedStack::<512>::new();
         // SAFETY: stack is 512 bytes and 16-byte aligned (AlignedStack repr).
         // FakeCpu::init_context is a no-op so the stack is never actually used.
-        unsafe { sched.add_task(&cpu, h, spin_entry(), stack.top()).unwrap() };
+        unsafe {
+            sched
+                .add_task(
+                    &cpu,
+                    h,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    stack.top(),
+                )
+                .unwrap();
+        };
         assert_eq!(sched.task_states[0], TaskState::Ready);
         assert_eq!(sched.task_handles[0], Some(h));
         assert_eq!(sched.ready.len(), 1);
@@ -1215,8 +1411,24 @@ mod tests {
         // SAFETY: stacks are 512 bytes and 16-byte aligned (AlignedStack repr).
         // FakeCpu::init_context is a no-op so the stacks are never actually used.
         unsafe {
-            sched.add_task(&cpu, h0, spin_entry(), s0.top()).unwrap();
-            sched.add_task(&cpu, h1, spin_entry(), s1.top()).unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h0,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s0.top(),
+                )
+                .unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h1,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s1.top(),
+                )
+                .unwrap();
         }
         // Simulate h0 running: it was dequeued when it started running.
         sched.ready.dequeue(); // removes h0 (head of queue)
@@ -1229,7 +1441,7 @@ mod tests {
         // `FakeCpu::context_switch` is a marker-only no-op, so the switch
         // never actually runs — the aliasing invariant is trivially satisfied.
         unsafe {
-            yield_now(core::ptr::from_mut(&mut sched), &cpu).unwrap();
+            yield_now(core::ptr::from_mut(&mut sched), &cpu, |_| {}).unwrap();
         }
 
         assert_eq!(sched.current, Some(h1));
@@ -1245,8 +1457,123 @@ mod tests {
         let mut sched: Scheduler<FakeCpu> = Scheduler::new();
         // SAFETY: same reasoning as the test above — `sched` is stack-local,
         // single-threaded test; no aliasing.
-        let result = unsafe { yield_now(core::ptr::from_mut(&mut sched), &cpu) };
+        let result = unsafe { yield_now(core::ptr::from_mut(&mut sched), &cpu, |_| {}) };
         assert_eq!(result, Err(SchedError::NoCurrentTask));
+    }
+
+    // ── Activation hook tests (T-018 commit 4) ────────────────────────────────
+
+    #[test]
+    fn yield_now_skips_activation_when_tasks_share_address_space() {
+        // Pin ADR-0028 §Simulation row 3's same-AS short-circuit: when
+        // current and next tasks have the same `AddressSpaceHandle`, the
+        // activation closure must not fire.
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+
+        let h0 = task_handle(0);
+        let h1 = task_handle(1);
+        let mut s0 = AlignedStack::<512>::new();
+        let mut s1 = AlignedStack::<512>::new();
+        // Both tasks on the same (bootstrap) AS.
+        // SAFETY: stack-local sched; FakeCpu's init_context is a no-op so the
+        // stack-top pointers are not actually dereferenced.
+        unsafe {
+            sched
+                .add_task(
+                    &cpu,
+                    h0,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s0.top(),
+                )
+                .unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h1,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s1.top(),
+                )
+                .unwrap();
+        }
+        sched.current = Some(h0);
+        sched.ready.dequeue(); // remove h0 from ready (mirror start_prelude's
+                               // dispatch)
+
+        let mut activated: Option<AddressSpaceHandle> = None;
+        // SAFETY: stack-local sched; FakeCpu's context_switch is a no-op.
+        unsafe {
+            yield_now(core::ptr::from_mut(&mut sched), &cpu, |h| {
+                activated = Some(h);
+            })
+            .unwrap();
+        }
+
+        assert_eq!(
+            activated, None,
+            "tasks share AS — activation closure must not fire"
+        );
+    }
+
+    #[test]
+    fn yield_now_activates_when_tasks_differ_in_address_space() {
+        // Pin ADR-0028 §Simulation row 3's switch-AS path: when current
+        // and next tasks have distinct `AddressSpaceHandle`s, the
+        // activation closure fires with the next task's handle.
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+
+        let h0 = task_handle(0);
+        let h1 = task_handle(1);
+        let mut s0 = AlignedStack::<512>::new();
+        let mut s1 = AlignedStack::<512>::new();
+
+        let as_a = BOOTSTRAP_ADDRESS_SPACE_HANDLE; // slot 0
+        let as_b = AddressSpaceHandle::test_handle(1, 0); // distinct slot
+
+        // SAFETY: stack-local sched; FakeCpu's init_context is a no-op.
+        unsafe {
+            sched
+                .add_task(&cpu, h0, as_a, spin_entry(), s0.top())
+                .unwrap();
+            sched
+                .add_task(&cpu, h1, as_b, spin_entry(), s1.top())
+                .unwrap();
+        }
+        sched.current = Some(h0);
+        sched.ready.dequeue(); // remove h0 from ready
+
+        let mut activated: Option<AddressSpaceHandle> = None;
+        // SAFETY: stack-local sched; FakeCpu's context_switch is a no-op.
+        unsafe {
+            yield_now(core::ptr::from_mut(&mut sched), &cpu, |h| {
+                activated = Some(h);
+            })
+            .unwrap();
+        }
+
+        assert_eq!(
+            activated,
+            Some(as_b),
+            "tasks differ in AS — activation closure must fire with the next task's AS handle"
+        );
+    }
+
+    #[test]
+    fn address_space_activation_target_pure_function() {
+        // Unit test for the helper used by both yield_now and
+        // ipc_recv_and_yield. None branches return None; matching
+        // handles return None; differing handles return Some(next).
+        let a = BOOTSTRAP_ADDRESS_SPACE_HANDLE;
+        let b = AddressSpaceHandle::test_handle(1, 0);
+
+        assert_eq!(address_space_activation_target(None, None), None);
+        assert_eq!(address_space_activation_target(Some(a), None), None);
+        assert_eq!(address_space_activation_target(None, Some(b)), None);
+        assert_eq!(address_space_activation_target(Some(a), Some(a)), None);
+        assert_eq!(address_space_activation_target(Some(a), Some(b)), Some(b));
     }
 
     #[test]
@@ -1305,7 +1632,13 @@ mod tests {
         // a no-op — stack is never actually used.
         unsafe {
             sched
-                .add_task(&cpu, task, spin_entry(), stack.top())
+                .add_task(
+                    &cpu,
+                    task,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    stack.top(),
+                )
                 .unwrap();
         }
         // Simulate `start` having dispatched `task`: it was dequeued and is
@@ -1356,6 +1689,7 @@ mod tests {
                 core::ptr::from_mut(&mut queues),
                 core::ptr::from_mut(&mut table),
                 ep_cap,
+                |_| {},
             )
         };
 
@@ -1416,6 +1750,7 @@ mod tests {
                 core::ptr::from_mut(&mut queues),
                 core::ptr::from_mut(&mut table),
                 ep_cap,
+                |_| {},
             )
         };
         assert!(matches!(result, Err(SchedError::Deadlock)));
@@ -1431,6 +1766,136 @@ mod tests {
             matches!(recv_outcome, RecvOutcome::Pending),
             "ADR-0032 rollback failed: endpoint observed {recv_outcome:?}, \
              want RecvOutcome::Pending (a clean Idle re-registration)"
+        );
+    }
+
+    /// R-Fix-3 regression: `ipc_recv_and_yield` called with no current
+    /// task must return `NoCurrentTask` **without** mutating endpoint
+    /// state (no `Idle → RecvWaiting` Phase-1 transition committed).
+    /// Pre-fix the early-return happened only at Phase 2, after Phase 1
+    /// had already mutated the endpoint — leaving it in `RecvWaiting`
+    /// with no rollback path.
+    #[test]
+    fn ipc_recv_and_yield_with_no_current_task_leaves_endpoint_idle() {
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let mut table = CapabilityTable::new();
+
+        // Mint an endpoint + RECV cap, but do NOT add_task or set
+        // sched.current. The scheduler has no running task.
+        let ep = create_endpoint(&mut ep_arena, Endpoint::new(0)).unwrap();
+        let ep_cap = table
+            .insert_root(Capability::new(CapRights::RECV, CapObject::Endpoint(ep)))
+            .unwrap();
+
+        assert_eq!(sched.current, None);
+
+        // SAFETY: pointers refer to stack-local test state; no aliasing.
+        let result = unsafe {
+            ipc_recv_and_yield(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                core::ptr::from_mut(&mut ep_arena),
+                core::ptr::from_mut(&mut queues),
+                core::ptr::from_mut(&mut table),
+                ep_cap,
+                |_| {},
+            )
+        };
+
+        assert!(
+            matches!(result, Err(SchedError::NoCurrentTask)),
+            "expected Err(NoCurrentTask), got {result:?}"
+        );
+
+        // Load-bearing assertion: endpoint must still be Idle (a fresh
+        // ipc_recv returns Pending — RecvWaiting would have produced
+        // QueueFull, the pre-fix-3 leak signature).
+        let recv_outcome =
+            crate::ipc::ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(
+            matches!(recv_outcome, RecvOutcome::Pending),
+            "endpoint must be Idle on NoCurrentTask return; got {recv_outcome:?}"
+        );
+    }
+
+    /// R-Fix-4 regression: when the registered idle task is itself the
+    /// current task (e.g. idle erroneously calls a blocking primitive),
+    /// the dispatcher must not pick idle as the next task — doing so
+    /// would self-context-switch and alias the same context slot as
+    /// `&mut` and `&` (release-mode UB; `debug_assert` tripwire fires).
+    /// The fix at the `or_else(|| s.idle.filter(...))` guard rejects
+    /// the self-dispatch and falls back to the Deadlock rollback.
+    #[test]
+    fn ipc_recv_and_yield_with_idle_as_current_returns_deadlock() {
+        let cpu = FakeCpu;
+        let mut sched: Scheduler<FakeCpu> = Scheduler::new();
+        let mut ep_arena = EndpointArena::default();
+        let mut queues = IpcQueues::new();
+        let mut table = CapabilityTable::new();
+        let mut s_idle = AlignedStack::<512>::new();
+        let h_idle = task_handle(0);
+
+        // Register idle, then promote idle to current (simulates idle
+        // having been dispatched and then somehow invoking the IPC
+        // blocking bridge — the latent path the guard closes).
+        // SAFETY: stack-local scheduler; FakeCpu::init_context is a no-op.
+        unsafe {
+            register_idle(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                h_idle,
+                BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                spin_entry(),
+                s_idle.top(),
+            );
+        }
+        sched.current = Some(h_idle);
+
+        // Endpoint + RECV cap so Phase 1 commits cleanly.
+        let ep = create_endpoint(&mut ep_arena, Endpoint::new(0)).unwrap();
+        let ep_cap = table
+            .insert_root(Capability::new(CapRights::RECV, CapObject::Endpoint(ep)))
+            .unwrap();
+
+        let prior_current = sched.current;
+        let prior_state = sched.task_states[0];
+        assert!(sched.ready.is_empty(), "ready queue must be empty");
+        assert_eq!(sched.idle, Some(h_idle));
+        assert_eq!(prior_current, Some(h_idle));
+
+        // SAFETY: pointers refer to stack-local test state; no aliasing.
+        // The self-dispatch guard rejects before context_switch.
+        let result = unsafe {
+            ipc_recv_and_yield(
+                core::ptr::from_mut(&mut sched),
+                &cpu,
+                core::ptr::from_mut(&mut ep_arena),
+                core::ptr::from_mut(&mut queues),
+                core::ptr::from_mut(&mut table),
+                ep_cap,
+                |_| {},
+            )
+        };
+
+        assert!(
+            matches!(result, Err(SchedError::Deadlock)),
+            "idle-is-current must surface as Deadlock, got {result:?}"
+        );
+
+        // Scheduler state restored.
+        assert_eq!(sched.current, prior_current);
+        assert_eq!(sched.task_states[0], prior_state);
+        assert!(sched.ready.is_empty());
+
+        // Endpoint state restored (ADR-0032 symmetric rollback).
+        let recv_outcome =
+            crate::ipc::ipc_recv(&mut ep_arena, &mut queues, ep_cap, &mut table).unwrap();
+        assert!(
+            matches!(recv_outcome, RecvOutcome::Pending),
+            "ADR-0032 rollback failed on idle-self deadlock: got {recv_outcome:?}"
         );
     }
 
@@ -1537,8 +2002,22 @@ mod tests {
         // ends before the bridge call below.
         unsafe {
             let s = &mut *sched_ptr;
-            s.add_task(&cpu, h0, spin_entry(), stack0.top()).unwrap();
-            s.add_task(&cpu, h1, spin_entry(), stack1.top()).unwrap();
+            s.add_task(
+                &cpu,
+                h0,
+                BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                spin_entry(),
+                stack0.top(),
+            )
+            .unwrap();
+            s.add_task(
+                &cpu,
+                h1,
+                BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                spin_entry(),
+                stack1.top(),
+            )
+            .unwrap();
             s.ready.dequeue();
             s.current = Some(h0);
         }
@@ -1547,7 +2026,15 @@ mod tests {
         // exclusively by this thread; each was derived exactly once
         // above, so no tag-invalidating re-borrow happens here.
         let result = unsafe {
-            ipc_recv_and_yield(sched_ptr, &cpu, ep_arena_ptr, queues_ptr, table_ptr, ep_cap)
+            ipc_recv_and_yield(
+                sched_ptr,
+                &cpu,
+                ep_arena_ptr,
+                queues_ptr,
+                table_ptr,
+                ep_cap,
+                |_| {},
+            )
         };
 
         assert!(
@@ -1576,8 +2063,24 @@ mod tests {
         // SAFETY: 16-byte aligned 512-byte stacks; FakeCpu init_context is
         // a no-op so the stack memory is never read by the test path.
         unsafe {
-            sched.add_task(&cpu, h0, spin_entry(), s0.top()).unwrap();
-            sched.add_task(&cpu, h1, spin_entry(), s1.top()).unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h0,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s0.top(),
+                )
+                .unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h1,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s1.top(),
+                )
+                .unwrap();
         }
 
         // Sanity: pre-call shape.
@@ -1637,6 +2140,7 @@ mod tests {
                 core::ptr::from_mut(&mut sched),
                 &cpu,
                 h_idle,
+                BOOTSTRAP_ADDRESS_SPACE_HANDLE,
                 spin_entry(),
                 s_idle.top(),
             );
@@ -1675,11 +2179,20 @@ mod tests {
         // SAFETY: stack-local scheduler + 16-byte-aligned stacks; FakeCpu's
         // init_context / context_switch are no-ops.
         unsafe {
-            sched.add_task(&cpu, h_a, spin_entry(), s_a.top()).unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h_a,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s_a.top(),
+                )
+                .unwrap();
             register_idle(
                 core::ptr::from_mut(&mut sched),
                 &cpu,
                 h_idle,
+                BOOTSTRAP_ADDRESS_SPACE_HANDLE,
                 spin_entry(),
                 s_idle.top(),
             );
@@ -1710,6 +2223,7 @@ mod tests {
                 core::ptr::from_mut(&mut queues),
                 core::ptr::from_mut(&mut table),
                 ep_cap,
+                |_| {},
             )
         };
 
@@ -1768,12 +2282,29 @@ mod tests {
 
         // SAFETY: stack-local scheduler + 16-byte-aligned stacks.
         unsafe {
-            sched.add_task(&cpu, h_b, spin_entry(), s_b.top()).unwrap();
-            sched.add_task(&cpu, h_a, spin_entry(), s_a.top()).unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h_b,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s_b.top(),
+                )
+                .unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h_a,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s_a.top(),
+                )
+                .unwrap();
             register_idle(
                 core::ptr::from_mut(&mut sched),
                 &cpu,
                 h_idle,
+                BOOTSTRAP_ADDRESS_SPACE_HANDLE,
                 spin_entry(),
                 s_idle.top(),
             );
@@ -1813,6 +2344,7 @@ mod tests {
                 ep_cap,
                 send_msg(0xAAAA),
                 None,
+                |_| {},
             )
         };
 
@@ -1901,8 +2433,24 @@ mod tests {
         // SAFETY: stacks are 16-byte aligned 512-byte buffers; FakeCpu
         // init_context is a no-op so the stack memory is never used.
         unsafe {
-            sched.add_task(&cpu, h0, spin_entry(), s0.top()).unwrap();
-            sched.add_task(&cpu, h1, spin_entry(), s1.top()).unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h0,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s0.top(),
+                )
+                .unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h1,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s1.top(),
+                )
+                .unwrap();
         }
 
         // Arrange the running shape: h0 is the current task; h1 is
@@ -1931,6 +2479,7 @@ mod tests {
                 ep_cap,
                 send_msg(42),
                 None,
+                |_| {},
             )
         };
 
@@ -1971,7 +2520,15 @@ mod tests {
 
         // SAFETY: see prior tests.
         unsafe {
-            sched.add_task(&cpu, h0, spin_entry(), s0.top()).unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h0,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s0.top(),
+                )
+                .unwrap();
         }
         sched.ready.dequeue();
         sched.current = Some(h0);
@@ -1992,6 +2549,7 @@ mod tests {
                 ep_cap,
                 send_msg(99),
                 None,
+                |_| {},
             )
         };
 
@@ -2028,8 +2586,24 @@ mod tests {
 
         // SAFETY: see prior tests.
         unsafe {
-            sched.add_task(&cpu, h0, spin_entry(), s0.top()).unwrap();
-            sched.add_task(&cpu, h1, spin_entry(), s1.top()).unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h0,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s0.top(),
+                )
+                .unwrap();
+            sched
+                .add_task(
+                    &cpu,
+                    h1,
+                    BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+                    spin_entry(),
+                    s1.top(),
+                )
+                .unwrap();
         }
         sched.ready.dequeue(); // h0 → current
         sched.current = Some(h0);
@@ -2057,6 +2631,7 @@ mod tests {
                 ep_cap,
                 send_msg(0),
                 None,
+                |_| {},
             )
         };
 

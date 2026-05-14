@@ -1,17 +1,19 @@
 //! Memory-management subsystem.
 //!
 //! Top-level parent for the kernel-side memory-management modules.
-//! Currently hosts the Physical Memory Manager (PMM) per [ADR-0035];
-//! a future B3 commit will add the address-space data-structure
-//! module per [ADR-0028 placeholder].
+//! Hosts the Physical Memory Manager (PMM) per [ADR-0035] and the
+//! kernel-side `AddressSpace<M>` object per [ADR-0028].
 //!
-//! See [T-017] for the implementation arc and [`docs/architecture/memory-management.md`]
-//! for the synthesised architecture chapter.
+//! See [T-017] for the PMM arc, [T-018] for the `AddressSpace` arc, and
+//! [`docs/architecture/memory-management.md`] for the synthesised
+//! architecture chapter.
 //!
+//! [ADR-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
 //! [ADR-0035]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0035-physical-memory-manager.md
-//! [ADR-0028 placeholder]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
 //! [T-017]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-017-physical-memory-manager.md
+//! [T-018]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-018-address-space-kernel-object.md
 
+pub mod address_space;
 pub mod pmm;
 
 use tyrne_hal::{PhysAddr, PAGE_SIZE};
@@ -85,4 +87,9 @@ impl PhysFrameRange {
     }
 }
 
+pub use address_space::{
+    activate_address_space_handle, cap_create_address_space, cap_map, cap_unmap,
+    create_address_space, get_address_space, AddressSpace, AddressSpaceArena, AddressSpaceError,
+    AddressSpaceHandle, ADDRESS_SPACE_ARENA_CAPACITY, BOOTSTRAP_ADDRESS_SPACE_HANDLE,
+};
 pub use pmm::{Pmm, PmmError, PmmStats};

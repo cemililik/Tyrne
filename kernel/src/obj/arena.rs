@@ -53,6 +53,24 @@ impl SlotId {
     pub(crate) const fn from_parts(index: Index, generation: Generation) -> Self {
         Self { index, generation }
     }
+
+    /// The canonical "first slot" identifier — index 0, generation 0.
+    ///
+    /// Production callers use this to *name* the first slot of an
+    /// arena (typically a bootstrap kernel-object slot — e.g., the
+    /// bootstrap address space) **before** the arena's first allocation
+    /// has run. The calling discipline is: the kernel-init path
+    /// allocates the bootstrap object first, which deterministically
+    /// produces a `SlotId` matching `first_slot()` (the empty arena's
+    /// head slot is index 0, generation 0; the first `allocate` consumes
+    /// it). Used by [`crate::mm::BOOTSTRAP_ADDRESS_SPACE_HANDLE`].
+    #[must_use]
+    pub const fn first_slot() -> Self {
+        Self {
+            index: 0,
+            generation: 0,
+        }
+    }
 }
 
 /// One storage cell of an [`Arena`]. Either populated or participating
@@ -179,6 +197,20 @@ impl<T, const N: usize> Arena<T, N> {
     #[must_use]
     pub fn contains(&self, id: SlotId) -> bool {
         self.get(id).is_some()
+    }
+
+    /// Return `true` when every slot is in use (the free list is empty).
+    ///
+    /// Useful for preflight capacity checks at composite operations
+    /// that allocate from multiple resources — e.g.,
+    /// `cap_create_address_space` checks both the arena and the
+    /// capability table for capacity before allocating a PMM frame,
+    /// so a downstream `ArenaFull` cannot leak the just-allocated
+    /// frame (the `FrameProvider` trait has no `free_frame` method
+    /// in v1; preflight + fail-fast is the structurally-safe path).
+    #[must_use]
+    pub const fn is_full(&self) -> bool {
+        self.free_head.is_none()
     }
 }
 

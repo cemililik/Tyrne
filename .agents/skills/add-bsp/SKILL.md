@@ -33,7 +33,7 @@ Do not write boot code before this ADR is Accepted.
 
 ### 2. Create the crate skeleton
 
-```
+```text
 bsp-<target>/
   Cargo.toml
   build.rs          (if a linker script needs to be emitted)
@@ -154,7 +154,7 @@ For real hardware, document the flashing command (e.g. `openocd`, `rpiboot`, `ca
 
 Boot the kernel and confirm:
 
-```
+```text
 tyrne: hello from kernel_main
 tyrne: starting cooperative scheduler
 tyrne: task A — iteration 0
@@ -176,7 +176,7 @@ See [`docs/standards/bsp-boot-checklist.md`](../../../docs/standards/bsp-boot-ch
 
 Per [commit-style.md](../../../docs/standards/commit-style.md):
 
-```
+```text
 feat(bsp-<target>): initial BSP — boot to kernel_entry on <target>
 ```
 

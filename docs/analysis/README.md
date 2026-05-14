@@ -17,7 +17,7 @@ Tasks are the unit of work. Each one is a short markdown file following the user
 - Task IDs (`T-NNN`) are sequential across the whole project; they do not restart per phase.
 - See [`tasks/README.md`](tasks/README.md) for the index, ID schema, status vocabulary, and lifecycle.
 
-Tasks are created with the [`start-task`](../../.claude/skills/start-task/SKILL.md) skill.
+Tasks are created with the [`start-task`](../../.agents/skills/start-task/SKILL.md) skill.
 
 ## Reviews
 
@@ -32,7 +32,7 @@ Reviews come in four types. Each type has its own folder, its own master plan, a
 
 Each folder contains a `README.md` describing when that type applies, a `master-plan.md` with a detailed multi-agent procedure, and one dated file per review conducted.
 
-Reviews are produced with the [`conduct-review`](../../.claude/skills/conduct-review/SKILL.md) skill, which takes the review type as input and applies that type's master plan.
+Reviews are produced with the [`conduct-review`](../../.agents/skills/conduct-review/SKILL.md) skill, which takes the review type as input and applies that type's master plan.
 
 See [`reviews/README.md`](reviews/README.md) for the cross-cutting review philosophy.
 

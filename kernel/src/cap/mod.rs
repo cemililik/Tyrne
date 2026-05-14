@@ -22,8 +22,8 @@
 //!   `TRANSFER`); more rights land with their subsystems.
 //! - [`CapObject`] is a typed enum that names a kernel object by its
 //!   typed handle — [`super::obj::TaskHandle`] / [`super::obj::EndpointHandle`]
-//!   / [`super::obj::NotificationHandle`] — following [ADR-0016][adr-0016].
-//!   `MemoryRegion` arrives in Phase B.
+//!   / [`super::obj::NotificationHandle`] / [`super::mm::AddressSpaceHandle`]
+//!   — following [ADR-0016][adr-0016]. `MemoryRegion` arrives in Phase B4+.
 //! - [`CapabilityTable`] implements
 //!   [`cap_copy`][CapabilityTable::cap_copy],
 //!   [`cap_derive`][CapabilityTable::cap_derive],
@@ -40,13 +40,19 @@ mod table;
 pub use rights::CapRights;
 pub use table::{CapHandle, CapabilityTable, CAP_TABLE_CAPACITY, MAX_DERIVATION_DEPTH};
 
+use crate::mm::AddressSpaceHandle;
 use crate::obj::{EndpointHandle, NotificationHandle, TaskHandle};
 
 /// Kinds of kernel object a capability can refer to.
 ///
 /// The discriminator for a capability's [`CapObject`]; `CapObject`
 /// carries the actual typed handle. `MemoryRegion` is reserved here but
-/// has no `CapObject` variant until Phase B introduces the MMU.
+/// has no `CapObject` variant until Phase B's B4+ work introduces
+/// frame-ownership semantics; `AddressSpace` was added in T-018 with
+/// the live [`AddressSpace`][crate::mm::AddressSpace] kernel-object
+/// landing per [ADR-0028][adr-0028].
+///
+/// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CapKind {
     /// Refers to a task kernel object.
@@ -55,7 +61,14 @@ pub enum CapKind {
     Endpoint,
     /// Refers to an asynchronous notification kernel object.
     Notification,
-    /// Refers to a physical memory region (Phase B).
+    /// Refers to an address-space kernel object (per
+    /// [ADR-0028][adr-0028]; T-018 commit 2). The
+    /// [`CapObject::AddressSpace`] variant carries the typed
+    /// [`AddressSpaceHandle`].
+    ///
+    /// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
+    AddressSpace,
+    /// Refers to a physical memory region (Phase B4+).
     MemoryRegion,
 }
 
@@ -63,9 +76,13 @@ pub enum CapKind {
 ///
 /// Each variant carries the [typed handle][crate::obj] of its kind, so
 /// passing a `TaskHandle` where an `EndpointHandle` is expected is a
-/// compile-time error. The discriminator matches [`CapKind`] one-to-one.
-/// `MemoryRegion` is deferred to Phase B; a capability with that kind
-/// cannot be constructed in v1.
+/// compile-time error. The discriminator matches [`CapKind`] one-to-one
+/// for every kind that has live kernel-object storage; `MemoryRegion`
+/// is in `CapKind` but has no `CapObject` variant until Phase B4+
+/// introduces frame-ownership semantics. `AddressSpace` landed with
+/// T-018 (per [ADR-0028][adr-0028]).
+///
+/// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CapObject {
     /// Capability naming a [`Task`][crate::obj::Task] kernel object.
@@ -74,6 +91,11 @@ pub enum CapObject {
     Endpoint(EndpointHandle),
     /// Capability naming a [`Notification`][crate::obj::Notification] kernel object.
     Notification(NotificationHandle),
+    /// Capability naming an [`AddressSpace`][crate::mm::AddressSpace]
+    /// kernel object (per [ADR-0028][adr-0028]; T-018 commit 2).
+    ///
+    /// [adr-0028]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0028-address-space-data-structure.md
+    AddressSpace(AddressSpaceHandle),
 }
 
 impl CapObject {
@@ -84,6 +106,7 @@ impl CapObject {
             Self::Task(_) => CapKind::Task,
             Self::Endpoint(_) => CapKind::Endpoint,
             Self::Notification(_) => CapKind::Notification,
+            Self::AddressSpace(_) => CapKind::AddressSpace,
         }
     }
 }
@@ -158,4 +181,12 @@ pub enum CapError {
     /// The caller must `cap_revoke` the subtree first so orphaned
     /// children cannot outlive their parent.
     HasChildren,
+    /// The capability's [`CapKind`] is not the one the operation
+    /// requires. Used by typed resolution helpers (e.g.,
+    /// `resolve_address_space_cap` in T-018 commit 3) when a caller
+    /// hands a wrong-kind capability to an operation that has a
+    /// specific kind contract — `cap_map(endpoint_cap, ...)` returns
+    /// `CapError::WrongKind` via the wrapper's
+    /// `AddressSpaceError::CapError(_)` passthrough.
+    WrongKind,
 }

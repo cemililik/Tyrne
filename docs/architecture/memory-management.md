@@ -207,6 +207,36 @@ Forward-portable to the future high-half kernel ([ADR-0033 placeholder](../decis
 
 [adr-0035-dep5]: ../decisions/0035-physical-memory-manager.md#dependency-chain
 
+## Address-space objects
+
+Per [ADR-0028](../decisions/0028-address-space-data-structure.md). The kernel wraps the BSP-specific [`Mmu::AddressSpace`](../../hal/src/mmu/mod.rs) associated type into a typed `AddressSpace<M: Mmu>` kernel object that lives in a per-type arena (`AddressSpaceArena<M>` — [ADR-0016](../decisions/0016-kernel-object-storage.md)'s fixed-size-block pattern with generation-tagged handles, mirroring `EndpointArena` / `TaskArena` / `NotificationArena`). The kernel propagates the existing `M: Mmu` generic axis from [ADR-0019](../decisions/0019-scheduler-shape.md) / [ADR-0020](../decisions/0020-cpu-trait-v2-context-switch.md) — no new generic axis is introduced at the address-space-object surface.
+
+**Capability variant.** [`CapKind::AddressSpace`](../../kernel/src/cap/mod.rs) + `CapObject::AddressSpace(AddressSpaceHandle)` (T-018 commit 2). Cap resolution uses the standard typed-handle pattern; wrong-kind caps surface as `CapError::WrongKind`, wrapped through `AddressSpaceError::CapError(_)` at the cap-gated wrapper surface.
+
+**Cap-gated wrapper surface.** Three free functions in [`kernel/src/mm/address_space.rs`](../../kernel/src/mm/address_space.rs) per [ADR-0028 §Simulation rows 1-2](../decisions/0028-address-space-data-structure.md#simulation):
+
+- `cap_create_address_space(table, parent_cap, new_rights, mmu, pmm, arena) -> Result<CapHandle, AddressSpaceError>` — 6-step capability-gated AS creation: validate parent-cap kind (must be `CapKind::AddressSpace` in v1; future `Untyped` per Phase-C); no-widening check on rights (mirrors `CapabilityTable::cap_copy`); `pmm.alloc_frame()` for the root; `unsafe { mmu.create_address_space(root) }` (UNSAFE-2026-0023 existing scope); arena slot; cap mint via `table.insert_root`. Rollback on cap-mint failure frees the arena slot via `destroy_address_space`; PMM frame leaks on `ArenaFull` / `CapsExhausted` (v1 limitation — `FrameProvider` trait has no `free_frame`; structurally unreachable in v1's sized arenas).
+- `cap_map(table, cap, mmu, pmm, arena, va, pa, flags) -> Result<(), AddressSpaceError>` — resolve cap → `&mut AddressSpace<M>` → `Mmu::map` → discharge `MapperFlush` token. Wraps `MmuError` as `AddressSpaceError::MmuMapError(_)`.
+- `cap_unmap(table, cap, mmu, arena, va) -> Result<PhysFrame, AddressSpaceError>` — mirrors `cap_map` inversely; returns the orphaned `PhysFrame` for caller-side handling (typically B4+ PMM `free_frame` once `cap_revoke(MemoryRegionCap)` lands; v1 tests verify the return value matches the originally-mapped PA).
+
+**Bootstrap-AS wrap.** Per [ADR-0028 §Simulation row 0](../decisions/0028-address-space-data-structure.md#simulation). At boot the BSP wraps the already-active L0 root frame (written into `TTBR0_EL1` by `mmu_bootstrap`) **without** calling `Mmu::create_address_space` — which would re-zero the live frame. The BSP-side `QemuVirtAddressSpace::from_existing_root(root)` constructor is safe (no zero-fill, no page-table modification); the kernel-side `AddressSpace::wrap_bootstrap(inner)` wraps it with metadata. Arena slot 0 holds the bootstrap AS; `BOOTSTRAP_ADDRESS_SPACE_HANDLE` is the deterministic name (slot 0, generation 0) for code that needs to reference the bootstrap AS before the actual arena allocation runs.
+
+**Activation-on-context-switch.** Per [ADR-0028 §Simulation row 3](../decisions/0028-address-space-data-structure.md#simulation). The scheduler's [`yield_now`](../../kernel/src/sched/mod.rs) / [`ipc_recv_and_yield`](../../kernel/src/sched/mod.rs) / [`start`](../../kernel/src/sched/mod.rs) take an `impl FnOnce(AddressSpaceHandle)` closure; the scheduler invokes it when the outgoing and incoming tasks' `AddressSpaceHandle`s differ (computed via the `address_space_activation_target` helper). The closure body — BSP-side `activate_address_space` — looks up the handle in `AS_ARENA` and calls [`Mmu::activate`](../../hal/src/mmu/mod.rs). v1 demo: all tasks share `BOOTSTRAP_ADDRESS_SPACE_HANDLE`, so the helper returns `None` and the closure never fires. B5+ multi-AS userspace tasks exercise the path. Host tests (`yield_now_activates_when_tasks_differ_in_address_space`) pin the fire path; the `address_space_activation_target_pure_function` test pins the helper's branch table.
+
+**`Task` integration.** [`Task`](../../kernel/src/obj/task.rs) gains an `address_space_handle: AddressSpaceHandle` field; `Task::new(id, address_space_handle)`. The scheduler maintains a `task_address_space_handles: [Option<AddressSpaceHandle>; TASK_ARENA_CAPACITY]` parallel array (indexed by task slot) — written by `add_task` / `register_idle`, read by the activation hook. v1's three tasks (Task A / Task B / idle) all carry `BOOTSTRAP_ADDRESS_SPACE_HANDLE`.
+
+**Audit-log surface.** No new entries for the AS-object layer itself — it is safe Rust over the existing MMU + PMM + cap surfaces. The activation-hook borrow + the BSP-side closure ride [UNSAFE-2026-0014](../audits/unsafe-log.md)'s existing umbrella (momentary `&` / `&mut` across cooperative switches); the static-cell access pattern is UNSAFE-2026-0010. The cap-gated wrappers' `unsafe { mmu.create_address_space(root) }` call ride UNSAFE-2026-0023's existing scope (the unsafe is on the HAL trait surface, not introduced by the wrappers).
+
+**Smoke trace.** Boot output gains exactly one new line immediately after the PMM banner:
+
+```text
+tyrne: address-space-arena ready (1 / 8 slots used; bootstrap AS root = 0x40092000)
+```
+
+The `1 / 8` confirms slot 0 holds the bootstrap AS and 7 slots are available for future B5+ tasks. The bootstrap-AS root address (the L0 frame in `.boot_pt`) is printed for cross-reference with `linker.ld`'s reservation.
+
+**Forward-compat to high-half migration ([ADR-0033 placeholder](../decisions/0027-kernel-virtual-memory-layout.md)).** The `AddressSpace<M>` struct holds only `inner: M::AddressSpace` in v1; future fields (`asid: Option<Asid>`, reverse-mapping pointers, per-AS table-walk bookkeeping) land additively via Amendment to the struct definition when ADR-0033 opens. No HAL trait surface change is needed for the additive case.
+
 ## TLB-invalidation scope
 
 v1 is single-core. Every `MapperFlush::flush()` call dispatches to `Mmu::invalidate_tlb_address(va)`, which the BSP implements as `TLBI VAE1, va_in_register; DSB ISH; ISB`. `Mmu::invalidate_tlb_all()` becomes `TLBI VMALLE1; DSB ISH; ISB`.

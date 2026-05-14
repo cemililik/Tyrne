@@ -75,7 +75,7 @@ Before starting, the reviewer determines the change's risk class:
 
 **Task:** does the change play well with everything around it?
 
-- Are there new dependencies? If so, was [`add-dependency`](../../../../.claude/skills/add-dependency/SKILL.md) followed?
+- Are there new dependencies? If so, was [`add-dependency`](../../../../.agents/skills/add-dependency/SKILL.md) followed?
 - Does the change break downstream callers (symbol renames, API changes, behaviour changes)?
 - Does the CI pipeline cover the new code paths?
 - Any regressions in existing tests?

@@ -493,6 +493,30 @@ impl CapabilityTable {
         Ok(&entry.capability)
     }
 
+    /// Return the depth of the capability at `handle` in the derivation
+    /// tree. A root capability minted via [`insert_root`] has depth `0`;
+    /// each [`cap_derive`] adds one. Used by cap-wrapper preflights
+    /// (e.g. [`crate::mm::cap_create_address_space`]) to reject
+    /// `parent_depth + 1 > MAX_DERIVATION_DEPTH` **before** consuming
+    /// downstream resources (PMM frames, arena slots) that the cap
+    /// table could not roll back.
+    ///
+    /// `pub(crate)`: this is an internal preflight helper, not part
+    /// of the cap-table public surface. Promote to `pub` if a future
+    /// downstream crate (syscall layer, userspace shim) needs to
+    /// query depth.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CapError::InvalidHandle`] if `handle` is stale.
+    ///
+    /// [`insert_root`]: Self::insert_root
+    /// [`cap_derive`]: Self::cap_derive
+    pub(crate) fn depth_of(&self, handle: CapHandle) -> Result<u8, CapError> {
+        let entry = self.entry_of(handle)?;
+        Ok(entry.depth)
+    }
+
     /// Return `true` if any live capability in this table names the
     /// given kernel object. Used by the [`crate::obj`] destroy paths
     /// to implement the reachability check described in
