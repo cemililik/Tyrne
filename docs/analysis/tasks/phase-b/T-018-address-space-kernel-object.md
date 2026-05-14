@@ -25,7 +25,7 @@ T-018 is also the **first runtime exerciser of UNSAFE-2026-0026** (PMM frame-zer
 
 ## Acceptance criteria
 
-- [x] **ADR-0028 Accepted** before code lands. Same-day Accept after careful re-read is permitted per [ADR-0025 §Revision notes](../../../decisions/0025-adr-governance-amendments.md); Propose commit is separate from the Accept commit per [`write-adr` skill §10](../../../../.claude/skills/write-adr/SKILL.md).
+- [x] **ADR-0028 Accepted** before code lands. Same-day Accept after careful re-read is permitted per [ADR-0025 §Revision notes](../../../decisions/0025-adr-governance-amendments.md); Propose commit is separate from the Accept commit per [`write-adr` skill §10](../../../../.agents/skills/write-adr/SKILL.md).
 
 ### Kernel-object module (`kernel/src/mm/address_space.rs`)
 
@@ -107,7 +107,7 @@ T-018 is also the **first runtime exerciser of UNSAFE-2026-0026** (PMM frame-zer
 - [x] `cargo fmt --all -- --check` clean.
 - [x] `cargo host-clippy` clean (`-D warnings`).
 - [x] `cargo kernel-clippy` clean (`-D warnings`).
-- [x] `cargo host-test` passes — expected ~212 (current 200 + ~12 new AddressSpace tests from the list above).
+- [x] `cargo host-test` passes — expected 221 (current 200 + 21 new tests: 17 AddressSpace + 3 scheduler activation-hook + 1 `Task::address_space_handle` round-trip; matches the count recorded in the [Review history](#review-history) row at landing).
 - [x] `cargo +nightly miri test` passes for the new AddressSpace test module (Stacked Borrows clean on the activation-hook's momentary borrow).
 - [x] `cargo kernel-build` produces a bootable image; size delta is bounded by the new `AddressSpaceArena<M, 8>` `.bss` reservation (8 × `sizeof(AddressSpace<QemuVirtMmu>)` + alignment) plus the cap-gated wrappers' `.text`.
 - [x] **QEMU smoke trace** — full demo through `tyrne: all tasks complete`; smoke-trace delta is exactly one new line `tyrne: address-space-arena ready (1 / 8 slots used; bootstrap AS root = 0x<pa>)` (and, if the second-AS smoke fixture lands, one additional line confirming the fixture ran). `-d int,unimp,guest_errors` shows only the pre-existing PL011 noise + the byte-count delta for the new banner.
