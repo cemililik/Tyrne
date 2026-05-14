@@ -32,12 +32,13 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
 use tyrne_hal::{Console, Cpu, FmtWriter, Timer};
-use tyrne_hal::{PhysAddr, PAGE_SIZE};
+use tyrne_hal::{PhysAddr, VirtAddr, PAGE_SIZE};
 use tyrne_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
 use tyrne_kernel::ipc::{IpcQueues, Message, RecvOutcome};
 use tyrne_kernel::mm::{PhysFrameRange, Pmm};
 use tyrne_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
 use tyrne_kernel::obj::task::{create_task, Task, TaskArena};
+use tyrne_kernel::obj::task_loader::load_image;
 use tyrne_kernel::sched::{
     ipc_recv_and_yield, ipc_send_and_yield, register_idle, start, yield_now, Scheduler,
 };
@@ -289,14 +290,44 @@ static BOOTSTRAP_AS_CAP: StaticCell<CapHandle> = StaticCell::new();
 
 /// Kernel-init's capability table. Mirrors `TABLE_A`/`TABLE_B`'s
 /// pattern but for the kernel-init context — holds the bootstrap AS
-/// authority cap. Currently 1 entry (the bootstrap AS cap); B5+
-/// will grow this with the kernel-init's untyped / memory-region
-/// authority caps.
-#[allow(
-    dead_code,
-    reason = "v1 demo creates no second AS; table reserved for B5+ userspace work"
-)]
+/// authority cap and (post-T-019) the loaded-image AS cap minted by
+/// `task_loader::load_image`. B5+ will grow this with the kernel-init's
+/// untyped / memory-region authority caps.
 static BOOTSTRAP_AS_TABLE: StaticCell<CapabilityTable> = StaticCell::new();
+
+// ─── T-019 task loader placeholder image (ADR-0029) ───────────────────────────
+
+/// Placeholder userspace image: 8 bytes of aarch64 `mov w0, #42; ret`
+/// per [ADR-0029 §Decision outcome (Build pipeline — B4 / T-019)][adr-0029].
+/// The real B6 "hello" userspace binary lands with `userland/hello/`
+/// per [ADR-0029 §Decision outcome (Build pipeline — B6)][adr-0029];
+/// T-019 ships with this hand-coded blob as the loader's smoke fixture.
+///
+/// **Not executed.** T-019 produces a `LoadedImage` describing a
+/// populated AS; running gates on B5 (syscall ABI per ADR-0030) + B6
+/// (first userspace "hello") which together provide the prerequisites
+/// (kernel mappings in userspace AS, EL0-ready context, syscall
+/// entry).
+///
+/// [adr-0029]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0029-initial-userspace-image-format.md
+static USERSPACE_IMAGE: &[u8] = &[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6];
+
+/// Base VA the loader places the image at — userspace VA range per
+/// [ADR-0027 §Decision outcome (a)][adr-0027]'s `TTBR0_EL1` range.
+/// `0x0080_0000` (8 MiB) matches the layout shape `bsp-qemu-virt`'s
+/// `linker.ld` uses for the kernel image (which lives at PA
+/// `0x4008_0000` = 128.5 MiB into PA-space; userspace VA `0x0080_0000`
+/// mirrors the 0.5 MiB-into-segment offset). Hard-coded for the
+/// placeholder blob; B6's `userland` linker script picks the real VA.
+///
+/// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+const USERSPACE_IMAGE_BASE_VA: usize = 0x0080_0000;
+
+/// Stack region size in `PAGE_SIZE`-multiples. Minimum 1; v1's
+/// placeholder never pushes to its stack but the loader requires a
+/// non-zero stack region (and the future `task_create_from_image`
+/// wrapper needs a defined `sp`).
+const USERSPACE_STACK_PAGES: usize = 1;
 
 /// Scheduler activation-hook callback for address-space changes.
 ///
@@ -926,6 +957,59 @@ pub extern "C" fn kernel_entry() -> ! {
             "tyrne: address-space-arena ready (1 / {} slots used; bootstrap AS root = {:#x})",
             tyrne_kernel::mm::ADDRESS_SPACE_ARENA_CAPACITY,
             bootstrap_root_pa
+        );
+    }
+
+    // ── Task loader smoke — T-019 / ADR-0029 ──────────────────────────────────
+    //
+    // First runtime exerciser of the loader half of B4: load the
+    // embedded raw-flat userspace placeholder blob into a fresh
+    // address space and print a one-line metadata banner. **Does NOT
+    // execute the loaded image** — runnability gates on B5/B6 per
+    // phase-b §B4 §Revision-notes. This block is the first post-
+    // bootstrap caller of `cap_create_address_space` + `cap_map`, so
+    // it exercises UNSAFE-2026-0025 (page-table descriptor writes)
+    // and UNSAFE-2026-0026 (PMM frame zero-fill) for real, and is
+    // the introducing site for UNSAFE-2026-0027 (the loader's
+    // copy_nonoverlapping byte-copy).
+    //
+    // SAFETY: PMM, MMU, AS_ARENA, BOOTSTRAP_AS_TABLE, and
+    // BOOTSTRAP_AS_CAP were each written above before this block
+    // runs; single-core cooperative, no peer borrow exists. The
+    // momentary `&mut` references drop at scope exit and do not
+    // cross any cooperative switch (scheduler is not yet started).
+    // Audit: UNSAFE-2026-0010 (StaticCell pattern) +
+    // UNSAFE-2026-0014 (momentary `&mut` to just-initialised state).
+    let loaded = unsafe {
+        let pmm = (*PMM.0.get()).assume_init_mut();
+        let mmu = (*MMU.0.get()).assume_init_ref();
+        let table = (*BOOTSTRAP_AS_TABLE.0.get()).assume_init_mut();
+        let arena = (*AS_ARENA.0.get()).assume_init_mut();
+        let parent_cap = *(*BOOTSTRAP_AS_CAP.0.get()).assume_init_ref();
+        load_image(
+            USERSPACE_IMAGE,
+            pmm,
+            mmu,
+            table,
+            arena,
+            parent_cap,
+            CapRights::empty(),
+            VirtAddr(USERSPACE_IMAGE_BASE_VA),
+            USERSPACE_STACK_PAGES,
+        )
+        .expect("task_loader::load_image failed on BSP smoke")
+    };
+
+    {
+        let mut w = FmtWriter(console);
+        let _ = writeln!(
+            w,
+            "tyrne: image loaded (entry = {:#x}; sp = {:#x}; image bytes {}; stack bytes {}; AS cap = idx {})",
+            loaded.entry_va.0,
+            loaded.stack_top_va.0,
+            loaded.image_bytes,
+            loaded.stack_bytes,
+            loaded.as_cap.index(),
         );
     }
 

@@ -54,6 +54,8 @@ sequenceDiagram
     KE->>U: write_bytes(b"tyrne: pmm initialized (...)\n")
     KE->>KE: AddressSpace arena init — wrap bootstrap L0<br/>(T-018 / ADR-0028; no Mmu::create_address_space call<br/>per Simulation row 0 — would re-zero the live root)
     KE->>U: write_bytes(b"tyrne: address-space-arena ready (...)\n")
+    KE->>KE: task_loader::load_image — embedded raw-flat blob<br/>into a fresh AS (T-019 / ADR-0029; NOT executed)
+    KE->>U: write_bytes(b"tyrne: image loaded (...)\n")
     KE->>KE: GIC init + DAIF.I unmask (T-012)
     KE->>U: write_bytes(b"tyrne: timer ready (...)")
     KE->>KE: kernel-object setup, IPC, scheduler

@@ -235,6 +235,8 @@ tyrne: address-space-arena ready (1 / 8 slots used; bootstrap AS root = 0x400920
 
 The `1 / 8` confirms slot 0 holds the bootstrap AS and 7 slots are available for future B5+ tasks. The bootstrap-AS root address (the L0 frame in `.boot_pt`) is printed for cross-reference with `linker.ld`'s reservation.
 
+**Task loader composition (T-019).** The first runtime composition of the AS-object layer with PMM + cap-table + MMU is the [task loader](task-loader.md) — see that chapter for the §Simulation pipeline, rollback contract, and v1 baseline leaks. The loader is the first post-bootstrap caller of `cap_create_address_space` + `cap_map`, exercising [UNSAFE-2026-0025](../audits/unsafe-log.md) (page-table descriptor writes) and [UNSAFE-2026-0026](../audits/unsafe-log.md) (PMM frame zero-fill) at runtime and introducing [UNSAFE-2026-0027](../audits/unsafe-log.md) (the loader's own `copy_nonoverlapping` byte-copy).
+
 **Forward-compat to high-half migration ([ADR-0033 placeholder](../decisions/0027-kernel-virtual-memory-layout.md)).** The `AddressSpace<M>` struct holds only `inner: M::AddressSpace` in v1; future fields (`asid: Option<Asid>`, reverse-mapping pointers, per-AS table-walk bookkeeping) land additively via Amendment to the struct definition when ADR-0033 opens. No HAL trait surface change is needed for the additive case.
 
 ## TLB-invalidation scope
