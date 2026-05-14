@@ -2,20 +2,20 @@
 
 Task-specific guides for AI agents working on Tyrne. Each skill describes **one recurring task** — how to perform it correctly against this project's standards and decision log. Skills are procedural, not expository: they tell an agent *what to do, in what order, and how to know they are done*.
 
-Skills live under `.claude/skills/<name>/SKILL.md`. This layout follows the Anthropic skill convention so that Claude Code can auto-discover them; other AI agents are directed here by [AGENTS.md](../../AGENTS.md) and [CLAUDE.md](../../CLAUDE.md).
+Skills live under `.agents/skills/<name>/SKILL.md`. The layout follows the Anthropic skill convention shape (per-skill directory + `SKILL.md` with YAML frontmatter) so Claude Code and other agent runners can auto-discover them; the directory name is `.agents/` rather than `.claude/` to keep the skill library agent-neutral. [AGENTS.md](../../AGENTS.md) and [CLAUDE.md](../../CLAUDE.md) both point here.
 
 ## Relationship to other agent files
 
 - [CLAUDE.md](../../CLAUDE.md) and [AGENTS.md](../../AGENTS.md) — the **rules** that constrain every agent action. Read first.
 - [docs/standards/](../../docs/standards/) — the **standards** that define how code, commits, reviews, logs, and releases should look.
 - [docs/decisions/](../../docs/decisions/) — the **decisions** that give context for why the rules and standards exist.
-- **This folder (`.claude/skills/`)** — the **procedures** an agent follows when the maintainer asks for a specific recurring task.
+- **This folder (`.agents/skills/`)** — the **procedures** an agent follows when the maintainer asks for a specific recurring task.
 
 Rules and standards tell an agent what *must* be true; skills tell an agent what to *do* to make it true.
 
 ## When an agent uses a skill
 
-An agent uses the skill at `.claude/skills/<slug>/SKILL.md` when:
+An agent uses the skill at `.agents/skills/<slug>/SKILL.md` when:
 
 - The maintainer references it by name ("follow the `write-adr` skill").
 - The task described in the skill's `description` frontmatter matches what the maintainer is asking for.
@@ -25,7 +25,7 @@ Before executing a skill, the agent reads the skill file in full and applies eve
 
 ## Format
 
-Every skill lives in its own directory at `.claude/skills/<slug>/` and contains at least a `SKILL.md` file with this shape:
+Every skill lives in its own directory at `.agents/skills/<slug>/` and contains at least a `SKILL.md` file with this shape:
 
 ```markdown
 ---
@@ -79,7 +79,7 @@ Skills are short. If a skill needs more than ~200 lines, either (a) the underlyi
 ## Conventions for adding a new skill
 
 1. Identify a task the project performs **at least three times** that has a non-trivial correct procedure. One-off tasks do not need a skill.
-2. Create a directory `.claude/skills/<slug>/` where `<slug>` is a kebab-case imperative-verb name (`add-driver`, not `driver-addition`).
+2. Create a directory `.agents/skills/<slug>/` where `<slug>` is a kebab-case imperative-verb name (`add-driver`, not `driver-addition`).
 3. Create `SKILL.md` inside it with the frontmatter above and the section structure.
 4. Fill the frontmatter with an accurate `description` and `when-to-use`.
 5. Keep the procedure to numbered steps that a cold-start agent could execute.

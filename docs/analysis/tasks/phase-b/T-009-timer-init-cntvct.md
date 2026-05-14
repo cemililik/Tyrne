@@ -47,7 +47,7 @@ ADR-0022's first revision-notes rider expects T-009 to bring WFI back into idle'
 - **`CNTKCTL_EL1.EL0PCTEN` setup.** Only relevant for EL0 access; the kernel runs at EL1 in v1.
 - **Per-core time alignment.** Single-core only; multi-core counter coordination is Phase C / SMP work.
 - **Timer-trait `Mutex` / locking around the cached frequency.** A bare `u64` field works because the value is set once at `new()` and read-only afterwards.
-- **Performance review document.** T-009 makes measurement *possible*; writing the first hypothesis-driven perf review is a separate cycle (and skill-driven via [`conduct-review`](../../../../.claude/skills/conduct-review/SKILL.md)).
+- **Performance review document.** T-009 makes measurement *possible*; writing the first hypothesis-driven perf review is a separate cycle (and skill-driven via [`conduct-review`](../../../../.agents/skills/conduct-review/SKILL.md)).
 - **Architecture doc for the Timer subsystem.** Bundled with T-008 if the pattern repeats; not on T-009.
 
 ## Approach

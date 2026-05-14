@@ -80,7 +80,7 @@ Every step keeps `cargo host-test` green.
 - [x] Any new `unsafe` has an audit entry per [`unsafe-policy.md`](../../../standards/unsafe-policy.md). Ideally none.
 - [x] Commit(s) follow [`commit-style.md`](../../../standards/commit-style.md). At minimum: ADR-0014 as one commit, implementation as one commit. Trailers `Refs: ADR-0014, ADR-0001`.
 - [x] [`../../../roadmap/current.md`](../../../roadmap/current.md) updated on status transitions (to `In Progress`, then `In Review`, then `Done`).
-- [x] Milestone A2 business review written after this task is Done, per [`conduct-review`](../../../../.claude/skills/conduct-review/SKILL.md).
+- [x] Milestone A2 business review written after this task is Done, per [`conduct-review`](../../../../.agents/skills/conduct-review/SKILL.md).
 
 ## Design notes
 

@@ -99,7 +99,7 @@ Delegated to **ADR-0021** for the final shape. At a sketch level:
 - [ADR-0019: Scheduler shape](../../../decisions/0019-scheduler-shape.md) — the IPC bridge is part of the scheduler per this ADR.
 - [ADR-0020: Cpu trait v2 / context-switch extension](../../../decisions/0020-cpu-trait-v2-context-switch.md) — the context switch around which the aliasing window currently opens.
 - [`unsafe-policy.md`](../../../standards/unsafe-policy.md) — the discipline every new `unsafe` block upholds.
-- [`justify-unsafe`](../../../../.claude/skills/justify-unsafe/SKILL.md) — the skill that writes the audit entry.
+- [`justify-unsafe`](../../../../.agents/skills/justify-unsafe/SKILL.md) — the skill that writes the audit entry.
 
 ## Review history
 

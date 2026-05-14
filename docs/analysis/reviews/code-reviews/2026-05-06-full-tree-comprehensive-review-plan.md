@@ -5,7 +5,7 @@
 - **Target HEAD at plan time:** `214052d` on `development`
 - **Type:** **Plan only.** This file is a *blueprint* for executing a multi-agent, full-tree review. The review *artifacts* are produced by the agent runs the maintainer launches against this plan; this file does not itself contain findings.
 
-> *This plan is a one-off, holistic re-review of every committed source and documentation file in the Tyrne tree, run after B1 closure (PR #11). It complements — but does not replace — the per-change skills [`perform-code-review`](../../../../.claude/skills/perform-code-review/SKILL.md) and [`perform-security-review`](../../../../.claude/skills/perform-security-review/SKILL.md). Use it once the maintainer wants a global pass before opening Phase B2 implementation work.*
+> *This plan is a one-off, holistic re-review of every committed source and documentation file in the Tyrne tree, run after B1 closure (PR #11). It complements — but does not replace — the per-change skills [`perform-code-review`](../../../../.agents/skills/perform-code-review/SKILL.md) and [`perform-security-review`](../../../../.agents/skills/perform-security-review/SKILL.md). Use it once the maintainer wants a global pass before opening Phase B2 implementation work.*
 
 ---
 
@@ -38,7 +38,7 @@ The maintainer wants a precise, parallel, full-tree pass that:
 | Guides | [docs/guides/](../../../guides/) | 4 files |
 | Roadmap & tasks | [docs/roadmap/](../../../roadmap/), [docs/analysis/tasks/](../../tasks/) | phase-a–j + per-task user stories |
 | Glossary, root docs | [docs/glossary.md](../../../glossary.md), [README.md](../../../../README.md), [CLAUDE.md](../../../../CLAUDE.md), [AGENTS.md](../../../../AGENTS.md), [CONTRIBUTING.md](../../../../CONTRIBUTING.md), [SECURITY.md](../../../../SECURITY.md), [LICENSE](../../../../LICENSE), [NOTICE](../../../../NOTICE) | — |
-| Skills index | [.claude/skills/](../../../../.claude/skills/) | each `SKILL.md` |
+| Skills index | [.agents/skills/](../../../../.agents/skills/) | each `SKILL.md` |
 
 **Out of scope:**
 
@@ -282,7 +282,7 @@ Each track agent must:
 - *Linker rustflags:* the `target.aarch64-unknown-none` block in `.cargo/config.toml`; `-C link-arg=-Tbsp-qemu-virt/linker.ld`; `-C panic=abort`; `runner` for QEMU.
 - *CI absence:* no GitHub Actions / circle / etc. workflow at HEAD. **This is the largest documented gap in the project.** Re-flag it as a blocker for the *project*, not for this review (consistent with how Phase A handled it: the absence is documented; we don't gate on it).
 - *Audit-log integrity:* the audit log is the supply-chain record for `unsafe`; verify the indexing scheme is intact (no hole in 0001–0021 numbering except the documented 0012 Removed).
-- *Skill index:* `.claude/skills/` indices match the `SKILL.md` files actually present; no orphaned skill or broken cross-link.
+- *Skill index:* `.agents/skills/` indices match the `SKILL.md` files actually present; no orphaned skill or broken cross-link.
 
 **Output:** sub-artifact `track-h-infra.md`.
 

@@ -34,9 +34,9 @@ The procedure does not *require* multiple agents; the single-agent sequential pa
 
 ## Producing a review
 
-Use the [`conduct-review`](../../../.claude/skills/conduct-review/SKILL.md) skill with the review type as an argument. The skill loads the type's master plan and walks through its steps.
+Use the [`conduct-review`](../../../.agents/skills/conduct-review/SKILL.md) skill with the review type as an argument. The skill loads the type's master plan and walks through its steps.
 
-For code and security reviews specifically, the execution skills [`perform-code-review`](../../../.claude/skills/perform-code-review/SKILL.md) and [`perform-security-review`](../../../.claude/skills/perform-security-review/SKILL.md) describe how to *do* the review during development; they produce the artifact in the corresponding folder as their final step.
+For code and security reviews specifically, the execution skills [`perform-code-review`](../../../.agents/skills/perform-code-review/SKILL.md) and [`perform-security-review`](../../../.agents/skills/perform-security-review/SKILL.md) describe how to *do* the review during development; they produce the artifact in the corresponding folder as their final step.
 
 ## See also
 

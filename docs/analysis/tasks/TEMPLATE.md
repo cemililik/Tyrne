@@ -50,7 +50,7 @@ Beyond the acceptance criteria:
 - [ ] `cargo host-clippy` clean with `-D warnings`.
 - [ ] `cargo kernel-clippy` clean (if the task touches anything reachable from the kernel build).
 - [ ] `cargo host-test` passes with the new tests added.
-- [ ] Any new `unsafe` has an audit entry in [`../../audits/unsafe-log.md`](../../audits/unsafe-log.md) per [`unsafe-policy.md`](../../standards/unsafe-policy.md) / [`justify-unsafe`](../../../.claude/skills/justify-unsafe/SKILL.md).
+- [ ] Any new `unsafe` has an audit entry in [`../../audits/unsafe-log.md`](../../audits/unsafe-log.md) per [`unsafe-policy.md`](../../standards/unsafe-policy.md) / [`justify-unsafe`](../../../.agents/skills/justify-unsafe/SKILL.md).
 - [ ] Commit message follows [`commit-style.md`](../../standards/commit-style.md) with `Refs: <ADR-NNNN>` and, if applicable, `Audit: <UNSAFE-YYYY-NNNN>` / `Security-Review: <reviewer>` trailers.
 - [ ] Task status updated to `In Review`; [`../../roadmap/current.md`](../../roadmap/current.md) updated.
 

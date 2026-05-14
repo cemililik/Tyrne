@@ -23,7 +23,7 @@ T-016 is the implementation of those decisions per the ADR's §Dependency chain:
 
 ## Acceptance criteria
 
-- [ ] **ADR-0027 Accepted** before code lands. Same-day Accept after careful re-read is permitted per [ADR-0025 §Revision notes](../../../decisions/0025-adr-governance-amendments.md); Propose commit is separate from the Accept commit per [`write-adr` skill §10](../../../../.claude/skills/write-adr/SKILL.md).
+- [ ] **ADR-0027 Accepted** before code lands. Same-day Accept after careful re-read is permitted per [ADR-0025 §Revision notes](../../../decisions/0025-adr-governance-amendments.md); Propose commit is separate from the Accept commit per [`write-adr` skill §10](../../../../.agents/skills/write-adr/SKILL.md).
 
 ### HAL trait extension (`hal/src/mmu/mod.rs`)
 

@@ -14,7 +14,7 @@ A dated file `YYYY-MM-DD-<context>.md` in this folder, following the shape in [`
 
 ## Relationship to the `perform-code-review` skill
 
-[`perform-code-review`](../../../../.claude/skills/perform-code-review/SKILL.md) describes how to **conduct** the review during development. This folder holds the resulting artifact.
+[`perform-code-review`](../../../../.agents/skills/perform-code-review/SKILL.md) describes how to **conduct** the review during development. This folder holds the resulting artifact.
 
 For security-sensitive changes, a code review is **not** sufficient — a security review (in [`../security-reviews/`](../security-reviews/)) is additionally required. The code-review artifact notes which security reviews are expected or already produced.
 

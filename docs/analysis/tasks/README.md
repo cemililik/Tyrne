@@ -34,11 +34,11 @@ Status transitions are author-driven. Only the maintainer authorizes `Done`.
 
 ## Lifecycle
 
-1. **Create** the task with the [`start-task`](../../../.claude/skills/start-task/SKILL.md) skill. It copies [`TEMPLATE.md`](TEMPLATE.md) into the right phase folder and assigns the next T-NNN.
+1. **Create** the task with the [`start-task`](../../../.agents/skills/start-task/SKILL.md) skill. It copies [`TEMPLATE.md`](TEMPLATE.md) into the right phase folder and assigns the next T-NNN.
 2. **Move to `In Progress`** when work begins. Update [`../../roadmap/current.md`](../../roadmap/current.md) to point at the task.
 3. **Work the acceptance criteria.** Any ADRs listed as dependencies are written (via `write-adr`) before implementation code lands.
 4. **Move to `In Review`** when all criteria appear satisfied. The maintainer's review confirms.
-5. **Move to `Done`** after review. Update `current.md`; if it was the last task of the milestone, trigger a business review via [`conduct-review`](../../../.claude/skills/conduct-review/SKILL.md).
+5. **Move to `Done`** after review. Update `current.md`; if it was the last task of the milestone, trigger a business review via [`conduct-review`](../../../.agents/skills/conduct-review/SKILL.md).
 
 ## Conventions
 
