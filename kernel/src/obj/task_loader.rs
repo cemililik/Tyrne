@@ -84,6 +84,27 @@ use tyrne_hal::{MappingFlags, Mmu, VirtAddr, PAGE_SIZE};
 /// [t-019]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-019-task-loader.md
 pub const INTERMEDIATE_FRAME_BUDGET: usize = 6;
 
+/// One-past-the-highest legal userspace virtual address.
+///
+/// Per [ADR-0027 §Decision outcome (a)][adr-0027], `TCR_EL1.T0SZ = 16`
+/// commits the kernel to 48-bit `TTBR0_EL1` virtual addresses; the
+/// architected userspace VA range is therefore `[0, USERSPACE_VA_LIMIT)`
+/// with `USERSPACE_VA_LIMIT = 1 << 48 = 0x1_0000_0000_0000`. The
+/// loader's mapped span `[image_base_va, stack_top_va)` (half-open)
+/// must lie within this range — a span that crosses or exceeds it
+/// could not be addressed by the hardware page-walker even after the
+/// future ADR-0033 high-half migration opens (which moves *kernel*
+/// VAs into `TTBR1_EL1`'s range, leaving the userspace `TTBR0_EL1`
+/// bound unchanged).
+///
+/// The 0 bound on the low side is not enforced separately: a
+/// `image_base_va = 0` is legal (page 0 mapped under `USER|EXECUTE`
+/// is unusual but not architecturally forbidden); the loader does
+/// not impose a stylistic "no-null-page" policy in v1.
+///
+/// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+pub const USERSPACE_VA_LIMIT: usize = 1usize << 48;
+
 /// Metadata describing a freshly populated address space produced by
 /// [`load_image`].
 ///
@@ -157,9 +178,8 @@ pub struct LoadedImage {
 /// canonical reference; this enum's doc-comments are summaries.
 ///
 /// `#[non_exhaustive]` because future-state variants are foreseeable
-/// — e.g. an `InvalidImageBaseVa` that fires when the caller-supplied
-/// `image_base_va` falls outside the userspace VA range, lands with
-/// the per-task VA-range ADR in B5+.
+/// — e.g. a per-section permission failure that lands with ADR-0034
+/// (placeholder; B5+).
 ///
 /// [t-019-rollback]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-019-task-loader.md#rollback-contract-explicit
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -170,6 +190,33 @@ pub enum LoadError {
 
     /// `stack_size_pages == 0`. Pre-PMM preflight; no state change.
     InvalidStackSize,
+
+    /// The requested VA span `[image_base_va, stack_top_va)` exceeds
+    /// the architected userspace VA range
+    /// `[0, USERSPACE_VA_LIMIT)`. Per
+    /// [ADR-0027 §Decision outcome (a)][adr-0027], `TCR_EL1.T0SZ = 16`
+    /// commits userspace VAs to 48 bits; an `image_base_va` plus
+    /// `image_pages + stack_pages` worth of bytes that lands past
+    /// `1 << 48` could not be addressed by the hardware page-walker.
+    /// The variant fires either when `image_base_va` itself is past
+    /// the limit, when the saturated-add of the span end exceeds it,
+    /// or when the byte-count multiplication overflows `usize`
+    /// (saturated to `usize::MAX`). Pre-PMM preflight; no state
+    /// change.
+    ///
+    /// `end == VirtAddr(usize::MAX)` is the sentinel for the overflow
+    /// path; non-sentinel `end` values name the offending
+    /// saturated-add result for diagnostics.
+    ///
+    /// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+    InvalidImageBaseVa {
+        /// The caller-supplied `image_base_va`.
+        base: VirtAddr,
+        /// The computed one-past-the-highest VA the loader would map.
+        /// Sentinel `VirtAddr(usize::MAX)` indicates the byte-count or
+        /// VA-end arithmetic saturated.
+        end: VirtAddr,
+    },
 
     /// Parent AS cap lookup or `CapKind::AddressSpace` kind check
     /// failed. Wraps the underlying [`CapError`]. **DERIVE-rights
@@ -364,8 +411,10 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
         return Err(LoadError::InvalidParentCap(CapError::WrongKind));
     }
 
-    // §Simulation row 3: frame-budget preflight. Safe upper bound, not
-    // exact (per T-019 §Acceptance criteria).
+    // §Simulation row 3: frame-budget + VA-range preflight. The frame
+    // budget is a safe upper bound (per T-019 §Acceptance criteria);
+    // the VA-range check enforces the architected userspace VA bound
+    // before any state change.
     let image_pages = image.len().div_ceil(PAGE_SIZE);
     let stack_pages = stack_size_pages;
     let needed = 1usize
@@ -375,6 +424,25 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
     let available = pmm.stats().free_frames;
     if needed > available {
         return Err(LoadError::FrameBudgetExceeded { needed, available });
+    }
+
+    // VA-range bound: the mapped span `[image_base_va, stack_top_va)`
+    // (half-open) must lie within `[0, USERSPACE_VA_LIMIT)` per
+    // ADR-0027 §Decision outcome (a). saturating_* primitives cap
+    // overflow at usize::MAX which is far past USERSPACE_VA_LIMIT
+    // (`1 << 48`), so the single `> USERSPACE_VA_LIMIT` check below
+    // catches both "base too high" and "span overflowed". The end
+    // value `usize::MAX` is the documented sentinel for the saturated
+    // path; non-sentinel ends name the offending VA for diagnostics.
+    let total_va_bytes = image_pages
+        .saturating_add(stack_pages)
+        .saturating_mul(PAGE_SIZE);
+    let span_end = image_base_va.0.saturating_add(total_va_bytes);
+    if span_end > USERSPACE_VA_LIMIT {
+        return Err(LoadError::InvalidImageBaseVa {
+            base: image_base_va,
+            end: VirtAddr(span_end),
+        });
     }
 
     // §Simulation row 4: image-PA-overlap preflight. Discharges
@@ -447,21 +515,25 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
         //
         // **Invariants upheld.** (1) `chunk.as_ptr()` is a valid pointer
         // to at least `chunk.len()` initialised bytes inside `image`'s
-        // backing storage (slice invariant). (2) `frame.as_usize() as
-        // *mut u8` is page-aligned (the `PhysFrame` type enforces this
-        // via `from_aligned`) and points at 4 KiB of PMM-owned,
-        // zero-initialised RAM exclusively owned by this stack frame
-        // until `cap_map` moves it into the AS (per the PMM's
+        // backing storage (slice invariant). (2) The destination
+        // pointer is materialised via
+        // [`crate::mm::phys_frame_kernel_ptr`], which centralises v1's
+        // identity-mapping invariant per
+        // [ADR-0027 §Decision outcome (a)][adr-0027] so the future
+        // high-half migration ([ADR-0033 placeholder][adr-0027])
+        // updates one helper instead of every call site. The returned
+        // pointer is page-aligned (the `PhysFrame` type enforces
+        // alignment via `from_aligned`) and points at 4 KiB of PMM-
+        // owned, zero-initialised RAM exclusively owned by this stack
+        // frame until `cap_map` moves it into the AS (per the PMM's
         // single-thread cooperative ownership discipline +
-        // [UNSAFE-2026-0026]'s zero-fill contract). The destination is
-        // identity-mapped to a kernel-readable VA post-bootstrap per
-        // [ADR-0027 §Decision outcome (a)][adr-0027]. (3) `chunk.len()`
+        // [UNSAFE-2026-0026]'s zero-fill contract). (3) `chunk.len()`
         // is at most `PAGE_SIZE`, so the write is in-bounds for the
         // destination frame. (4) Source and destination are
-        // non-overlapping by construction: the source lives in the
-        // kernel image's `.rodata` (or another `.rodata`-resident
-        // static) while the destination lives in PMM-managed RAM
-        // outside the kernel-image reservation.
+        // non-overlapping — runtime-enforced by the row-4 preflight
+        // (`Pmm::could_yield_pa_overlapping(image_pa_range)`); the
+        // BSP-layout discipline (`.rodata` ⊆ PMM-reserved range per
+        // ADR-0027 + ADR-0035) remains the production reality.
         //
         // **Why safer alternatives were rejected.** Per
         // [UNSAFE-2026-0027][audit]: `write_volatile` would falsely
@@ -476,7 +548,7 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
         // [audit]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
         unsafe {
             let src = chunk.as_ptr();
-            let dst = frame.as_usize() as *mut u8;
+            let dst = crate::mm::phys_frame_kernel_ptr(frame);
             core::ptr::copy_nonoverlapping(src, dst, chunk.len());
         }
 
@@ -860,6 +932,97 @@ mod tests {
     }
 
     // ── §Simulation row 3 — frame-budget preflight ────────────────────────────
+
+    #[test]
+    fn rejects_image_base_va_past_userspace_va_limit() {
+        // Pin §Simulation row 3 VA-range preflight: an `image_base_va`
+        // past USERSPACE_VA_LIMIT (1 << 48 per ADR-0027 §Decision
+        // outcome (a)) fails before any state change. PMM untouched.
+        let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(16);
+        let pmm_before = pmm.stats().free_frames;
+
+        let bad_base = VirtAddr(super::USERSPACE_VA_LIMIT);
+        let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
+            &[0xAAu8; PAGE_SIZE],
+            &mut pmm,
+            &mmu,
+            &mut table,
+            &mut arena,
+            parent_cap,
+            CapRights::empty(),
+            bad_base,
+            1,
+        );
+
+        match result {
+            Err(LoadError::InvalidImageBaseVa { base, end }) => {
+                assert_eq!(base, bad_base);
+                // span end = USERSPACE_VA_LIMIT + 2 * PAGE_SIZE.
+                assert_eq!(end, VirtAddr(super::USERSPACE_VA_LIMIT + 2 * PAGE_SIZE));
+            }
+            other => panic!("expected InvalidImageBaseVa, got {other:?}"),
+        }
+        assert_eq!(pmm.stats().free_frames, pmm_before);
+    }
+
+    #[test]
+    fn rejects_image_base_va_saturating_overflow() {
+        // Pin §Simulation row 3 VA-range preflight: a near-usize::MAX
+        // `image_base_va` whose span-end saturates is rejected with
+        // `end == VirtAddr(usize::MAX)` as the documented sentinel.
+        // PMM untouched.
+        let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(16);
+        let pmm_before = pmm.stats().free_frames;
+
+        let bad_base = VirtAddr(usize::MAX - PAGE_SIZE);
+        let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
+            &[0xAAu8; PAGE_SIZE],
+            &mut pmm,
+            &mmu,
+            &mut table,
+            &mut arena,
+            parent_cap,
+            CapRights::empty(),
+            bad_base,
+            1,
+        );
+
+        match result {
+            Err(LoadError::InvalidImageBaseVa { base, end }) => {
+                assert_eq!(base, bad_base);
+                assert_eq!(end, VirtAddr(usize::MAX), "saturating sentinel");
+            }
+            other => panic!("expected InvalidImageBaseVa, got {other:?}"),
+        }
+        assert_eq!(pmm.stats().free_frames, pmm_before);
+    }
+
+    #[test]
+    fn accepts_image_base_va_exactly_at_userspace_va_limit_minus_span() {
+        // Pin the half-open `[base, end)` boundary: `end ==
+        // USERSPACE_VA_LIMIT` is **allowed** because the limit itself
+        // is one-past-the-highest legal VA. A request whose span ends
+        // exactly at the limit lands at the last legal frame.
+        let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(32);
+        let span_pages = 1 + 1; // 1 image + 1 stack
+        let edge_base = VirtAddr(super::USERSPACE_VA_LIMIT - span_pages * PAGE_SIZE);
+
+        let loaded = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
+            &[0xAAu8; PAGE_SIZE],
+            &mut pmm,
+            &mmu,
+            &mut table,
+            &mut arena,
+            parent_cap,
+            CapRights::empty(),
+            edge_base,
+            1,
+        )
+        .expect("span end == USERSPACE_VA_LIMIT must be accepted");
+
+        assert_eq!(loaded.entry_va, edge_base);
+        assert_eq!(loaded.stack_top_va, VirtAddr(super::USERSPACE_VA_LIMIT));
+    }
 
     #[test]
     fn rejects_when_pmm_budget_exceeded() {
@@ -1624,13 +1787,17 @@ mod tests {
 
     #[test]
     fn load_error_variants_pattern_match_exhaustively() {
-        // Pin the 8-variant taxonomy. `#[non_exhaustive]` only forces
+        // Pin the 9-variant taxonomy. `#[non_exhaustive]` only forces
         // external (out-of-crate) consumers to add a wildcard arm;
         // within-crate exhaustiveness still fires. Adding a variant
         // breaks this test at compile time.
         let cases = [
             LoadError::InvalidImage,
             LoadError::InvalidStackSize,
+            LoadError::InvalidImageBaseVa {
+                base: VirtAddr(0xFFFF_FFFF_FFFF_0000),
+                end: VirtAddr(usize::MAX),
+            },
             LoadError::InvalidParentCap(CapError::InvalidHandle),
             LoadError::FrameBudgetExceeded {
                 needed: 100,
@@ -1645,6 +1812,7 @@ mod tests {
             match err {
                 LoadError::InvalidImage
                 | LoadError::InvalidStackSize
+                | LoadError::InvalidImageBaseVa { .. }
                 | LoadError::InvalidParentCap(_)
                 | LoadError::FrameBudgetExceeded { .. }
                 | LoadError::ImageOverlapsAllocatableMemory

@@ -93,3 +93,48 @@ pub use address_space::{
     AddressSpaceHandle, ADDRESS_SPACE_ARENA_CAPACITY, BOOTSTRAP_ADDRESS_SPACE_HANDLE,
 };
 pub use pmm::{Pmm, PmmError, PmmStats};
+
+/// Return a kernel-writable raw pointer for `frame`'s base PA.
+///
+/// In v1 the kernel address space is identity-mapped over the entire
+/// PMM-managed physical extent per
+/// [ADR-0027 §Decision outcome (a)][adr-0027], so any
+/// [`tyrne_hal::PhysFrame`] returned by [`Pmm::alloc_frame`] is
+/// reachable at VA = PA from kernel code. This helper *centralises*
+/// that assumption: every kernel-side caller that needs to read or
+/// write a PMM-allocated frame's payload (e.g.
+/// [`crate::obj::task_loader::load_image`]'s `copy_nonoverlapping`
+/// byte-copy site under [UNSAFE-2026-0027]) routes through this
+/// function so the future high-half migration
+/// ([ADR-0033 placeholder][adr-0027]) can replace the body with a
+/// real PA → kernel-VA translation in **one** place, leaving every
+/// call site source-compatible.
+///
+/// The function itself is safe (the `as *mut u8` cast is infallible
+/// Rust); only the *dereference* at the call site is `unsafe` and
+/// requires the audit-log entry that names the call site's specific
+/// ownership / aliasing discipline.
+///
+/// ## Forward-compat note
+///
+/// When [ADR-0033 placeholder][adr-0027] opens and the kernel moves
+/// to a high-half virtual layout, this function's body grows to
+/// `KERNEL_PHYS_BASE.checked_add(frame.as_usize()).expect(...)` or
+/// similar; every call site keeps working without source changes.
+/// The audit-log entries that cite "identity mapping post-MMU per
+/// ADR-0027" (UNSAFE-2026-0026, UNSAFE-2026-0027) gain a "lifted via
+/// ADR-0033 migration on date X" Amendment at the same commit. The
+/// PMM's existing `core::ptr::write_bytes` site
+/// ([`kernel/src/mm/pmm.rs`](pmm.rs)) is the second adopter — its
+/// safety comment already names the future-migration plan; the
+/// physical PMM site will route through this helper at the same
+/// commit ADR-0033 lands (kept inline today to avoid churning the
+/// audit-log entries that landed with T-017).
+///
+/// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+/// [UNSAFE-2026-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
+#[must_use]
+#[inline]
+pub fn phys_frame_kernel_ptr(frame: tyrne_hal::PhysFrame) -> *mut u8 {
+    frame.as_usize() as *mut u8
+}

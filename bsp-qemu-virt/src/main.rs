@@ -987,6 +987,21 @@ pub extern "C" fn kernel_entry() -> ! {
         let table = (*BOOTSTRAP_AS_TABLE.0.get()).assume_init_mut();
         let arena = (*AS_ARENA.0.get()).assume_init_mut();
         let parent_cap = *(*BOOTSTRAP_AS_CAP.0.get()).assume_init_ref();
+        // `new_rights = CapRights::empty()` is intentional in v1: the
+        // address-space cap-rights model is **kind-only** today, not
+        // per-operation. `resolve_address_space_cap`'s doc-comment
+        // (`kernel/src/mm/address_space.rs`) records the v1 contract
+        // — "this helper checks the cap *kind* only — not the specific
+        // rights bits; per-operation rights (`MAP`, `UNMAP`, `ACTIVATE`)
+        // are deferred to B5+ and will require an ADR". The
+        // `CapRights` enum (`kernel/src/cap/rights.rs`) accordingly
+        // exposes `DUPLICATE / DERIVE / REVOKE / TRANSFER / SEND / RECV /
+        // NOTIFY` only — no `MAP` / `UNMAP` bit exists to pass here.
+        // When the future ADR introduces them, this call site updates
+        // to `CapRights::MAP | CapRights::UNMAP` (the minimum set the
+        // loader exercises on the new cap: `cap_map` for installs +
+        // `cap_unmap` for rollback); the change is purely additive at
+        // this site.
         load_image(
             USERSPACE_IMAGE,
             pmm,
