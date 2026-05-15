@@ -21,18 +21,23 @@
 //! 3. Frame-budget preflight: `1 + image_pages + stack_pages +
 //!    INTERMEDIATE_FRAME_BUDGET <= pmm.stats().free_frames`
 //!    ([`LoadError::FrameBudgetExceeded`]).
-//! 4. Create the AS via [`cap_create_address_space`]; on failure no
+//! 4. Image-PA-overlap preflight: reject if the `image` slice's PA
+//!    range overlaps a frame [`Pmm::alloc_frame`] could yield
+//!    ([`LoadError::ImageOverlapsAllocatableMemory`]). Discharges
+//!    UNSAFE-2026-0027's non-overlap invariant at runtime instead of
+//!    relying on BSP-layout discipline.
+//! 5. Create the AS via [`cap_create_address_space`]; on failure no
 //!    state was committed (T-018's preflight discipline)
 //!    ([`LoadError::AddressSpaceCreationFailed`]).
-//! 5. Image-page loop: `pmm.alloc_frame` → `copy_nonoverlapping` byte
+//! 6. Image-page loop: `pmm.alloc_frame` → `copy_nonoverlapping` byte
 //!    copy → [`cap_map`] under `USER | EXECUTE` per page. Tail-zeroing
 //!    on the partial last page is automatic via the PMM's zero-init
 //!    contract.
-//! 6. Stack-page loop: `pmm.alloc_frame` → [`cap_map`] under
+//! 7. Stack-page loop: `pmm.alloc_frame` → [`cap_map`] under
 //!    `USER | WRITE` per page.
-//! 7. Construct [`LoadedImage`] and return.
+//! 8. Construct [`LoadedImage`] and return.
 //!
-//! Steps 5+6 are fallible mid-loop; the rollback contract
+//! Steps 6+7 are fallible mid-loop; the rollback contract
 //! ([`cap_unmap`] + [`Pmm::free_frame`] for the committed pages, plus
 //! [`Pmm::free_frame`] for the failing iteration's leaf frame, plus
 //! [`CapabilityTable::cap_drop`][crate::cap::CapabilityTable::cap_drop]
@@ -196,6 +201,24 @@ pub enum LoadError {
     /// preflight ensures no committed state on failure).
     AddressSpaceCreationFailed(AddressSpaceError),
 
+    /// The `image` byte slice's PA range overlaps a frame
+    /// [`Pmm::alloc_frame`] could yield. If accepted, the loader's
+    /// `core::ptr::copy_nonoverlapping` would alias source and
+    /// destination — undefined behaviour per the Rust safety contract.
+    /// The check is a runtime preflight on
+    /// [UNSAFE-2026-0027][unsafe-27]'s "source and destination do not
+    /// overlap" invariant, replacing the BSP-layout-documented form
+    /// (ADR-0027 + ADR-0035) with a mechanically enforced rejection.
+    /// Pre-PMM preflight; no state change.
+    ///
+    /// Practically unreachable under correct BSP wiring (`.rodata`-
+    /// resident images are in PMM-reserved memory by ADR-0035), but
+    /// retained as a defensive variant so a misconfigured BSP fails
+    /// fast with a typed error instead of UB.
+    ///
+    /// [unsafe-27]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
+    ImageOverlapsAllocatableMemory,
+
     /// `pmm.alloc_frame()` returned `None` mid-image-or-stack-loop.
     /// Structurally unreachable post-[`FrameBudgetExceeded`][LoadError::FrameBudgetExceeded]
     /// preflight under v1's single-thread cooperative model; retained
@@ -230,14 +253,20 @@ pub enum LoadError {
 /// 3. Frame-budget preflight: `1 + image_pages + stack_pages +
 ///    INTERMEDIATE_FRAME_BUDGET <= pmm.stats().free_frames`
 ///    ([`LoadError::FrameBudgetExceeded`]).
-/// 4. [`cap_create_address_space`]: mint the AS cap
+/// 4. Image-PA-overlap preflight: reject if the `image` slice's PA
+///    range overlaps a frame [`Pmm::alloc_frame`] could yield
+///    ([`LoadError::ImageOverlapsAllocatableMemory`]). Discharges
+///    [UNSAFE-2026-0027][unsafe-27]'s non-overlap invariant at runtime.
+/// 5. [`cap_create_address_space`]: mint the AS cap
 ///    ([`LoadError::AddressSpaceCreationFailed`] — no rollback,
 ///    T-018's preflight guarantees no committed state on failure).
-/// 5. Image-page loop under `USER | EXECUTE`
+/// 6. Image-page loop under `USER | EXECUTE`
 ///    ([`LoadError::OutOfFrames`] / [`LoadError::MapFailed`] — rollback
 ///    discipline below).
-/// 6. Stack-page loop under `USER | WRITE` (same).
-/// 7. Construct and return [`LoadedImage`].
+/// 7. Stack-page loop under `USER | WRITE` (same).
+/// 8. Construct and return [`LoadedImage`].
+///
+/// [unsafe-27]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
 ///
 /// # Arguments
 ///
@@ -269,7 +298,7 @@ pub enum LoadError {
 ///
 /// # Rollback discipline
 ///
-/// On any `Err` from step 5 or 6 the function unwinds *every*
+/// On any `Err` from step 6 or 7 the function unwinds *every*
 /// committed mapping (via [`cap_unmap`] + [`Pmm::free_frame`] in
 /// reverse order), frees the failing iteration's already-allocated
 /// leaf frame, and drops the AS cap via
@@ -348,7 +377,25 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
         return Err(LoadError::FrameBudgetExceeded { needed, available });
     }
 
-    // §Simulation row 4: mint the new AS cap. T-018's preflight
+    // §Simulation row 4: image-PA-overlap preflight. Discharges
+    // UNSAFE-2026-0027 invariant "source and destination do not
+    // overlap" at runtime — `image.as_ptr() as usize` is treated as a
+    // PA under v1's identity-mapped post-bootstrap kernel AS (ADR-0027
+    // §Decision outcome (a)). If any byte of the image's PA range
+    // could be returned by `pmm.alloc_frame()`, `copy_nonoverlapping`
+    // in the image-page loop below would alias source and destination
+    // — undefined behaviour per Rust's `core::ptr::copy_nonoverlapping`
+    // safety contract. The check is practically unreachable under
+    // correct BSP wiring (`.rodata`-resident images live in PMM-
+    // reserved memory by ADR-0035) but defensive against BSP
+    // misconfiguration. Pre-state-change; no rollback needed.
+    let image_pa_start = image.as_ptr() as usize;
+    let image_pa_end = image_pa_start.saturating_add(image.len());
+    if pmm.could_yield_pa_overlapping(image_pa_start..image_pa_end) {
+        return Err(LoadError::ImageOverlapsAllocatableMemory);
+    }
+
+    // §Simulation row 5: mint the new AS cap. T-018's preflight
     // discipline guarantees no PMM / arena / cap-table state was
     // committed on failure → no rollback at this layer.
     let loaded_as_cap =
@@ -362,7 +409,7 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
             .saturating_add(image_pages.saturating_mul(PAGE_SIZE)),
     );
 
-    // §Simulation row 5: image-page loop.
+    // §Simulation row 6: image-page loop.
     let mut image_pages_mapped: usize = 0;
     for (i, chunk) in image.chunks(PAGE_SIZE).enumerate() {
         // Defensive: alloc_frame returning None here is structurally
@@ -466,7 +513,7 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
         image_pages_mapped = image_pages_mapped.saturating_add(1);
     }
 
-    // §Simulation row 6: stack-page loop. Same shape, USER|WRITE.
+    // §Simulation row 7: stack-page loop. Same shape, USER|WRITE.
     let mut stack_pages_mapped: usize = 0;
     for i in 0..stack_pages {
         let Some(frame) = pmm.alloc_frame() else {
@@ -512,7 +559,7 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
         stack_pages_mapped = stack_pages_mapped.saturating_add(1);
     }
 
-    // §Simulation row 7: construct + return. `stack_top_va` is
+    // §Simulation row 8: construct + return. `stack_top_va` is
     // one-past-the-highest mapped address (half-open `[stack_base,
     // stack_top_va)` convention; matches AAPCS64 sp init).
     let stack_top_va = VirtAddr(
@@ -884,11 +931,103 @@ mod tests {
         }
     }
 
-    // ── §Simulation row 4 — cap_create_address_space delegation ───────────────
+    // ── §Simulation row 4 — image-PA-overlap preflight ────────────────────────
+
+    #[test]
+    fn rejects_when_image_overlaps_allocatable_memory() {
+        // Pin §Simulation row 4: an image slice whose PA range overlaps
+        // a frame `pmm.alloc_frame()` could yield is rejected up front,
+        // before any state change. The check discharges
+        // UNSAFE-2026-0027's "source and destination do not overlap"
+        // invariant at runtime; without it, a misconfigured BSP could
+        // hand the loader an image that aliases a future allocation,
+        // causing `copy_nonoverlapping` UB.
+        //
+        // Construction: a Pmm over a host-backed extent with no
+        // reserved ranges (every frame is allocatable), and an image
+        // slice whose `as_ptr()` falls inside the extent. The fixture's
+        // `pmm_over_backing` returns exactly this shape — backing
+        // bytes live in a host `Vec<u8>` reachable at the same address
+        // the PMM treats as PA.
+        let (mut table, parent_cap, mmu, mut arena, mut pmm, backing) = fixture(16);
+        let pmm_before = pmm.stats().free_frames;
+
+        // The `backing` Vec's payload is the same memory the PMM's
+        // extent claims to manage. Take a slice from inside the
+        // backing — `image.as_ptr()` falls into the PMM's allocatable
+        // region.
+        let backing_ptr = backing.as_ptr();
+        let aligned = ((backing_ptr as usize + (PAGE_SIZE - 1)) & !(PAGE_SIZE - 1)) as *const u8;
+        // SAFETY: `aligned` is a page-aligned offset into the same
+        // host allocation as `backing`; reading 8 bytes is well within
+        // the backing's `(frames + 1) * PAGE_SIZE` size.
+        let image: &[u8] = unsafe { core::slice::from_raw_parts(aligned, 8) };
+
+        let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
+            image,
+            &mut pmm,
+            &mmu,
+            &mut table,
+            &mut arena,
+            parent_cap,
+            CapRights::empty(),
+            VirtAddr(0x0080_0000),
+            1,
+        );
+
+        assert_eq!(result, Err(LoadError::ImageOverlapsAllocatableMemory));
+        // No state change: PMM byte-stable, table free-list unchanged.
+        assert_eq!(pmm.stats().free_frames, pmm_before);
+    }
+
+    #[test]
+    fn accepts_image_disjoint_from_pmm_extent() {
+        // Negative companion to the overlap test: an image whose PA
+        // range is disjoint from the PMM extent (i.e., not a candidate
+        // to alias a future `alloc_frame`) passes the preflight
+        // cleanly. Confirms the preflight is precise (does not
+        // false-positive on `.rodata`-resident images, which is the
+        // production BSP wiring shape).
+        let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(16);
+
+        // A heap-allocated image whose address is NOT inside the
+        // fixture's PMM extent. Modern allocators put `Vec` payloads
+        // far from the host's aligned backing region the fixture
+        // carves out.
+        let image: Vec<u8> = vec![0xAAu8; 8];
+        let image_pa = image.as_ptr() as usize;
+        let extent_start = pmm.extent().start.0;
+        let extent_end = pmm.extent().end.0;
+        // Sanity: if the host allocator happens to put `image` inside
+        // the PMM extent, the test premise is invalid — skip with a
+        // soft failure rather than asserting a runtime allocator
+        // behaviour.
+        if image_pa >= extent_start && image_pa < extent_end {
+            return;
+        }
+
+        let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
+            &image,
+            &mut pmm,
+            &mmu,
+            &mut table,
+            &mut arena,
+            parent_cap,
+            CapRights::empty(),
+            VirtAddr(0x0080_0000),
+            1,
+        );
+        assert!(
+            result.is_ok(),
+            "disjoint image must not trigger overlap preflight; got {result:?}"
+        );
+    }
+
+    // ── §Simulation row 5 — cap_create_address_space delegation ───────────────
 
     #[test]
     fn missing_derive_surfaces_via_address_space_creation_failed() {
-        // Pin §Simulation row 2 ↔ row 4 split: DERIVE-rights enforcement
+        // Pin §Simulation row 2 ↔ row 5 split: DERIVE-rights enforcement
         // is delegated to cap_create_address_space (step 2a) and
         // surfaces as AddressSpaceCreationFailed(CapError::InsufficientRights),
         // NOT as InvalidParentCap.
@@ -940,11 +1079,11 @@ mod tests {
         drop(backing); // explicit lifetime extension
     }
 
-    // ── Happy path: §Simulation rows 5 / 6 / 7 ────────────────────────────────
+    // ── Happy path: §Simulation rows 6 / 7 / 8 ────────────────────────────────
 
     #[test]
     fn returns_loaded_image_with_correct_metadata() {
-        // Pin §Simulation row 7: the LoadedImage struct returned by
+        // Pin §Simulation row 8: the LoadedImage struct returned by
         // the happy path carries the values the §Simulation table
         // promises.
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(32);
@@ -1016,7 +1155,7 @@ mod tests {
 
     #[test]
     fn maps_image_pages_with_user_execute_flags() {
-        // Pin §Simulation row 5 mapping-flag choice: every image-page
+        // Pin §Simulation row 6 mapping-flag choice: every image-page
         // mapping carries USER | EXECUTE (no WRITE).
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(32);
         let image_base = VirtAddr(0x0080_0000);
@@ -1051,7 +1190,7 @@ mod tests {
 
     #[test]
     fn maps_stack_with_user_write_flags() {
-        // Pin §Simulation row 6 mapping-flag choice: every stack-page
+        // Pin §Simulation row 7 mapping-flag choice: every stack-page
         // mapping carries USER | WRITE (no EXECUTE).
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(32);
         let image_base = VirtAddr(0x0080_0000);
@@ -1084,7 +1223,7 @@ mod tests {
 
     #[test]
     fn tail_zeroing_on_partial_last_page() {
-        // Pin §Simulation row 5 tail-zeroing: image bytes are copied
+        // Pin §Simulation row 6 tail-zeroing: image bytes are copied
         // into the leaf frame; bytes beyond image.len() % PAGE_SIZE
         // stay zero from the PMM's zero-init contract.
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(32);
@@ -1136,7 +1275,7 @@ mod tests {
         }
     }
 
-    // ── Rollback: §Simulation row 5 / 6 failure paths ─────────────────────────
+    // ── Rollback: §Simulation row 6 / 7 failure paths ─────────────────────────
 
     /// `Mmu` decorator that fails the (1 + n)-th `map` call with
     /// `MmuError::AlreadyMapped`. Delegates everything else to
@@ -1249,7 +1388,7 @@ mod tests {
 
     #[test]
     fn rolls_back_on_cap_map_failure_mid_image_loop() {
-        // Pin §Simulation row 5 rollback: a cap_map failure mid-image-
+        // Pin §Simulation row 6 rollback: a cap_map failure mid-image-
         // loop unwinds every committed mapping (via cap_unmap +
         // pmm.free_frame) AND frees the failing iteration's leaf frame
         // AND drops the AS cap. The v1 leaks are documented in
@@ -1305,7 +1444,7 @@ mod tests {
 
     #[test]
     fn rolls_back_on_cap_map_failure_mid_stack_loop() {
-        // Pin §Simulation row 6 rollback: a cap_map failure mid-stack-
+        // Pin §Simulation row 7 rollback: a cap_map failure mid-stack-
         // loop unwinds BOTH the image-loop's committed mappings AND
         // the stack-loop's mappings, then drops the AS cap.
         // fail_at = 3 means: first 3 map calls succeed (3 image pages),
@@ -1347,6 +1486,61 @@ mod tests {
             pmm.stats().free_frames,
             pmm_before - 1,
             "rollback must free all leaf frames; only the root L0 leaks in v1"
+        );
+    }
+
+    #[test]
+    fn rolls_back_on_pmm_exhausted_mid_image_loop() {
+        // Pin §Simulation row 6 rollback (OutOfFrames branch): a direct
+        // `pmm.alloc_frame()` failure mid-image-loop unwinds every
+        // committed mapping AND drops the AS cap. Distinguished from
+        // the `MapFailed` rollback by the absence of a leaf-frame-to-
+        // free-directly: alloc itself returned None, so no leaf was
+        // ever in hand for the failing iteration.
+        //
+        // The OutOfFrames branch is structurally unreachable in v1
+        // under the frame-budget preflight + single-thread cooperative
+        // model (`load_image`'s rustdoc + LoadError::OutOfFrames
+        // doc-comment both note this). Test-only failure injection via
+        // `Pmm::force_alloc_failure_after` drives the path
+        // deterministically so the defensive rollback is exercised by
+        // live code rather than only by static reading.
+        let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(32);
+        let pmm_before = pmm.stats().free_frames;
+
+        // Schedule the 3rd alloc_frame call to fail:
+        //   alloc #1: cap_create_address_space's root L0 — succeeds.
+        //   alloc #2: image-page idx 0 leaf — succeeds; cap_map then
+        //             commits the mapping.
+        //   alloc #3: image-page idx 1 leaf — returns None → OutOfFrames.
+        pmm.force_alloc_failure_after(2);
+
+        let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
+            &[0xAAu8; 4 * PAGE_SIZE], // 4 image pages — failure mid-loop
+            &mut pmm,
+            &mmu,
+            &mut table,
+            &mut arena,
+            parent_cap,
+            CapRights::empty(),
+            VirtAddr(0x0080_0000),
+            2,
+        );
+
+        assert_eq!(result, Err(LoadError::OutOfFrames));
+
+        // Rollback accounting:
+        //   - 1 leaf frame committed via cap_map (image idx 0) → freed
+        //     via cap_unmap + pmm.free_frame.
+        //   - 0 leaf frames to free directly (alloc itself failed; the
+        //     OutOfFrames branch has no leaf in hand for the failing
+        //     iteration, unlike the MapFailed branch).
+        //   - 1 root L0 frame for the new AS → LEAKED per v1 baseline.
+        // Net: pmm.free_frames == pmm_before - 1.
+        assert_eq!(
+            pmm.stats().free_frames,
+            pmm_before - 1,
+            "OutOfFrames rollback must free the one committed image leaf; only the root L0 leaks"
         );
     }
 
@@ -1430,7 +1624,7 @@ mod tests {
 
     #[test]
     fn load_error_variants_pattern_match_exhaustively() {
-        // Pin the 7-variant taxonomy. `#[non_exhaustive]` only forces
+        // Pin the 8-variant taxonomy. `#[non_exhaustive]` only forces
         // external (out-of-crate) consumers to add a wildcard arm;
         // within-crate exhaustiveness still fires. Adding a variant
         // breaks this test at compile time.
@@ -1442,6 +1636,7 @@ mod tests {
                 needed: 100,
                 available: 50,
             },
+            LoadError::ImageOverlapsAllocatableMemory,
             LoadError::AddressSpaceCreationFailed(AddressSpaceError::OutOfFrames),
             LoadError::OutOfFrames,
             LoadError::MapFailed(AddressSpaceError::StaleHandle),
@@ -1452,6 +1647,7 @@ mod tests {
                 | LoadError::InvalidStackSize
                 | LoadError::InvalidParentCap(_)
                 | LoadError::FrameBudgetExceeded { .. }
+                | LoadError::ImageOverlapsAllocatableMemory
                 | LoadError::AddressSpaceCreationFailed(_)
                 | LoadError::OutOfFrames
                 | LoadError::MapFailed(_) => { /* exhaustive within-crate */ }
@@ -1464,6 +1660,14 @@ mod tests {
         assert_ne!(LoadError::InvalidImage, LoadError::InvalidStackSize);
         assert_ne!(LoadError::InvalidImage, LoadError::OutOfFrames);
         assert_ne!(LoadError::InvalidStackSize, LoadError::OutOfFrames);
+        assert_ne!(
+            LoadError::ImageOverlapsAllocatableMemory,
+            LoadError::OutOfFrames,
+        );
+        assert_ne!(
+            LoadError::ImageOverlapsAllocatableMemory,
+            LoadError::InvalidImage,
+        );
         assert_ne!(
             LoadError::InvalidParentCap(CapError::InvalidHandle),
             LoadError::InvalidParentCap(CapError::WrongKind),

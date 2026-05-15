@@ -22,7 +22,7 @@ The `task_create_from_image` wrapper that turns a `LoadedImage` into a runnable 
 
 ## Pipeline (one §Simulation row at a time)
 
-The loader is a seven-step state machine; each step matches one row of [T-019 §Approach §Simulation](../analysis/tasks/phase-b/T-019-task-loader.md#simulation). Steps 1–4 are preflights (no committed state on failure); steps 5–7 commit and require rollback machinery.
+The loader is an eight-step state machine; each step matches one row of [T-019 §Approach §Simulation](../analysis/tasks/phase-b/T-019-task-loader.md#simulation). Steps 1–5 are preflights / state-uncommitted (no committed state on failure); steps 6–8 commit and require rollback machinery.
 
 ```mermaid
 flowchart TB
@@ -34,32 +34,34 @@ flowchart TB
     C -- wrong kind --> X3
     C --> D{3. frame budget}
     D -- needed > avail --> X4[Err FrameBudgetExceeded]
-    D --> E{4. cap_create_address_space}
+    D --> P{4. image PA overlap}
+    P -- could_yield_overlap --> X4b[Err ImageOverlapsAllocatableMemory]
+    P --> E{5. cap_create_address_space}
     E -- DERIVE missing --> X5[Err AddressSpaceCreationFailed]
     E -- PMM exhausted --> X5
-    E --> F[5. image-page loop]
+    E --> F[6. image-page loop]
     F -- per page --> F1[pmm.alloc_frame]
     F1 --> F2[copy_nonoverlapping bytes]
     F2 --> F3[cap_map USER EXECUTE]
     F3 -- ok --> F
     F3 -- err --> R[rollback]
     F1 -- None --> R
-    F --> G[6. stack-page loop]
+    F --> G[7. stack-page loop]
     G -- per page --> G1[pmm.alloc_frame]
     G1 --> G2[cap_map USER WRITE]
     G2 -- ok --> G
     G2 -- err --> R
     G1 -- None --> R
-    G --> H[7. construct LoadedImage]
+    G --> H[8. construct LoadedImage]
     H --> OK[Ok LoadedImage]
     R --> X6[Err MapFailed or OutOfFrames]
 ```
 
-The preflight chain ([rows 1–3](../analysis/tasks/phase-b/T-019-task-loader.md#simulation)) is the discipline that keeps the rollback path bounded — by validating *before* `pmm.alloc_frame` is ever called, the loader guarantees that the "PMM allocated something we now can't undo" failure window is reduced to the structurally-rare mid-loop case. The frame-budget preflight uses a **safe upper bound** (`1 + image_pages + stack_pages + 6` where the `1` is the root L0 frame `cap_create_address_space` allocates and the `6 = INTERMEDIATE_FRAME_BUDGET` is the worst case for v1's fresh-AS scenario: 3 intermediate page-table frames per contiguous VA range × 2 ranges for image + stack), not an exact calculation; the slack is bounded at ≤ 24 KiB per call.
+The preflight chain ([rows 1–4](../analysis/tasks/phase-b/T-019-task-loader.md#simulation)) is the discipline that keeps the rollback path bounded — by validating *before* `pmm.alloc_frame` is ever called, the loader guarantees that the "PMM allocated something we now can't undo" failure window is reduced to the structurally-rare mid-loop case. The frame-budget preflight (row 3) uses a **safe upper bound** (`1 + image_pages + stack_pages + 6` where the `1` is the root L0 frame `cap_create_address_space` allocates and the `6 = INTERMEDIATE_FRAME_BUDGET` is the worst case for v1's fresh-AS scenario: 3 intermediate page-table frames per contiguous VA range × 2 ranges for image + stack), not an exact calculation; the slack is bounded at ≤ 24 KiB per call. The image-PA-overlap preflight (row 4) discharges [UNSAFE-2026-0027](../audits/unsafe-log.md)'s "source and destination do not overlap" invariant at runtime by querying [`Pmm::could_yield_pa_overlapping`](../../kernel/src/mm/pmm.rs) with the image slice's PA range (correct under v1's identity-mapped kernel AS per ADR-0027 §Decision outcome (a)) — practically unreachable under correct BSP wiring (`.rodata`-resident images live in PMM-reserved memory by ADR-0035), but defensive against BSP misconfiguration.
 
 ## Rollback contract
 
-Any failure from row 5 or row 6 triggers the rollback helper (`task_loader::rollback`). The contract is documented canonically in [T-019 §Approach §"Rollback contract (explicit)"](../analysis/tasks/phase-b/T-019-task-loader.md#rollback-contract-explicit); the summary below repeats the load-bearing shape:
+Any failure from row 6 or row 7 triggers the rollback helper (`task_loader::rollback`). The contract is documented canonically in [T-019 §Approach §"Rollback contract (explicit)"](../analysis/tasks/phase-b/T-019-task-loader.md#rollback-contract-explicit); the summary below repeats the load-bearing shape:
 
 - **Reverse install order.** Stack pages first (newest first), then image pages (newest first), to mirror the forward direction's allocation order.
 - **Per page: `cap_unmap` + `pmm.free_frame`.** `cap_unmap` returns the orphaned `PhysFrame`; the helper passes it straight to `pmm.free_frame`. Errors from either are swallowed — the rollback path runs only after a primary failure; surfacing a secondary error would mask the first and provide no actionable information.
@@ -70,7 +72,7 @@ Any failure from row 5 or row 6 triggers the rollback helper (`task_loader::roll
 
 Even with the right APIs, this is still cap-side and leaf-frame cleanup. Three resources **leak** in v1 on every rollback:
 
-1. **The root L0 frame** `cap_create_address_space` allocated (step 4). `cap_drop` invalidates the cap but does not free the underlying frame.
+1. **The root L0 frame** `cap_create_address_space` allocated (step 5). `cap_drop` invalidates the cap but does not free the underlying frame.
 2. **Intermediate L1/L2/L3 page-table frames** the BSP's `walk_or_alloc_table` allocated during `cap_map`. v1's `cap_unmap` removes the leaf descriptor but does not garbage-collect intermediates.
 3. **The AS arena slot itself.** `cap_drop` does not call `destroy_address_space` on the arena slot.
 
@@ -93,7 +95,9 @@ T-019 ships with a hand-coded 8-byte aarch64 sequence:
 
 ```rust
 // `mov w0, #42; ret` — sets w0 to 42 and returns.
-static USERSPACE_IMAGE: &[u8] = &[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6];
+// Word 0 LE = 0x52800540 → MOVZ Wd=w0, imm16=0x002a, hw=00, sf=0 (w-reg).
+// Word 1 LE = 0xd65f03c0 → RET (Rn=x30 implicit).
+static USERSPACE_IMAGE: &[u8] = &[0x40, 0x05, 0x80, 0x52, 0xc0, 0x03, 0x5f, 0xd6];
 ```
 
 This is sufficient to exercise the loader's `cap_create_address_space` + `cap_map` + `LoadedImage` return path under host tests + the smoke trace. **The blob is not executed in B4.** B6's `userland/hello/` crate produces the real userspace binary per [ADR-0029 §Decision outcome (Build pipeline — B6)](../decisions/0029-initial-userspace-image-format.md).
@@ -137,17 +141,21 @@ The loader's `unsafe` surface is **exactly one block** in `kernel/src/obj/task_l
 
 ## Test surface
 
-T-019's host-test coverage in `kernel/src/obj/task_loader.rs::tests` pins **every row of the §Simulation table** plus the **rollback contract** plus the **enum-variant taxonomy**. The 21 tests decompose as:
+T-019's host-test coverage in `kernel/src/obj/task_loader.rs::tests` pins **every row of the §Simulation table** plus the **rollback contract** plus the **enum-variant taxonomy**. The 24 tests decompose as:
 
 - §Simulation row 1: `rejects_empty_image`, `rejects_zero_stack`.
 - §Simulation row 2: `rejects_invalid_parent_cap_lookup`, `rejects_invalid_parent_cap_wrong_kind`.
 - §Simulation row 3: `rejects_when_pmm_budget_exceeded`, `frame_budget_includes_root_plus_intermediates`.
-- §Simulation row 4 (DERIVE delegation): `missing_derive_surfaces_via_address_space_creation_failed`.
-- §Simulation rows 5–7 (happy path): `returns_loaded_image_with_correct_metadata`, `stack_top_va_is_one_past_highest_mapped`, `maps_image_pages_with_user_execute_flags`, `maps_stack_with_user_write_flags`, `tail_zeroing_on_partial_last_page`.
-- §Rollback contract: `rolls_back_on_cap_map_failure_mid_image_loop`, `rolls_back_on_cap_map_failure_mid_stack_loop`, `rolls_back_on_misaligned_image_base_va`, `rollback_helper_zero_pages_only_drops_cap`.
+- §Simulation row 4 (image-PA-overlap preflight): `rejects_when_image_overlaps_allocatable_memory`, `accepts_image_disjoint_from_pmm_extent`.
+- §Simulation row 5 (DERIVE delegation + happy-path cap mint): `missing_derive_surfaces_via_address_space_creation_failed`, `returns_loaded_image_with_correct_metadata`.
+- §Simulation rows 6–8 (happy path + per-region flag pins): `stack_top_va_is_one_past_highest_mapped`, `maps_image_pages_with_user_execute_flags`, `maps_stack_with_user_write_flags`, `tail_zeroing_on_partial_last_page`.
+- §Rollback contract: `rolls_back_on_cap_map_failure_mid_image_loop`, `rolls_back_on_pmm_exhausted_mid_image_loop`, `rolls_back_on_cap_map_failure_mid_stack_loop`, `rolls_back_on_misaligned_image_base_va`, `rollback_helper_zero_pages_only_drops_cap`.
 - Variant taxonomy: `loaded_image_struct_literal_round_trips_through_copy_and_eq`, `loaded_image_distinguishes_different_field_values`, `load_error_variants_pattern_match_exhaustively`, `load_error_variants_are_distinct`, `load_error_frame_budget_exceeded_fields_round_trip`.
 
-The mid-loop-failure tests use a `FailingMapMmu` decorator (defined inline in the test module) that wraps `FakeMmu` and fails the Nth `map` call deterministically. This lets the test inject mid-image-loop and mid-stack-loop `cap_map` failures without an unstable real-MMU dependency.
+The mid-loop-failure tests use two test-only injection mechanisms:
+
+- A `FailingMapMmu` decorator (defined inline in the test module) wraps `FakeMmu` and fails the Nth `map` call deterministically — used to drive mid-image-loop and mid-stack-loop `cap_map` failures.
+- [`Pmm::force_alloc_failure_after`](../../kernel/src/mm/pmm.rs), a `#[cfg(test)] pub(crate)` setter, schedules `alloc_frame` to start returning `None` after N successful calls — used to drive the `OutOfFrames` rollback path (structurally unreachable in v1 post-FrameBudgetExceeded preflight, but the defensive code in `load_image` has its own rollback shape that the test pins).
 
 ## Cross-references
 

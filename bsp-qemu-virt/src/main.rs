@@ -275,17 +275,18 @@ static AS_ARENA: StaticCell<tyrne_kernel::mm::AddressSpaceArena<mmu::QemuVirtMmu
     StaticCell::new();
 
 /// The bootstrap "AS authority" cap. Kernel-init's parent cap for any
-/// future `cap_create_address_space` invocation that wants to mint a
-/// new AS. Stored as a `CapHandle` into [`BOOTSTRAP_AS_TABLE`] (the
-/// kernel-init's cap table; distinct from `TABLE_A`/`TABLE_B` which
-/// are the per-task tables for the IPC demo). Currently unused by the
-/// v1 demo (no second AS is created); reserved as scaffold for B5+
-/// userspace work.
-#[allow(
-    dead_code,
-    reason = "v1 demo creates no second AS; field reserved for B5+ userspace work \
-              that uses cap_create_address_space"
-)]
+/// `cap_create_address_space` invocation that wants to mint a new AS.
+/// Stored as a `CapHandle` into [`BOOTSTRAP_AS_TABLE`] (the kernel-
+/// init's cap table; distinct from `TABLE_A`/`TABLE_B` which are the
+/// per-task tables for the IPC demo).
+///
+/// **Live as of T-019.** The task loader smoke at the end of
+/// `kernel_main` reads this cap and passes it as `parent_as_cap` to
+/// `task_loader::load_image`, which derives the loaded image's AS cap
+/// from it (DERIVE rights granted at mint time below). The previous
+/// `#[allow(dead_code)]` covering the "v1 demo creates no second AS"
+/// state was removed when T-019 turned the cap into the live parent
+/// authority for the loader's mint.
 static BOOTSTRAP_AS_CAP: StaticCell<CapHandle> = StaticCell::new();
 
 /// Kernel-init's capability table. Mirrors `TABLE_A`/`TABLE_B`'s
@@ -310,7 +311,7 @@ static BOOTSTRAP_AS_TABLE: StaticCell<CapabilityTable> = StaticCell::new();
 /// entry).
 ///
 /// [adr-0029]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0029-initial-userspace-image-format.md
-static USERSPACE_IMAGE: &[u8] = &[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6];
+static USERSPACE_IMAGE: &[u8] = &[0x40, 0x05, 0x80, 0x52, 0xc0, 0x03, 0x5f, 0xd6];
 
 /// Base VA the loader places the image at — userspace VA range per
 /// [ADR-0027 §Decision outcome (a)][adr-0027]'s `TTBR0_EL1` range.

@@ -128,6 +128,14 @@ pub struct Pmm<const N: usize, const R: usize> {
     reserved_count: usize,
     /// Cached `Allocated`-state counter.
     allocated_count: usize,
+    /// **Test-only failure injection.** When `Some(n)`, `alloc_frame`
+    /// returns `None` after `n` further successful calls; production
+    /// code has no setter for this field. Used by host tests in
+    /// `obj::task_loader::tests` to drive the structurally-unreachable-
+    /// in-v1 `LoadError::OutOfFrames` rollback path that is otherwise
+    /// guarded out by the loader's frame-budget preflight.
+    #[cfg(test)]
+    alloc_failure_after: Option<usize>,
 }
 
 impl<const N: usize, const R: usize> Pmm<N, R> {
@@ -268,6 +276,8 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
             free_count,
             reserved_count,
             allocated_count: 0,
+            #[cfg(test)]
+            alloc_failure_after: None,
         })
     }
 
@@ -320,6 +330,21 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
     ///
     /// [adr-0035]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0035-physical-memory-manager.md#simulation
     pub fn alloc_frame(&mut self) -> Option<PhysFrame> {
+        // Test-only failure injection (see `alloc_failure_after`'s
+        // doc-comment). Runs before the production body so a forced
+        // failure leaves the bitmap and counters byte-stable. The
+        // `#[cfg(test)]` gate keeps this branch out of production
+        // builds entirely.
+        #[cfg(test)]
+        {
+            if let Some(remaining) = self.alloc_failure_after.as_mut() {
+                if *remaining == 0 {
+                    return None;
+                }
+                *remaining = remaining.saturating_sub(1);
+            }
+        }
+
         let total_frames = self.extent.frame_count();
 
         // Forward scan from `hint`. v1 single-core cooperative
@@ -490,6 +515,103 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
         self.allocated_count = self.allocated_count.saturating_sub(1);
 
         Ok(())
+    }
+
+    /// Returns `true` if any byte of `pa_range` falls inside a PA that
+    /// [`alloc_frame`][Self::alloc_frame] could yield — i.e., inside
+    /// the managed `extent` AND outside every cached reserved range.
+    /// Returns `false` for empty ranges and ranges disjoint from the
+    /// extent.
+    ///
+    /// # Purpose
+    ///
+    /// Used by callers that hold an external pointer and need to prove
+    /// it cannot alias a future `alloc_frame()` return. The task
+    /// loader (see
+    /// [`obj::task_loader::load_image`][crate::obj::task_loader::load_image])
+    /// uses this query to discharge
+    /// [UNSAFE-2026-0027][unsafe-27]'s "source and destination do not
+    /// overlap" invariant at runtime rather than via BSP memory-layout
+    /// discipline (ADR-0027 + ADR-0035). The check treats
+    /// `pa_range`'s endpoints as physical addresses — correct under
+    /// v1's identity-mapped post-bootstrap kernel AS per
+    /// [ADR-0027 §Decision outcome (a)][adr-0027]; a future high-half
+    /// migration (ADR-0033 placeholder) introduces a `virt_to_phys`
+    /// helper at the loader's call site.
+    ///
+    /// # Algorithm
+    ///
+    /// Clip `pa_range` to `extent`, then walk the covered frame
+    /// indices linearly; return `true` on the first frame whose PA is
+    /// not inside any populated `Some(_)` slot of `reserved_ranges`.
+    /// Worst-case `O((pa_range.len() / PAGE_SIZE) × populated_reserved)`;
+    /// for the loader's v1 placeholder (8-byte image, 1 frame of
+    /// coverage) this is a single iteration over at most `R` slots
+    /// (`R = 8` for `bsp-qemu-virt`).
+    ///
+    /// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+    /// [unsafe-27]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
+    #[must_use]
+    pub fn could_yield_pa_overlapping(&self, pa_range: core::ops::Range<usize>) -> bool {
+        // Empty range cannot overlap anything.
+        if pa_range.start >= pa_range.end {
+            return false;
+        }
+        let extent_start = self.extent.start.0;
+        let extent_end = self.extent.end.0;
+        // Disjoint from extent → cannot overlap a yieldable frame.
+        if pa_range.end <= extent_start || pa_range.start >= extent_end {
+            return false;
+        }
+        // Clip to extent.
+        let clipped_start = if pa_range.start > extent_start {
+            pa_range.start
+        } else {
+            extent_start
+        };
+        let clipped_end = if pa_range.end < extent_end {
+            pa_range.end
+        } else {
+            extent_end
+        };
+        // Frame-index bounds: any frame whose PA range
+        // `[f, f + PAGE_SIZE)` overlaps `[clipped_start, clipped_end)`.
+        // Equivalently: start_idx is the frame containing `clipped_start`;
+        // end_idx is one past the frame containing `clipped_end - 1`.
+        let start_idx = clipped_start
+            .saturating_sub(extent_start)
+            .wrapping_div(PAGE_SIZE);
+        let end_idx = clipped_end
+            .saturating_sub(extent_start)
+            .saturating_add(PAGE_SIZE)
+            .saturating_sub(1)
+            .wrapping_div(PAGE_SIZE);
+        // Walk frame PAs; return true on first non-reserved frame.
+        for idx in start_idx..end_idx {
+            let frame_pa = extent_start.saturating_add(idx.saturating_mul(PAGE_SIZE));
+            let frame_addr = PhysAddr(frame_pa);
+            let in_reserved = self
+                .reserved_ranges
+                .iter()
+                .flatten()
+                .any(|r| r.contains(frame_addr));
+            if !in_reserved {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+impl<const N: usize, const R: usize> Pmm<N, R> {
+    /// **Test-only.** Schedule [`alloc_frame`][Self::alloc_frame] to
+    /// start returning `None` after the next `n` successful calls.
+    /// Calling again replaces the prior schedule. Used by host tests
+    /// in `obj::task_loader::tests` to deterministically drive the
+    /// `OutOfFrames` rollback path; production code has no caller.
+    pub(crate) fn force_alloc_failure_after(&mut self, n: usize) {
+        self.alloc_failure_after = Some(n);
     }
 }
 
