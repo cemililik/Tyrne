@@ -19,8 +19,9 @@
 //!    [`LoadError::AddressSpaceCreationFailed`] wrapping
 //!    [`CapError::InsufficientRights`].
 //! 3. Frame-budget preflight: `1 + image_pages + stack_pages +
-//!    INTERMEDIATE_FRAME_BUDGET <= pmm.stats().free_frames`
-//!    ([`LoadError::FrameBudgetExceeded`]).
+//!    intermediate_frame_count(...) <= pmm.stats().free_frames`
+//!    (see [`intermediate_frame_count`]) — returns
+//!    [`LoadError::FrameBudgetExceeded`] on miss.
 //! 4. Image-PA-overlap preflight: reject if the `image` slice's PA
 //!    range overlaps a frame [`Pmm::alloc_frame`] could yield
 //!    ([`LoadError::ImageOverlapsAllocatableMemory`]). Discharges
@@ -68,21 +69,90 @@ use crate::mm::{
 };
 use tyrne_hal::{MappingFlags, Mmu, VirtAddr, PAGE_SIZE};
 
-/// Safe upper bound on intermediate page-table frames `cap_map` may
-/// pull for the loader's two contiguous VA ranges (image + stack).
+/// Compute the exact number of intermediate page-table frames
+/// (L1 + L2 + L3 tables) `cap_map` will allocate for the loader's
+/// image + stack mappings under `VMSAv8` 4-level translation.
 ///
-/// Per [T-019 §Approach][t-019]: each contiguous VA range may need up
-/// to 3 intermediate page-table frames (L1, L2, L3) the first time a
-/// page is mapped at that level; v1's fresh-AS has the L0 root only,
-/// so all three intermediates for the image range and all three for
-/// the (separately-located) stack range may need to be allocated. The
-/// `6` is therefore the worst case for the loader's call pattern and
-/// is documented as a *safe upper bound, not an exact calculation* —
-/// over-allocating by up to ~24 KiB of frame headroom is acceptable
-/// per T-019 §Acceptance criteria's frame-budget bullet.
+/// Walks the `VMSAv8` 4 KiB granule index decomposition:
 ///
-/// [t-019]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-019-task-loader.md
-pub const INTERMEDIATE_FRAME_BUDGET: usize = 6;
+/// - **L3** (4 KiB page) table covers 2 MiB (`VA[20:12]` index, 9 bits).
+/// - **L2** (2 MiB block) table covers 1 GiB (`VA[29:21]` index).
+/// - **L1** (1 GiB block) table covers 512 GiB (`VA[38:30]` index).
+/// - **L0** root covers the full 48-bit VA range — already allocated
+///   by [`crate::mm::cap_create_address_space`], **not** counted here.
+///
+/// Image and stack are contiguous by construction (`stack_base =
+/// image_base_va + image_pages * PAGE_SIZE`), so their combined VA
+/// span is closed; the distinct-slot count at each level is exactly
+/// `(last >> shift) - (first >> shift) + 1`.
+///
+/// The returned count is **exact** for a BSP that lazy-allocates
+/// table descriptors only when the parent entry is invalid (v1's
+/// [`bsp-qemu-virt/src/mmu.rs`](../../../../bsp-qemu-virt/src/mmu.rs)
+/// `walk_or_alloc_table` behaviour); a BSP that pre-allocates more
+/// aggressively would observe this count as a lower bound. v1 has
+/// the single aarch64 BSP, so the count is exact in practice.
+///
+/// Returns 0 for an empty span (defensive; row 1 preflight rejects
+/// zero-page requests before this helper is reached).
+///
+/// ## Why not a closed-form constant
+///
+/// Earlier T-019 commits used a hard-coded constant `6` (3 L0/L1/L2
+/// intermediates per range × 2 contiguous ranges = 6). PR #31
+/// review-round 3 (Finding 1) observed this is **wrong** for image
+/// spans that cross more than one L2 slot — every additional 2 MiB
+/// boundary the image crosses adds one L3 table. Example: an 8 MiB
+/// image at VA `0x0080_0000` covers L2 slots 4–7 + the stack's slot
+/// 8 = 5 distinct L2 slots, requiring 1 L1 + 1 L2 + 5 L3 = **7**
+/// intermediates, not 6. The exact computation below tracks the true
+/// count and satisfies the "safe upper bound" contract T-019
+/// §Acceptance criteria promises.
+///
+/// ## `VMSAv8`-specificity
+///
+/// The `21`/`30`/`39` bit-shift constants encode `VMSAv8`'s 4 KiB
+/// granule + 9-bit per-level index decomposition per
+/// [ADR-0009 §Decision drivers][adr-0009] and
+/// [ADR-0027 §Decision outcome (a)][adr-0027]. Future BSPs targeting
+/// a different page-table format (e.g. RISC-V `Sv39`) would either
+/// re-derive these constants per their format or surface an
+/// `Mmu::intermediate_frames_for_span` HAL method. v1's single
+/// aarch64 BSP keeps the constants inline.
+///
+/// [adr-0009]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0009-mmu-trait.md
+/// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+#[must_use]
+pub fn intermediate_frame_count(
+    image_base_va: VirtAddr,
+    image_pages: usize,
+    stack_pages: usize,
+) -> usize {
+    let total_pages = image_pages.saturating_add(stack_pages);
+    if total_pages == 0 {
+        return 0;
+    }
+    let span_bytes = total_pages.saturating_mul(PAGE_SIZE);
+    let span_start = image_base_va.0;
+    // Last addressed byte. `total_pages > 0` guarantees `span_bytes
+    // >= PAGE_SIZE > 0`, so the `saturating_sub` does not underflow.
+    let last_byte = span_start.saturating_add(span_bytes).saturating_sub(1);
+
+    // L3 (4 KiB page) table: each covers 2 MiB → shift 21.
+    let l3_count = (last_byte >> 21)
+        .saturating_sub(span_start >> 21)
+        .saturating_add(1);
+    // L2 (2 MiB block) table: each covers 1 GiB → shift 30.
+    let l2_count = (last_byte >> 30)
+        .saturating_sub(span_start >> 30)
+        .saturating_add(1);
+    // L1 (1 GiB block) table: each covers 512 GiB → shift 39.
+    let l1_count = (last_byte >> 39)
+        .saturating_sub(span_start >> 39)
+        .saturating_add(1);
+
+    l1_count.saturating_add(l2_count).saturating_add(l3_count)
+}
 
 /// One-past-the-highest legal userspace virtual address.
 ///
@@ -297,9 +367,17 @@ pub enum LoadError {
 ///    [`LoadError::InvalidStackSize`]).
 /// 2. Cap preflight: lookup + [`CapKind::AddressSpace`] kind check
 ///    ([`LoadError::InvalidParentCap`]).
-/// 3. Frame-budget preflight: `1 + image_pages + stack_pages +
-///    INTERMEDIATE_FRAME_BUDGET <= pmm.stats().free_frames`
-///    ([`LoadError::FrameBudgetExceeded`]).
+/// 3. VA-range preflight: the mapped span end
+///    `image_base_va + (image_pages + stack_pages) * PAGE_SIZE` must
+///    be `<= USERSPACE_VA_LIMIT` (= `1 << 48` per ADR-0027 §Decision
+///    outcome (a)). Returns [`LoadError::InvalidImageBaseVa`] on
+///    miss. Frame-budget preflight: `1 + image_pages + stack_pages +
+///    intermediate_frame_count(...) <= pmm.stats().free_frames` (see
+///    [`intermediate_frame_count`]). Returns
+///    [`LoadError::FrameBudgetExceeded`] on miss. VA-range runs
+///    first so an arithmetic-saturated request surfaces the
+///    documented [`LoadError::InvalidImageBaseVa`] sentinel instead
+///    of being masked by [`LoadError::FrameBudgetExceeded`].
 /// 4. Image-PA-overlap preflight: reject if the `image` slice's PA
 ///    range overlaps a frame [`Pmm::alloc_frame`] could yield
 ///    ([`LoadError::ImageOverlapsAllocatableMemory`]). Discharges
@@ -411,20 +489,14 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
         return Err(LoadError::InvalidParentCap(CapError::WrongKind));
     }
 
-    // §Simulation row 3: frame-budget + VA-range preflight. The frame
-    // budget is a safe upper bound (per T-019 §Acceptance criteria);
-    // the VA-range check enforces the architected userspace VA bound
-    // before any state change.
+    // §Simulation row 3: VA-range preflight (first) + frame-budget
+    // preflight (second). VA-range runs first so an arithmetic-
+    // saturated request (e.g. `stack_size_pages = usize::MAX`)
+    // surfaces the documented `InvalidImageBaseVa` sentinel instead
+    // of being masked by the saturated-then-overshoot frame-budget
+    // comparison — addresses PR #31 review-round 3 Finding 2.
     let image_pages = image.len().div_ceil(PAGE_SIZE);
     let stack_pages = stack_size_pages;
-    let needed = 1usize
-        .saturating_add(image_pages)
-        .saturating_add(stack_pages)
-        .saturating_add(INTERMEDIATE_FRAME_BUDGET);
-    let available = pmm.stats().free_frames;
-    if needed > available {
-        return Err(LoadError::FrameBudgetExceeded { needed, available });
-    }
 
     // VA-range bound: the mapped span `[image_base_va, stack_top_va)`
     // (half-open) must lie within `[0, USERSPACE_VA_LIMIT)` per
@@ -443,6 +515,22 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
             base: image_base_va,
             end: VirtAddr(span_end),
         });
+    }
+
+    // Frame-budget bound. The intermediate count is *exact* (not a
+    // safe upper bound) per `intermediate_frame_count`'s docstring;
+    // PR #31 review-round 3 Finding 1 replaced the previous
+    // hard-coded `6` (which under-counted when the image span crossed
+    // more than one 2 MiB L2 slot — every additional boundary adds
+    // one L3 table).
+    let intermediate_budget = intermediate_frame_count(image_base_va, image_pages, stack_pages);
+    let needed = 1usize
+        .saturating_add(image_pages)
+        .saturating_add(stack_pages)
+        .saturating_add(intermediate_budget);
+    let available = pmm.stats().free_frames;
+    if needed > available {
+        return Err(LoadError::FrameBudgetExceeded { needed, available });
     }
 
     // §Simulation row 4: image-PA-overlap preflight. Discharges
@@ -707,7 +795,7 @@ fn rollback<M: Mmu, const N: usize, const R: usize>(
     reason = "tests may use pragmas forbidden in production kernel code"
 )]
 mod tests {
-    use super::{load_image, rollback, LoadError, LoadedImage, INTERMEDIATE_FRAME_BUDGET};
+    use super::{intermediate_frame_count, load_image, rollback, LoadError, LoadedImage};
     use crate::cap::{CapError, CapObject, CapRights, Capability, CapabilityTable};
     use crate::mm::{AddressSpaceArena, AddressSpaceError, PhysFrameRange, Pmm};
     use crate::obj::EndpointHandle;
@@ -1024,18 +1112,117 @@ mod tests {
         assert_eq!(loaded.stack_top_va, VirtAddr(super::USERSPACE_VA_LIMIT));
     }
 
+    // ── §Simulation row 3 — intermediate-frame budget helper ─────────────────
+
+    #[test]
+    fn intermediate_frame_count_minimal_single_l2_slot() {
+        // 1-byte image + 1-page stack at VA 8 MiB. Image VA range
+        // [0x80_0000, 0x80_1000); stack VA range [0x80_1000, 0x80_2000).
+        // Both fall inside L2 slot 4 (covers [0x80_0000, 0xA0_0000)).
+        // Distinct slots: 1 L3 + 1 L2 + 1 L1 = 3.
+        assert_eq!(
+            intermediate_frame_count(VirtAddr(0x0080_0000), 1, 1),
+            3,
+            "minimal single-L2-slot case must yield 3 intermediates"
+        );
+    }
+
+    #[test]
+    fn intermediate_frame_count_8mib_image_one_stack_page_crosses_five_l2() {
+        // Regression for PR #31 review-round 3 Finding 1: 8 MiB image
+        // at 0x0080_0000 covers L2 slots 4..=7 (4 distinct); one stack
+        // page at 0x0100_0000 (= 16 MiB) lands in L2 slot 8.
+        // Distinct: 5 L3 + 1 L2 + 1 L1 = 7 (NOT the old hard-coded 6).
+        let image_pages = (8 * 1024 * 1024) / PAGE_SIZE; // 2048
+        assert_eq!(
+            intermediate_frame_count(VirtAddr(0x0080_0000), image_pages, 1),
+            7,
+            "8 MiB image crossing 5 L2 slots must yield 7 intermediates"
+        );
+    }
+
+    #[test]
+    fn intermediate_frame_count_l1_boundary_crossing() {
+        // Span crossing the 1 GiB L1 boundary: base at 1 GiB - 4 KiB,
+        // 1 page image + 1 page stack. L2 slots: 511 (within L1 slot 0)
+        // and 512 (within L1 slot 1) = 2 distinct L3 tables. L1 slots:
+        // 0 and 1 = 2 distinct L2 tables. L0 slot: 0 = 1 L1 table.
+        // Total: 2 L3 + 2 L2 + 1 L1 = 5.
+        assert_eq!(
+            intermediate_frame_count(VirtAddr(0x3FFF_F000), 1, 1),
+            5,
+            "L1 boundary crossing must yield 2 L3 + 2 L2 + 1 L1 = 5"
+        );
+    }
+
+    #[test]
+    fn intermediate_frame_count_zero_span_defensive() {
+        // Defensive zero-span: row 1 preflight rejects zero-page
+        // requests before this helper is reached, but the helper
+        // itself must not panic on `image_pages = stack_pages = 0`.
+        assert_eq!(intermediate_frame_count(VirtAddr(0), 0, 0), 0);
+        assert_eq!(intermediate_frame_count(VirtAddr(0x0080_0000), 0, 0), 0);
+    }
+
+    #[test]
+    fn intermediate_frame_count_saturated_total_pages() {
+        // `total_pages.saturating_mul(PAGE_SIZE)` saturating at
+        // usize::MAX must not cause the helper to overflow or panic;
+        // the returned count is bounded by the L1/L2/L3 max-index
+        // arithmetic regardless.
+        let _ = intermediate_frame_count(VirtAddr(0), usize::MAX, 1);
+        let _ = intermediate_frame_count(VirtAddr(0), 1, usize::MAX);
+    }
+
+    #[test]
+    fn va_range_preflight_runs_before_frame_budget() {
+        // Regression for PR #31 review-round 3 Finding 2: a saturated
+        // request (`stack_size_pages = usize::MAX`) must surface as
+        // `InvalidImageBaseVa` (the documented sentinel), NOT as
+        // `FrameBudgetExceeded` (which previously fired first because
+        // `needed.saturating_add(usize::MAX) > available` triggered
+        // before the VA-range check ran).
+        let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(16);
+        let pmm_before = pmm.stats().free_frames;
+
+        let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
+            &[0xAAu8],
+            &mut pmm,
+            &mmu,
+            &mut table,
+            &mut arena,
+            parent_cap,
+            CapRights::empty(),
+            VirtAddr(0x0080_0000),
+            usize::MAX,
+        );
+
+        match result {
+            Err(LoadError::InvalidImageBaseVa { base, end }) => {
+                assert_eq!(base, VirtAddr(0x0080_0000));
+                assert_eq!(end, VirtAddr(usize::MAX), "saturating sentinel");
+            }
+            other => panic!("expected InvalidImageBaseVa with saturated end, got {other:?}"),
+        }
+        assert_eq!(pmm.stats().free_frames, pmm_before);
+    }
+
     #[test]
     fn rejects_when_pmm_budget_exceeded() {
         // Pin §Simulation row 3: requested budget exceeding
         // pmm.stats().free_frames returns FrameBudgetExceeded with
         // accurate `needed` / `available` fields, no state change.
         // 4 frames available; ask for an 8-frame image + 8-page stack
-        // → needed = 1 + 8 + 8 + 6 = 23, available = 4 ⇒ reject.
+        // at VA 0x0080_0000 (image+stack span = 9 pages = within 1
+        // L2 slot) → intermediates = 1 L1 + 1 L2 + 1 L3 = 3,
+        // needed = 1 + 8 + 8 + 3 = 20, available = 4 ⇒ reject.
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(4);
         let pmm_before = pmm.stats().free_frames;
 
         // Image bytes: 8 pages worth (32 KiB).
         let image: Vec<u8> = vec![0xCDu8; 8 * PAGE_SIZE];
+        let image_base = VirtAddr(0x0080_0000);
+        let stack_pages = 8usize;
         let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
             &image,
             &mut pmm,
@@ -1044,13 +1231,14 @@ mod tests {
             &mut arena,
             parent_cap,
             CapRights::empty(),
-            VirtAddr(0x0080_0000),
-            8, // 8 pages of stack
+            image_base,
+            stack_pages,
         );
 
         match result {
             Err(LoadError::FrameBudgetExceeded { needed, available }) => {
-                assert_eq!(needed, 1 + 8 + 8 + INTERMEDIATE_FRAME_BUDGET);
+                let expected_intermediates = intermediate_frame_count(image_base, 8, stack_pages);
+                assert_eq!(needed, 1 + 8 + stack_pages + expected_intermediates);
                 assert_eq!(available, pmm_before);
             }
             other => panic!("expected FrameBudgetExceeded, got {other:?}"),
@@ -1062,11 +1250,16 @@ mod tests {
     fn frame_budget_includes_root_plus_intermediates() {
         // Pin the budget formula: a budget that's exactly one frame
         // short reports `needed` accounting for both the leading `1`
-        // (root L0) and the +6 intermediate-frame upper bound.
-        let frames_available = 1 + 2 + 1 + INTERMEDIATE_FRAME_BUDGET - 1; // off-by-one short
+        // (root L0) and the exact intermediate-frame count for the
+        // requested VA span.
+        let image_base = VirtAddr(0x0080_0000);
+        let image_pages = 2usize;
+        let stack_pages = 1usize;
+        let intermediates = intermediate_frame_count(image_base, image_pages, stack_pages);
+        let frames_available = 1 + image_pages + stack_pages + intermediates - 1; // off-by-one short
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(frames_available);
 
-        let image: Vec<u8> = vec![0u8; 2 * PAGE_SIZE]; // 2 image pages
+        let image: Vec<u8> = vec![0u8; image_pages * PAGE_SIZE];
         let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
             &image,
             &mut pmm,
@@ -1075,20 +1268,20 @@ mod tests {
             &mut arena,
             parent_cap,
             CapRights::empty(),
-            VirtAddr(0x0080_0000),
-            1, // 1 stack page
+            image_base,
+            stack_pages,
         );
 
         match result {
             Err(LoadError::FrameBudgetExceeded { needed, available }) => {
-                assert_eq!(needed, 1 + 2 + 1 + INTERMEDIATE_FRAME_BUDGET);
+                assert_eq!(needed, 1 + image_pages + stack_pages + intermediates);
                 assert_eq!(available, frames_available);
                 // Confirm `needed` includes both halves of the formula.
-                assert!(needed > 2 + 1, "needed must exceed bare image+stack count");
                 assert!(
-                    needed >= INTERMEDIATE_FRAME_BUDGET,
-                    "needed must include intermediates"
+                    needed > image_pages + stack_pages,
+                    "needed must exceed bare image+stack count"
                 );
+                assert!(needed >= intermediates, "needed must include intermediates");
             }
             other => panic!("expected FrameBudgetExceeded, got {other:?}"),
         }
