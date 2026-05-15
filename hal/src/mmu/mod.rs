@@ -350,13 +350,53 @@ pub trait Mmu: Send + Sync {
     /// for `va`) or `.ignore()` (documented no-op for bulk operations
     /// followed by a single [`Self::invalidate_tlb_all`]).
     ///
+    /// # Failure semantics (load-bearing contract for `unsafe`-free callers)
+    ///
+    /// On every `Err` return, the implementation **must** guarantee:
+    ///
+    /// 1. **No mapping at `va`.** The translation walk for `va` returns
+    ///    the *same* result as it would have before the call (either
+    ///    unmapped or, for [`MmuError::AlreadyMapped`] /
+    ///    [`MmuError::BlockMapped`], the *pre-existing* mapping).
+    /// 2. **`pa` is not consumed.** The caller retains ownership of
+    ///    `pa` and may safely return it to its [`FrameProvider`] or
+    ///    install it at a different `va` without risk of double-use.
+    ///    BSP implementations achieve this by performing the leaf
+    ///    descriptor write *after* every fallible step (intermediate
+    ///    table allocation, descriptor decoding, alignment checks)
+    ///    has succeeded.
+    /// 3. **Intermediate frames pulled from `frames` are NOT promised
+    ///    back to the caller on Err.** Intermediate L1/L2/L3 page-table
+    ///    frames allocated mid-walk *may* be retained inside `as_`'s
+    ///    translation tree and freed only when `as_` itself is
+    ///    destroyed. This asymmetry is deliberate: leaf-frame
+    ///    ownership is caller-tracked (so the safe-API rollback path
+    ///    can return `pa` to PMM); intermediate-frame ownership is
+    ///    AS-internal (the BSP walker may legitimately keep partial
+    ///    state for retry).
+    ///
+    /// Safe kernel callers (e.g.
+    /// [`crate::Mmu::map`][Self::map]-routing wrappers in
+    /// `tyrne-kernel`'s `task_loader::load_image` rollback path) rely
+    /// on **(2)** to free the failing iteration's leaf frame without
+    /// aliasing risk. A BSP impl that violates (2) — for example by
+    /// writing the leaf descriptor before checking flag validity —
+    /// would create undefined behaviour through safe code (the
+    /// rollback path `pmm.free_frame(pa)` would alias a still-mapped
+    /// frame). Per the [`Mmu`] trait's `unsafe`-free safety
+    /// contract, satisfying (2) is the impl's responsibility, not the
+    /// caller's.
+    ///
     /// # Errors
     ///
     /// - [`MmuError::AlreadyMapped`] if `va` already has a mapping.
     /// - [`MmuError::MisalignedAddress`] if `va` is not
     ///   [`PAGE_SIZE`]-aligned.
     /// - [`MmuError::OutOfFrames`] if an intermediate table needed a frame
-    ///   and `frames` returned `None`.
+    ///   and `frames` returned `None`. Per (3) above, intermediate
+    ///   frames already pulled from `frames` may have been installed
+    ///   into `as_` and are not returned to the caller; `pa` itself
+    ///   (the leaf frame) is unchanged per (2).
     /// - [`MmuError::InvalidFlags`] if `flags` cannot be applied (for
     ///   example, user + kernel-only combinations).
     fn map(

@@ -41,7 +41,7 @@ Specifically:
 
 [adr-0034-placeholder]: 0027-kernel-virtual-memory-layout.md
 - **VA placement.** A fixed userspace base VA is implementation-detail of T-019, not this ADR — the VA range scoping decision is owned by [T-019's Approach](../analysis/tasks/phase-b/T-019-task-loader.md) and bounded by [ADR-0027 §Decision outcome (a)](0027-kernel-virtual-memory-layout.md)'s `TTBR0_EL1` range. The loader maps the blob at a single contiguous VA range determined at compile time per the userspace linker script.
-- **Build pipeline (B4 / T-019 — placeholder blob).** T-019 ships with a **hand-coded** placeholder blob: a small `&[u8]` literal (e.g. `[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6]` for `mov w0, #42; ret`) embedded into the BSP at compile time — sufficient to exercise the loader's `cap_create_address_space` + `cap_map` + `LoadedImage`-return path under host tests + the smoke trace without depending on a userspace toolchain. **No `cargo build`-to-`objcopy` pipeline lands with T-019.**
+- **Build pipeline (B4 / T-019 — placeholder blob).** T-019 ships with a **hand-coded** placeholder blob: a small `&[u8]` literal (e.g. `[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6]` for `mov w0, #42; ret`) embedded into the BSP at compile time — sufficient to exercise the loader's `cap_create_address_space` + `cap_map` + `LoadedImage`-return path under host tests + the smoke trace without depending on a userspace toolchain. **No `cargo build`-to-`objcopy` pipeline lands with T-019.** (The bytes shown here are the Accept-state illustrative literal; see §Revision notes for the post-Accept byte-encoding correction.)
 - **Build pipeline (B6 — real userspace crate).** B6's `userland/hello/` crate (separate, future task — not opened in B4) is the first **real** userspace binary: a `no_std, no_main` aarch64 crate built via `cargo build --target aarch64-unknown-none` (`cargo build` default for the userland workspace member) and stripped to raw bytes via `objcopy -O binary` (or the equivalent `cargo-binutils` invocation) as a userland-crate build-script step. The kernel embeds the resulting `.bin` via `include_bytes!("../../userland/hello/target/.../hello.bin")` (or similar — the exact path lands with B6). Until B6 lands, T-019's placeholder blob is the only userspace image in tree.
 
 ### Simulation
@@ -75,7 +75,7 @@ Step 1 is the natural Phase B6 work and is **not** opened today; B4's T-019 ship
 
 - **Loader complexity is bounded by the page-loop + intermediate-frame-budget pattern**, not by a parser. The actual loader sequence (per [T-019 §Approach][t-019-approach]) is: (1) preflight cap kind + image size + total PMM-frame budget (1 root AS frame + image pages + stack pages + worst-case intermediate page-table frames per [ADR-0027 §VMSAv8 4-level translation][adr-0027-vmsav8]); (2) `cap_create_address_space` for the new AS; (3) loop `pmm.alloc_frame` + `core::ptr::copy_nonoverlapping` byte-copy + `cap_map` per image page (with tail zeroing on the partial page); (4) loop the same shape per stack page; (5) return `LoadedImage` metadata. The per-page mechanics are real (`Pmm::alloc_frame` is per-frame, not contiguous; `cap_map` is per-page, not range-mapped — see T-019 §Approach for the explicit loop) but the parser surface is *zero*. Compared to Option 2 (ELF subset) which adds ~80–120 lines of header / program-header / segment-table validation that **all** must be panic-free per `kernel/src/lib.rs`'s `#![deny(clippy::panic)]` discipline, Option 1's complexity sits in the *loop* (which can be table-driven, easily Miri-tested) rather than in *parsing* (which is an attacker-controllable input surface in B5+ when filesystem-loaded modules eventually land).
 - **Boot footprint stays bounded.** No ELF header overhead (54 bytes header + 56 per program header in ELF64 = ~110 bytes minimum, doubling a 100-byte v1 binary). The kernel `.rodata` cost is exactly `blob.len()`.
-- **Host-side loader tests are trivial.** Tests construct a `&'static [u8]` directly (e.g., `static TEST_BLOB: &[u8] = &[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6]` = a real `mov w0, #42; ret` sequence). No fake-ELF builder; no toolchain-dependent test fixtures.
+- **Host-side loader tests are trivial.** Tests construct a `&'static [u8]` directly (e.g., `static TEST_BLOB: &[u8] = &[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6]` for a real `mov w0, #42; ret` sequence). No fake-ELF builder; no toolchain-dependent test fixtures. (Bytes here are the Accept-state illustrative literal; see §Revision notes for the post-Accept byte-encoding correction.)
 - **Toolchain alignment.** Every aarch64 Rust crate's `cargo build` output is one `objcopy -O binary` away from a working raw flat binary.
 
 [t-019-approach]: ../analysis/tasks/phase-b/T-019-task-loader.md#approach
@@ -121,6 +121,32 @@ Step 1 is the natural Phase B6 work and is **not** opened today; B4's T-019 ship
 - **Con:** No off-the-shelf tooling (`readelf`-equivalent) for inspection.
 - **Con:** Loader complexity sits between Options 1 and 2 — small parser, but the parser exists and must be panic-free.
 - **Con:** Test surface still needs a synthetic builder (the format isn't `objcopy`-producible).
+
+## Revision notes
+
+Per the [ADR README §Format](README.md) and [CLAUDE.md non-negotiable #5](../../CLAUDE.md), ADRs are append-only: the original §Decision-outcome / §Consequences / §Pros-and-cons text written at Accept time stays on record, and post-Accept corrections land in this section. PR #31 review-round 5 (2026-05-16) flagged a prior in-place edit to the §Decision outcome §"Build pipeline (B4 / T-019)" + §"Host-side loader tests" byte literals as a policy violation; this revision-notes entry records the correction without rewriting the original ADR body.
+
+### 2026-05-16 — Placeholder byte sequence: documented intent vs Accept-state literal
+
+**Context.** Both §Decision outcome's "Build pipeline (B4 / T-019)" bullet and §Pros-and-cons §Option 1's "Host-side loader tests are trivial" bullet illustrate the placeholder image as `[0x40, 0x00, 0x80, 0xd2, 0xc0, 0x03, 0x5f, 0xd6]` "for `mov w0, #42; ret`". These bytes were the literal at Accept time (`f90e382`) and remain in the ADR body above.
+
+**Discrepancy.** Decoding the bytes as little-endian aarch64 instructions:
+
+- LE word 0 = `0xd2800040` = `MOVZ x0, #2` (sf-bit = 1 → **64-bit** MOVZ; `imm16 = 0x0002`)
+- LE word 1 = `0xd65f03c0` = `RET`
+
+So the bytes actually mean `MOVZ x0, #2; ret` — not the documented `mov w0, #42`. The bytes are non-executable in B4 (T-019 produces a `LoadedImage` but does not run it; see [phase-b §B4 §Revision-notes](../roadmap/phases/phase-b.md#milestone-b4--task-loader)), so the encoding mismatch was harmless at runtime; it's a doc-vs-encoding drift only.
+
+**Canonical kernel-source bytes (post-revision).** The BSP wiring in [`bsp-qemu-virt/src/main.rs`](../../bsp-qemu-virt/src/main.rs) (`USERSPACE_IMAGE`) carries the **corrected** bytes `[0x40, 0x05, 0x80, 0x52, 0xc0, 0x03, 0x5f, 0xd6]` which decode as:
+
+- LE word 0 = `0x52800540` = `MOVZ w0, #42` (sf-bit = 0 → **32-bit** MOVZ; `imm16 = 0x002A = 42`)
+- LE word 1 = `0xd65f03c0` = `RET`
+
+Together: `mov w0, #42; ret` — matching the documented intent. The BSP source is the canonical truth for the placeholder bytes; the ADR's illustrative literal in §Decision outcome is preserved as-is per the append-only policy and the canonical source is referenced from the line in question.
+
+**No decision change.** The format choice (raw flat binary), the build-pipeline split (B4-placeholder vs B6-userland-crate), and all consequences are unchanged. This revision note records a doc/encoding correction only.
+
+**Reviewed by:** @cemililik (+ Claude Opus 4.7 agent), PR #31 review-round 5.
 
 ## References
 

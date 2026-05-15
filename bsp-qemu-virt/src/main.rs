@@ -32,12 +32,13 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
 use tyrne_hal::{Console, Cpu, FmtWriter, Timer};
-use tyrne_hal::{PhysAddr, PAGE_SIZE};
+use tyrne_hal::{PhysAddr, VirtAddr, PAGE_SIZE};
 use tyrne_kernel::cap::{CapHandle, CapObject, CapRights, Capability, CapabilityTable};
 use tyrne_kernel::ipc::{IpcQueues, Message, RecvOutcome};
 use tyrne_kernel::mm::{PhysFrameRange, Pmm};
 use tyrne_kernel::obj::endpoint::{create_endpoint, Endpoint, EndpointArena};
 use tyrne_kernel::obj::task::{create_task, Task, TaskArena};
+use tyrne_kernel::obj::task_loader::load_image;
 use tyrne_kernel::sched::{
     ipc_recv_and_yield, ipc_send_and_yield, register_idle, start, yield_now, Scheduler,
 };
@@ -274,29 +275,62 @@ static AS_ARENA: StaticCell<tyrne_kernel::mm::AddressSpaceArena<mmu::QemuVirtMmu
     StaticCell::new();
 
 /// The bootstrap "AS authority" cap. Kernel-init's parent cap for any
-/// future `cap_create_address_space` invocation that wants to mint a
-/// new AS. Stored as a `CapHandle` into [`BOOTSTRAP_AS_TABLE`] (the
-/// kernel-init's cap table; distinct from `TABLE_A`/`TABLE_B` which
-/// are the per-task tables for the IPC demo). Currently unused by the
-/// v1 demo (no second AS is created); reserved as scaffold for B5+
-/// userspace work.
-#[allow(
-    dead_code,
-    reason = "v1 demo creates no second AS; field reserved for B5+ userspace work \
-              that uses cap_create_address_space"
-)]
+/// `cap_create_address_space` invocation that wants to mint a new AS.
+/// Stored as a `CapHandle` into [`BOOTSTRAP_AS_TABLE`] (the kernel-
+/// init's cap table; distinct from `TABLE_A`/`TABLE_B` which are the
+/// per-task tables for the IPC demo).
+///
+/// **Live as of T-019.** The task loader smoke at the end of
+/// `kernel_main` reads this cap and passes it as `parent_as_cap` to
+/// `task_loader::load_image`, which derives the loaded image's AS cap
+/// from it (DERIVE rights granted at mint time below). The previous
+/// `#[allow(dead_code)]` covering the "v1 demo creates no second AS"
+/// state was removed when T-019 turned the cap into the live parent
+/// authority for the loader's mint.
 static BOOTSTRAP_AS_CAP: StaticCell<CapHandle> = StaticCell::new();
 
 /// Kernel-init's capability table. Mirrors `TABLE_A`/`TABLE_B`'s
 /// pattern but for the kernel-init context — holds the bootstrap AS
-/// authority cap. Currently 1 entry (the bootstrap AS cap); B5+
-/// will grow this with the kernel-init's untyped / memory-region
-/// authority caps.
-#[allow(
-    dead_code,
-    reason = "v1 demo creates no second AS; table reserved for B5+ userspace work"
-)]
+/// authority cap and (post-T-019) the loaded-image AS cap minted by
+/// `task_loader::load_image`. B5+ will grow this with the kernel-init's
+/// untyped / memory-region authority caps.
 static BOOTSTRAP_AS_TABLE: StaticCell<CapabilityTable> = StaticCell::new();
+
+// ─── T-019 task loader placeholder image (ADR-0029) ───────────────────────────
+
+/// Placeholder userspace image: 8 bytes of aarch64 `mov w0, #42; ret`
+/// per [ADR-0029 §Decision outcome (Build pipeline — B4 / T-019)][adr-0029].
+/// The real B6 "hello" userspace binary lands with `userland/hello/`
+/// per [ADR-0029 §Decision outcome (Build pipeline — B6)][adr-0029];
+/// T-019 ships with this hand-coded blob as the loader's smoke fixture.
+///
+/// **Not executed.** T-019 produces a `LoadedImage` describing a
+/// populated AS; running gates on B5 (syscall ABI per ADR-0030) + B6
+/// (first userspace "hello") which together provide the prerequisites
+/// (kernel mappings in userspace AS, EL0-ready context, syscall
+/// entry).
+///
+/// [adr-0029]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0029-initial-userspace-image-format.md
+static USERSPACE_IMAGE: &[u8] = &[0x40, 0x05, 0x80, 0x52, 0xc0, 0x03, 0x5f, 0xd6];
+
+/// Base VA the loader places the image at — userspace VA range per
+/// [ADR-0027 §Decision outcome (a)][adr-0027]'s `TTBR0_EL1` range.
+/// `0x0080_0000` (8 MiB) is a pragmatic, page-aligned userspace VA:
+/// well clear of the null-page guard region used to trap dereferences,
+/// far below `USERSPACE_VA_LIMIT` (= `1 << 48`) so no overflow concern
+/// arises for placeholder-sized image+stack spans, and structurally
+/// aligned at the 8 MiB boundary which simplifies any mental arithmetic
+/// reading the smoke trace. Hard-coded for the placeholder blob; B6's
+/// `userland` linker script picks the real VA.
+///
+/// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+const USERSPACE_IMAGE_BASE_VA: usize = 0x0080_0000;
+
+/// Stack region size in `PAGE_SIZE`-multiples. Minimum 1; v1's
+/// placeholder never pushes to its stack but the loader requires a
+/// non-zero stack region (and the future `task_create_from_image`
+/// wrapper needs a defined `sp`).
+const USERSPACE_STACK_PAGES: usize = 1;
 
 /// Scheduler activation-hook callback for address-space changes.
 ///
@@ -926,6 +960,116 @@ pub extern "C" fn kernel_entry() -> ! {
             "tyrne: address-space-arena ready (1 / {} slots used; bootstrap AS root = {:#x})",
             tyrne_kernel::mm::ADDRESS_SPACE_ARENA_CAPACITY,
             bootstrap_root_pa
+        );
+    }
+
+    // ── Task loader smoke — T-019 / ADR-0029 ──────────────────────────────────
+    //
+    // First runtime exerciser of the loader half of B4: load the
+    // embedded raw-flat userspace placeholder blob into a fresh
+    // address space and print a one-line metadata banner. **Does NOT
+    // execute the loaded image** — runnability gates on B5/B6 per
+    // phase-b §B4 §Revision-notes. This block is the first post-
+    // bootstrap caller of `cap_create_address_space` + `cap_map`, so
+    // it exercises UNSAFE-2026-0025 (page-table descriptor writes)
+    // and UNSAFE-2026-0026 (PMM frame zero-fill) for real, and is
+    // the introducing site for UNSAFE-2026-0027 (the loader's
+    // copy_nonoverlapping byte-copy).
+    //
+    // SAFETY:
+    // **Why unsafe is required.** The block materialises momentary
+    // `&mut`/`&` references to the five write-once static cells
+    // `PMM` / `MMU` / `AS_ARENA` / `BOOTSTRAP_AS_TABLE` /
+    // `BOOTSTRAP_AS_CAP` via `assume_init_{mut,ref}` on
+    // `MaybeUninit<T>`. The compiler cannot prove these cells are
+    // already initialised at this point, nor that no concurrent peer
+    // holds an alias — that reasoning lives in the BSP boot flow's
+    // initialisation order and the v1 single-core cooperative model.
+    //
+    // **Invariants upheld.**
+    // (1) **Initialisation order.** All five cells are written exactly
+    //     once earlier in `kernel_entry`, before this block runs:
+    //     `PMM` (post-`mmu_bootstrap` PMM-init step); `MMU` and
+    //     `AS_ARENA` (T-018 AS-arena init step); `BOOTSTRAP_AS_TABLE`
+    //     and `BOOTSTRAP_AS_CAP` (bootstrap-AS-cap mint step). Each
+    //     `assume_init_*` therefore satisfies `MaybeUninit`'s
+    //     initialised-payload contract.
+    // (2) **No concurrent aliasing.** v1 is single-core + cooperative
+    //     and the scheduler has not been started yet (`SCHED` is not
+    //     written and `start()` not invoked until far below this
+    //     block), so no peer task or interrupt handler can observe
+    //     the cells while this block runs.
+    // (3) **Scope-limited &mut.** The four `&mut`s (`pmm`, `table`,
+    //     `arena`, plus the `&` for `mmu` and the by-value copy for
+    //     `parent_cap`) are local `let` bindings inside the
+    //     `unsafe { ... }` expression. They drop at the closing
+    //     brace and do **not** cross any cooperative switch — the
+    //     borrow lifetimes are bounded by the single `load_image`
+    //     call inside this same block per ADR-0021's no-`&mut`-
+    //     across-switch discipline.
+    // (4) **Audit IDs.** Pattern is covered by UNSAFE-2026-0010
+    //     (`StaticCell`'s `Sync` marker + write-once contract) and
+    //     UNSAFE-2026-0014 (momentary `&mut` to just-initialised
+    //     state across the cooperative-switch boundary).
+    //
+    // **Why safer alternatives were rejected.** A `Box<Mutex<T>>` /
+    // `RwLock<T>` would require either a heap allocator (v1's
+    // bare-metal kernel has none) or a spin lock that is itself
+    // `unsafe` to construct + adds boot-time overhead with no
+    // soundness win under single-core cooperative semantics.
+    // `OnceCell` / `LazyCell` from `core` require a constructor
+    // closure invoked at access time, which cannot express the
+    // boot-flow ordering constraints this block depends on (PMM
+    // must be initialised before MMU before AS arena before
+    // cap-table). The `StaticCell` + write-once pattern is the
+    // minimal `Sync` shape that matches the actual boot semantics;
+    // every access path is `unsafe` so the audit log can name
+    // exactly which invariants each call site relies on.
+    let loaded = unsafe {
+        let pmm = (*PMM.0.get()).assume_init_mut();
+        let mmu = (*MMU.0.get()).assume_init_ref();
+        let table = (*BOOTSTRAP_AS_TABLE.0.get()).assume_init_mut();
+        let arena = (*AS_ARENA.0.get()).assume_init_mut();
+        let parent_cap = *(*BOOTSTRAP_AS_CAP.0.get()).assume_init_ref();
+        // `new_rights = CapRights::empty()` is intentional in v1: the
+        // address-space cap-rights model is **kind-only** today, not
+        // per-operation. `resolve_address_space_cap`'s doc-comment
+        // (`kernel/src/mm/address_space.rs`) records the v1 contract
+        // — "this helper checks the cap *kind* only — not the specific
+        // rights bits; per-operation rights (`MAP`, `UNMAP`, `ACTIVATE`)
+        // are deferred to B5+ and will require an ADR". The
+        // `CapRights` enum (`kernel/src/cap/rights.rs`) accordingly
+        // exposes `DUPLICATE / DERIVE / REVOKE / TRANSFER / SEND / RECV /
+        // NOTIFY` only — no `MAP` / `UNMAP` bit exists to pass here.
+        // When the future ADR introduces them, this call site updates
+        // to `CapRights::MAP | CapRights::UNMAP` (the minimum set the
+        // loader exercises on the new cap: `cap_map` for installs +
+        // `cap_unmap` for rollback); the change is purely additive at
+        // this site.
+        load_image(
+            USERSPACE_IMAGE,
+            pmm,
+            mmu,
+            table,
+            arena,
+            parent_cap,
+            CapRights::empty(),
+            VirtAddr(USERSPACE_IMAGE_BASE_VA),
+            USERSPACE_STACK_PAGES,
+        )
+        .expect("task_loader::load_image failed on BSP smoke")
+    };
+
+    {
+        let mut w = FmtWriter(console);
+        let _ = writeln!(
+            w,
+            "tyrne: image loaded (entry = {:#x}; sp = {:#x}; image bytes {}; stack bytes {}; AS cap = idx {})",
+            loaded.entry_va.0,
+            loaded.stack_top_va.0,
+            loaded.image_bytes,
+            loaded.stack_bytes,
+            loaded.as_cap.index(),
         );
     }
 

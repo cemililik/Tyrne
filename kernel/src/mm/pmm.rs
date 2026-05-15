@@ -128,6 +128,14 @@ pub struct Pmm<const N: usize, const R: usize> {
     reserved_count: usize,
     /// Cached `Allocated`-state counter.
     allocated_count: usize,
+    /// **Test-only failure injection.** When `Some(n)`, `alloc_frame`
+    /// returns `None` after `n` further successful calls; production
+    /// code has no setter for this field. Used by host tests in
+    /// `obj::task_loader::tests` to drive the structurally-unreachable-
+    /// in-v1 `LoadError::OutOfFrames` rollback path that is otherwise
+    /// guarded out by the loader's frame-budget preflight.
+    #[cfg(test)]
+    alloc_failure_after: Option<usize>,
 }
 
 impl<const N: usize, const R: usize> Pmm<N, R> {
@@ -268,6 +276,8 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
             free_count,
             reserved_count,
             allocated_count: 0,
+            #[cfg(test)]
+            alloc_failure_after: None,
         })
     }
 
@@ -320,6 +330,21 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
     ///
     /// [adr-0035]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0035-physical-memory-manager.md#simulation
     pub fn alloc_frame(&mut self) -> Option<PhysFrame> {
+        // Test-only failure injection (see `alloc_failure_after`'s
+        // doc-comment). Runs before the production body so a forced
+        // failure leaves the bitmap and counters byte-stable. The
+        // `#[cfg(test)]` gate keeps this branch out of production
+        // builds entirely.
+        #[cfg(test)]
+        {
+            if let Some(remaining) = self.alloc_failure_after.as_mut() {
+                if *remaining == 0 {
+                    return None;
+                }
+                *remaining = remaining.saturating_sub(1);
+            }
+        }
+
         let total_frames = self.extent.frame_count();
 
         // Forward scan from `hint`. v1 single-core cooperative
@@ -490,6 +515,126 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
         self.allocated_count = self.allocated_count.saturating_sub(1);
 
         Ok(())
+    }
+
+    /// Returns `true` if any byte of `pa_range` falls inside a PA that
+    /// [`alloc_frame`][Self::alloc_frame] could yield — i.e., inside
+    /// the managed `extent` AND outside every cached reserved range.
+    /// Returns `false` for empty ranges and ranges disjoint from the
+    /// extent.
+    ///
+    /// # Purpose
+    ///
+    /// Used by callers that hold an external pointer and need to prove
+    /// it cannot alias a future `alloc_frame()` return. The task
+    /// loader (see
+    /// [`obj::task_loader::load_image`][crate::obj::task_loader::load_image])
+    /// uses this query to discharge
+    /// [UNSAFE-2026-0027][unsafe-27]'s "source and destination do not
+    /// overlap" invariant at runtime rather than via BSP memory-layout
+    /// discipline (ADR-0027 + ADR-0035). The check treats
+    /// `pa_range`'s endpoints as physical addresses — correct under
+    /// v1's identity-mapped post-bootstrap kernel AS per
+    /// [ADR-0027 §Decision outcome (a)][adr-0027]; a future high-half
+    /// migration (ADR-0033 placeholder) introduces a `virt_to_phys`
+    /// helper at the loader's call site.
+    ///
+    /// # Conservatism (over-approximation)
+    ///
+    /// The helper queries the *extent + reserved-range* set only — it
+    /// does **not** consult the live bitmap to filter out frames that
+    /// are currently `Allocated`. An `Allocated` frame cannot be
+    /// returned by the very next `alloc_frame()` (the bitmap bit is
+    /// set), but the helper reports it as a candidate yield anyway.
+    /// This is *deliberate over-approximation*: an `Allocated` frame
+    /// becomes reachable as a yield candidate again the moment its
+    /// owner calls `free_frame` on it, so a staging region overlapping
+    /// such a frame is at risk over its lifetime. The conservative
+    /// "non-reserved frame ⇒ might be yielded" rule keeps the
+    /// soundness argument independent of allocation-timing reasoning.
+    ///
+    /// The production BSP wiring uses `.rodata`-resident images that
+    /// live entirely in PMM-reserved memory (kernel image range), so
+    /// the conservatism does not trip a real caller. Callers that
+    /// *intentionally* stage data in an `Allocated` PMM frame and
+    /// pass that PA to a `could_yield_pa_overlapping`-using helper
+    /// will see a false-positive rejection — they should either keep
+    /// the data in `.rodata` (the supported pattern) or build a
+    /// stricter helper that consults the bitmap.
+    ///
+    /// # Algorithm
+    ///
+    /// Clip `pa_range` to `extent`, then walk the covered frame
+    /// indices linearly; return `true` on the first frame whose PA is
+    /// not inside any populated `Some(_)` slot of `reserved_ranges`.
+    /// Worst-case `O((pa_range.len() / PAGE_SIZE) × populated_reserved)`;
+    /// for the loader's v1 placeholder (8-byte image, 1 frame of
+    /// coverage) this is a single iteration over at most `R` slots
+    /// (`R = 8` for `bsp-qemu-virt`).
+    ///
+    /// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
+    /// [unsafe-27]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
+    #[must_use]
+    pub fn could_yield_pa_overlapping(&self, pa_range: core::ops::Range<usize>) -> bool {
+        // Empty range cannot overlap anything.
+        if pa_range.start >= pa_range.end {
+            return false;
+        }
+        let extent_start = self.extent.start.0;
+        let extent_end = self.extent.end.0;
+        // Disjoint from extent → cannot overlap a yieldable frame.
+        if pa_range.end <= extent_start || pa_range.start >= extent_end {
+            return false;
+        }
+        // Clip to extent.
+        let clipped_start = if pa_range.start > extent_start {
+            pa_range.start
+        } else {
+            extent_start
+        };
+        let clipped_end = if pa_range.end < extent_end {
+            pa_range.end
+        } else {
+            extent_end
+        };
+        // Frame-index bounds: any frame whose PA range
+        // `[f, f + PAGE_SIZE)` overlaps `[clipped_start, clipped_end)`.
+        // Equivalently: start_idx is the frame containing `clipped_start`;
+        // end_idx is one past the frame containing `clipped_end - 1`.
+        let start_idx = clipped_start
+            .saturating_sub(extent_start)
+            .wrapping_div(PAGE_SIZE);
+        let end_idx = clipped_end
+            .saturating_sub(extent_start)
+            .saturating_add(PAGE_SIZE)
+            .saturating_sub(1)
+            .wrapping_div(PAGE_SIZE);
+        // Walk frame PAs; return true on first non-reserved frame.
+        for idx in start_idx..end_idx {
+            let frame_pa = extent_start.saturating_add(idx.saturating_mul(PAGE_SIZE));
+            let frame_addr = PhysAddr(frame_pa);
+            let in_reserved = self
+                .reserved_ranges
+                .iter()
+                .flatten()
+                .any(|r| r.contains(frame_addr));
+            if !in_reserved {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+#[cfg(test)]
+impl<const N: usize, const R: usize> Pmm<N, R> {
+    /// **Test-only.** Schedule [`alloc_frame`][Self::alloc_frame] to
+    /// start returning `None` after the next `n` successful calls.
+    /// Calling again replaces the prior schedule. Used by host tests
+    /// in `obj::task_loader::tests` to deterministically drive the
+    /// `OutOfFrames` rollback path; production code has no caller.
+    pub(crate) fn force_alloc_failure_after(&mut self, n: usize) {
+        self.alloc_failure_after = Some(n);
     }
 }
 
@@ -754,10 +899,30 @@ mod tests {
         let (_buf, ptr) = aligned_backing(16);
         // Pre-poison the backing with non-zero bytes so we can
         // assert the alloc actually zero-fills.
-        // SAFETY: ptr points to the head of a 16-frame
-        // PAGE_SIZE-aligned host-allocated Vec<u8> kept alive by
-        // _buf for the test's duration; the write covers exactly
-        // the Vec's payload range.
+        //
+        // SAFETY:
+        // (a) **Why unsafe is required.** `core::ptr::write_bytes` is
+        //     `unsafe fn` — the compiler cannot statically prove that
+        //     `ptr` points to `count` writable bytes; the obligation
+        //     falls on the caller.
+        // (b) **Invariants upheld.** `ptr` is the page-aligned head
+        //     of a host-allocated `Vec<u8>` of `(16 + 1) * 4096` bytes
+        //     (`aligned_backing`'s contract), kept alive by `_buf` for
+        //     the full duration of this test (the `_` prefix prevents
+        //     Rust from dropping the Vec early). The `16 * 4096`
+        //     write length lands entirely inside the Vec's payload
+        //     (alignment slack is at the head, not at the tail). No
+        //     other reference to the Vec's interior exists at this
+        //     point — `aligned_backing` returned the raw pointer
+        //     alongside the owning Vec, and we hold both bindings.
+        // (c) **Why a safer alternative was rejected.** Constructing
+        //     a `&mut [u8; 16 * 4096]` from the raw pointer would
+        //     itself require `unsafe` (`core::slice::from_raw_parts_mut`),
+        //     produce the same audit obligation, and add a wrapper
+        //     that hides the raw operation from reviewers. `write_bytes`
+        //     is the minimal expression of "fill PMM-backing host
+        //     memory with a poison pattern" for the zero-fill
+        //     regression test below.
         unsafe {
             core::ptr::write_bytes(ptr, 0xA5u8, 16 * 4096);
         }
@@ -771,9 +936,19 @@ mod tests {
         // Verify the returned frame is zeroed.
         let returned_ptr = frame.as_usize() as *const u8;
         for off in 0..4096 {
-            // SAFETY: returned_ptr is a PhysFrame the PMM just
-            // returned from the same backing buffer; reading the
-            // 4 KiB page is in-bounds for the host-allocated Vec.
+            // SAFETY:
+            // (a) The dereference `*returned_ptr.add(off)` requires
+            //     `unsafe` because raw-pointer reads are not
+            //     statically bounds-checked.
+            // (b) `returned_ptr` is the PA of a `PhysFrame` the PMM
+            //     just returned from the same `aligned_backing` Vec
+            //     this test owns (kept alive by `_buf`); the entire
+            //     4 KiB page is in-bounds for the host allocation,
+            //     and `off ∈ [0, 4096)` stays within that page.
+            // (c) Materialising a `&[u8; 4096]` slice would require
+            //     `slice::from_raw_parts` which is also `unsafe` and
+            //     hides the per-byte read pattern that's load-
+            //     bearing for the zero-fill assertion.
             let byte = unsafe { *returned_ptr.add(off) };
             assert_eq!(byte, 0u8, "alloc_frame must zero-fill (off={off})");
         }
@@ -945,6 +1120,57 @@ mod tests {
         let _f2 = provider.alloc_frame().expect("alloc 3");
         let _f3 = provider.alloc_frame().expect("alloc 4");
         assert_eq!(provider.alloc_frame(), None);
+    }
+
+    // ── `could_yield_pa_overlapping` conservatism regression ──────────────────
+
+    #[test]
+    fn could_yield_pa_overlapping_treats_allocated_frame_as_yieldable() {
+        // PR #31 review-round 5 P2 regression: the helper queries
+        // extent + reserved-ranges only — it deliberately does NOT
+        // consult the bitmap to filter out currently-`Allocated`
+        // frames. A staging region overlapping an Allocated frame is
+        // therefore reported as a yield candidate (conservative
+        // over-approximation), even though the very next
+        // `alloc_frame()` cannot return that exact frame until it is
+        // freed. The conservatism is load-bearing: the staged region
+        // becomes a yield candidate the moment the owner calls
+        // `free_frame`, so the soundness argument stays independent
+        // of allocation timing.
+        let (_buf, ptr) = aligned_backing(4);
+        let base = ptr as usize;
+        let mut pmm = pmm_over_backing(ptr, 4, &[]);
+
+        // Allocate frame 0; the bitmap bit at index 0 is now set,
+        // so `alloc_frame()` cannot return frame 0 again until it is
+        // freed.
+        let frame0 = pmm.alloc_frame().expect("alloc must succeed");
+        assert_eq!(frame0.as_usize(), base);
+        assert_eq!(pmm.stats().allocated_frames, 1);
+        assert_eq!(pmm.stats().free_frames, 3);
+
+        // The helper STILL reports frame 0 as a possible yield —
+        // because it doesn't consult the bitmap. This is the
+        // documented conservatism (over-approximation).
+        let allocated_range = base..base.saturating_add(4096);
+        assert!(
+            pmm.could_yield_pa_overlapping(allocated_range),
+            "helper must over-conservatively report an Allocated \
+             frame as a yield candidate (regardless of the live \
+             bitmap bit)"
+        );
+
+        // Reserved frames are excluded, so the conservatism does
+        // NOT extend to reserved-range coverage. Build a second PMM
+        // with frame 0 reserved (offset (0, 1) in frame-index terms)
+        // and check the negative case.
+        let (_buf2, ptr2) = aligned_backing(4);
+        let base2 = ptr2 as usize;
+        let pmm2 = pmm_over_backing(ptr2, 4, &[(0, 1)]);
+        assert!(
+            !pmm2.could_yield_pa_overlapping(base2..base2.saturating_add(4096)),
+            "helper must exclude reserved-range frames"
+        );
     }
 
     #[test]
