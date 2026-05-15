@@ -141,9 +141,9 @@ The loader's `unsafe` surface is **exactly one block** in `kernel/src/obj/task_l
 
 ## Test surface
 
-T-019's host-test coverage in `kernel/src/obj/task_loader.rs::tests` pins **every row of the §Simulation table** plus the **rollback contract** plus the **enum-variant taxonomy** plus the **intermediate-frame-budget helper**. The 33 tests decompose as:
+T-019's host-test coverage in `kernel/src/obj/task_loader.rs::tests` pins **every row of the §Simulation table** plus the **rollback contract** plus the **enum-variant taxonomy** plus the **intermediate-frame-budget helper**. The 34 tests decompose as:
 
-- §Simulation row 1: `rejects_empty_image`, `rejects_zero_stack`.
+- §Simulation row 1: `rejects_empty_image`, `rejects_zero_stack`, `rejects_misaligned_image_base_va_with_pmm_byte_stable`.
 - §Simulation row 2: `rejects_invalid_parent_cap_lookup`, `rejects_invalid_parent_cap_wrong_kind`.
 - §Simulation row 3 (VA-range, then frame-budget): `rejects_when_pmm_budget_exceeded`, `frame_budget_includes_root_plus_intermediates`, `rejects_image_base_va_past_userspace_va_limit`, `rejects_image_base_va_saturating_overflow`, `accepts_image_base_va_exactly_at_userspace_va_limit_minus_span`, `va_range_preflight_runs_before_frame_budget`.
 - §Simulation row 3 (intermediate-frame helper): `intermediate_frame_count_minimal_single_l2_slot`, `intermediate_frame_count_8mib_image_one_stack_page_crosses_five_l2`, `intermediate_frame_count_l1_boundary_crossing`, `intermediate_frame_count_zero_span_defensive`, `intermediate_frame_count_saturated_total_pages`.

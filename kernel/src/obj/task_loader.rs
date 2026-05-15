@@ -11,7 +11,8 @@
 //! ## Pipeline (§Simulation rows of T-019)
 //!
 //! 1. Argument preflight ([`LoadError::InvalidImage`] /
-//!    [`LoadError::InvalidStackSize`]).
+//!    [`LoadError::InvalidStackSize`] /
+//!    [`LoadError::MisalignedImageBaseVa`]).
 //! 2. Cap preflight: lookup + [`CapKind::AddressSpace`] kind check
 //!    ([`LoadError::InvalidParentCap`]). The DERIVE-rights check is
 //!    *delegated* to [`cap_create_address_space`]'s step 2a and
@@ -261,6 +262,19 @@ pub enum LoadError {
     /// `stack_size_pages == 0`. Pre-PMM preflight; no state change.
     InvalidStackSize,
 
+    /// `image_base_va` is not `PAGE_SIZE`-aligned. Pre-PMM preflight
+    /// rejects the request before any state change. Without this
+    /// check, the misalignment would surface only at the first
+    /// `cap_map` call inside the image-page loop — by which point
+    /// `cap_create_address_space` has already allocated the root L0
+    /// frame, which then leaks via the v1 baseline rollback. Per
+    /// PR #31 review-round 4 P2: the leak is preventable by argument
+    /// validation, so this variant takes precedence over the
+    /// `MapFailed(MmuMapError(MisalignedAddress))` path the loader
+    /// would otherwise return. The wrapped `VirtAddr` names the
+    /// offending base for diagnostics.
+    MisalignedImageBaseVa(VirtAddr),
+
     /// The requested VA span `[image_base_va, stack_top_va)` exceeds
     /// the architected userspace VA range
     /// `[0, USERSPACE_VA_LIMIT)`. Per
@@ -297,15 +311,19 @@ pub enum LoadError {
     InvalidParentCap(CapError),
 
     /// Frame-budget preflight: `1 + image_pages + stack_pages +
-    /// intermediate_budget` exceeds `pmm.stats().free_frames`. The
-    /// leading `1` accounts for the root L0 frame
-    /// `cap_create_address_space` will allocate; `intermediate_budget
-    /// = 6` is the safe upper bound for v1's fresh-AS scenario (up to
-    /// 3 intermediate frames per contiguous VA range × 2 ranges for
-    /// image + stack). Pre-PMM preflight; no state change.
+    /// intermediate_frame_count(...)` exceeds `pmm.stats().free_frames`.
+    /// The leading `1` accounts for the root L0 frame
+    /// `cap_create_address_space` will allocate;
+    /// [`intermediate_frame_count`] returns the **exact** distinct
+    /// L1/L2/L3 page-table-frame count for the requested VA span
+    /// (per `VMSAv8` 4-level index decomposition — *not* a hard-coded
+    /// constant, since the previous `INTERMEDIATE_FRAME_BUDGET = 6`
+    /// undercounted for image spans crossing more than one 2 MiB L2
+    /// slot per PR #31 review-round 3 Finding 1). Pre-PMM preflight;
+    /// no state change.
     FrameBudgetExceeded {
         /// Frames the loader would commit (root + image + stack +
-        /// intermediate upper bound).
+        /// exact intermediate count).
         needed: usize,
         /// Frames currently available per `pmm.stats().free_frames`.
         available: usize,
@@ -364,7 +382,8 @@ pub enum LoadError {
 /// state-machine specification. The sequence of fallible steps is:
 ///
 /// 1. Argument preflight ([`LoadError::InvalidImage`] /
-///    [`LoadError::InvalidStackSize`]).
+///    [`LoadError::InvalidStackSize`] /
+///    [`LoadError::MisalignedImageBaseVa`]).
 /// 2. Cap preflight: lookup + [`CapKind::AddressSpace`] kind check
 ///    ([`LoadError::InvalidParentCap`]).
 /// 3. VA-range preflight: the mapped span end
@@ -409,10 +428,9 @@ pub enum LoadError {
 /// - `new_rights`: rights set the new AS cap will carry.
 /// - `image_base_va`: VA at which the image's offset 0 lands. The
 ///   caller's userspace linker script dictates this. Must be
-///   `PAGE_SIZE`-aligned; the loader does **not** verify alignment
-///   here — `cap_map` rejects misaligned VAs with
-///   `MmuError::MisalignedAddress` which surfaces as
-///   [`LoadError::MapFailed`] (the rollback path correctly recovers).
+///   `PAGE_SIZE`-aligned — verified in row 1's argument preflight;
+///   misaligned bases return [`LoadError::MisalignedImageBaseVa`]
+///   before any state change.
 /// - `stack_size_pages`: stack-region size in `PAGE_SIZE`-multiples;
 ///   minimum 1.
 ///
@@ -477,6 +495,15 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
     }
     if stack_size_pages == 0 {
         return Err(LoadError::InvalidStackSize);
+    }
+    // PR #31 review-round 4 P2: an unaligned `image_base_va` would
+    // surface as `MmuError::MisalignedAddress` from the first cap_map
+    // call inside the image-page loop, but only *after*
+    // `cap_create_address_space` has allocated the root L0 frame
+    // (which then leaks via the v1 baseline rollback). Catch it at
+    // argument-preflight time to keep PMM byte-stable on rejection.
+    if !image_base_va.0.is_multiple_of(PAGE_SIZE) {
+        return Err(LoadError::MisalignedImageBaseVa(image_base_va));
     }
 
     // §Simulation row 2: cap preflight — lookup + kind check. The
@@ -1058,11 +1085,16 @@ mod tests {
         // Pin §Simulation row 3 VA-range preflight: a near-usize::MAX
         // `image_base_va` whose span-end saturates is rejected with
         // `end == VirtAddr(usize::MAX)` as the documented sentinel.
-        // PMM untouched.
+        // PMM untouched. Base is page-aligned so the row-1 alignment
+        // preflight (added in PR #31 review-round 4 P2) does not
+        // intercept the overflow path.
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(16);
         let pmm_before = pmm.stats().free_frames;
 
-        let bad_base = VirtAddr(usize::MAX - PAGE_SIZE);
+        // `usize::MAX & !(PAGE_SIZE - 1)` = `0xFFFF_FFFF_FFFF_F000` —
+        // page-aligned, but `base + 2 * PAGE_SIZE` saturates past
+        // `usize::MAX`.
+        let bad_base = VirtAddr(usize::MAX & !(PAGE_SIZE - 1));
         let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
             &[0xAAu8; PAGE_SIZE],
             &mut pmm,
@@ -1336,6 +1368,15 @@ mod tests {
         assert_eq!(pmm.stats().free_frames, pmm_before);
     }
 
+    /// `.rodata`-resident image used by `accepts_image_disjoint_from_pmm_extent`.
+    /// Lives in the test binary's read-only data segment and is therefore
+    /// **structurally disjoint** from any heap allocation the host
+    /// allocator might choose for the fixture's PMM backing — no chance
+    /// of overlap, no host-allocator-dependent skip path. Mirrors the
+    /// production BSP wiring shape (`static USERSPACE_IMAGE: &[u8] =
+    /// ...` in `bsp-qemu-virt/src/main.rs`).
+    static DISJOINT_RODATA_IMAGE: [u8; 8] = [0xAAu8; 8];
+
     #[test]
     fn accepts_image_disjoint_from_pmm_extent() {
         // Negative companion to the overlap test: an image whose PA
@@ -1344,26 +1385,32 @@ mod tests {
         // cleanly. Confirms the preflight is precise (does not
         // false-positive on `.rodata`-resident images, which is the
         // production BSP wiring shape).
+        //
+        // PR #31 review-round 4 P3: previously this test used a
+        // heap-allocated `Vec` for `image` and silently `return`-ed
+        // (passing without asserting) when the host allocator happened
+        // to place the Vec inside the PMM-extent host-backing region.
+        // Switched to a `.rodata`-resident `static` so disjointness is
+        // structurally guaranteed and any future drift surfaces as a
+        // hard assertion failure rather than a silent skip.
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(16);
 
-        // A heap-allocated image whose address is NOT inside the
-        // fixture's PMM extent. Modern allocators put `Vec` payloads
-        // far from the host's aligned backing region the fixture
-        // carves out.
-        let image: Vec<u8> = vec![0xAAu8; 8];
+        let image: &[u8] = &DISJOINT_RODATA_IMAGE;
         let image_pa = image.as_ptr() as usize;
         let extent_start = pmm.extent().start.0;
         let extent_end = pmm.extent().end.0;
-        // Sanity: if the host allocator happens to put `image` inside
-        // the PMM extent, the test premise is invalid — skip with a
-        // soft failure rather than asserting a runtime allocator
-        // behaviour.
-        if image_pa >= extent_start && image_pa < extent_end {
-            return;
-        }
+        // Premise check — fail loudly if `.rodata` ever lands inside
+        // the fixture's heap-backed PMM extent (would indicate a
+        // toolchain or fixture-construction regression, not a
+        // legitimate test pass).
+        assert!(
+            image_pa < extent_start || image_pa >= extent_end,
+            "test premise broken: `.rodata` image PA {image_pa:#x} \
+             is inside PMM extent [{extent_start:#x}, {extent_end:#x})"
+        );
 
         let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
-            &image,
+            image,
             &mut pmm,
             &mmu,
             &mut table,
@@ -1901,15 +1948,22 @@ mod tests {
     }
 
     #[test]
-    fn rolls_back_on_misaligned_image_base_va() {
-        // Sanity test for the rollback path on the *first* cap_map call:
-        // a misaligned image_base_va surfaces from FakeMmu (which
-        // mirrors the real Mmu contract) as MmuError::MisalignedAddress
-        // → MapFailed. Rollback at this point has image_pages_mapped=0
-        // and stack_pages_mapped=0, so only the failing leaf frame and
-        // the AS cap drop matter; nothing else to unmap.
+    fn rejects_misaligned_image_base_va_with_pmm_byte_stable() {
+        // Pin PR #31 review-round 4 P2: a misaligned `image_base_va`
+        // is rejected by the row-1 argument preflight, **before** any
+        // `cap_create_address_space` call. PMM must be byte-stable on
+        // return (no root L0 frame leaked); cap table free-list also
+        // unchanged.
+        //
+        // Pre-fix, the misalignment surfaced as
+        // `MapFailed(MmuMapError(MisalignedAddress))` from the first
+        // cap_map call inside the image-page loop — by which point
+        // `cap_create_address_space` had already allocated the root
+        // L0 frame, leaking it via the v1 baseline rollback. The new
+        // preflight prevents that leak entirely.
         let (mut table, parent_cap, mmu, mut arena, mut pmm, _b) = fixture(32);
         let pmm_before = pmm.stats().free_frames;
+        let bad_base = VirtAddr(0x0080_0001); // off-by-one byte
 
         let result = load_image::<FakeMmu, TEST_PMM_N, TEST_PMM_R>(
             &[0xAAu8; 2 * PAGE_SIZE],
@@ -1919,22 +1973,24 @@ mod tests {
             &mut arena,
             parent_cap,
             CapRights::empty(),
-            VirtAddr(0x0080_0001), // off-by-one byte
+            bad_base,
             2,
         );
 
-        assert!(
-            matches!(
-                result,
-                Err(LoadError::MapFailed(AddressSpaceError::MmuMapError(
-                    MmuError::MisalignedAddress
-                )))
-            ),
-            "expected MapFailed(MisalignedAddress), got {result:?}"
+        assert_eq!(
+            result,
+            Err(LoadError::MisalignedImageBaseVa(bad_base)),
+            "misaligned base must surface as MisalignedImageBaseVa, \
+             not MapFailed(MisalignedAddress)"
         );
-
-        // Net leak: 1 root L0 frame; the failing leaf frame is freed.
-        assert_eq!(pmm.stats().free_frames, pmm_before - 1);
+        // No PMM mutation: the preflight catches the misalignment
+        // before any `pmm.alloc_frame` (including the root L0 alloc
+        // inside `cap_create_address_space`).
+        assert_eq!(
+            pmm.stats().free_frames,
+            pmm_before,
+            "PMM must be byte-stable on misaligned-base rejection"
+        );
     }
 
     // ── Variant-shape regression (carried forward from commit 1) ─────────────
@@ -1980,13 +2036,14 @@ mod tests {
 
     #[test]
     fn load_error_variants_pattern_match_exhaustively() {
-        // Pin the 9-variant taxonomy. `#[non_exhaustive]` only forces
+        // Pin the 10-variant taxonomy. `#[non_exhaustive]` only forces
         // external (out-of-crate) consumers to add a wildcard arm;
         // within-crate exhaustiveness still fires. Adding a variant
         // breaks this test at compile time.
         let cases = [
             LoadError::InvalidImage,
             LoadError::InvalidStackSize,
+            LoadError::MisalignedImageBaseVa(VirtAddr(0x0080_0001)),
             LoadError::InvalidImageBaseVa {
                 base: VirtAddr(0xFFFF_FFFF_FFFF_0000),
                 end: VirtAddr(usize::MAX),
@@ -2005,6 +2062,7 @@ mod tests {
             match err {
                 LoadError::InvalidImage
                 | LoadError::InvalidStackSize
+                | LoadError::MisalignedImageBaseVa(_)
                 | LoadError::InvalidImageBaseVa { .. }
                 | LoadError::InvalidParentCap(_)
                 | LoadError::FrameBudgetExceeded { .. }
@@ -2028,6 +2086,18 @@ mod tests {
         assert_ne!(
             LoadError::ImageOverlapsAllocatableMemory,
             LoadError::InvalidImage,
+        );
+        assert_ne!(
+            LoadError::MisalignedImageBaseVa(VirtAddr(0x0080_0001)),
+            LoadError::MisalignedImageBaseVa(VirtAddr(0x0080_0002)),
+        );
+        // Different variants both wrapping a VirtAddr stay distinct.
+        assert_ne!(
+            LoadError::MisalignedImageBaseVa(VirtAddr(0x0080_0001)),
+            LoadError::InvalidImageBaseVa {
+                base: VirtAddr(0x0080_0001),
+                end: VirtAddr(usize::MAX),
+            },
         );
         assert_ne!(
             LoadError::InvalidParentCap(CapError::InvalidHandle),
