@@ -974,13 +974,55 @@ pub extern "C" fn kernel_entry() -> ! {
     // the introducing site for UNSAFE-2026-0027 (the loader's
     // copy_nonoverlapping byte-copy).
     //
-    // SAFETY: PMM, MMU, AS_ARENA, BOOTSTRAP_AS_TABLE, and
-    // BOOTSTRAP_AS_CAP were each written above before this block
-    // runs; single-core cooperative, no peer borrow exists. The
-    // momentary `&mut` references drop at scope exit and do not
-    // cross any cooperative switch (scheduler is not yet started).
-    // Audit: UNSAFE-2026-0010 (StaticCell pattern) +
-    // UNSAFE-2026-0014 (momentary `&mut` to just-initialised state).
+    // SAFETY:
+    // **Why unsafe is required.** The block materialises momentary
+    // `&mut`/`&` references to the five write-once static cells
+    // `PMM` / `MMU` / `AS_ARENA` / `BOOTSTRAP_AS_TABLE` /
+    // `BOOTSTRAP_AS_CAP` via `assume_init_{mut,ref}` on
+    // `MaybeUninit<T>`. The compiler cannot prove these cells are
+    // already initialised at this point, nor that no concurrent peer
+    // holds an alias — that reasoning lives in the BSP boot flow's
+    // initialisation order and the v1 single-core cooperative model.
+    //
+    // **Invariants upheld.**
+    // (1) **Initialisation order.** All five cells are written exactly
+    //     once earlier in `kernel_entry`, before this block runs:
+    //     `PMM` (post-`mmu_bootstrap` PMM-init step); `MMU` and
+    //     `AS_ARENA` (T-018 AS-arena init step); `BOOTSTRAP_AS_TABLE`
+    //     and `BOOTSTRAP_AS_CAP` (bootstrap-AS-cap mint step). Each
+    //     `assume_init_*` therefore satisfies `MaybeUninit`'s
+    //     initialised-payload contract.
+    // (2) **No concurrent aliasing.** v1 is single-core + cooperative
+    //     and the scheduler has not been started yet (`SCHED` is not
+    //     written and `start()` not invoked until far below this
+    //     block), so no peer task or interrupt handler can observe
+    //     the cells while this block runs.
+    // (3) **Scope-limited &mut.** The four `&mut`s (`pmm`, `table`,
+    //     `arena`, plus the `&` for `mmu` and the by-value copy for
+    //     `parent_cap`) are local `let` bindings inside the
+    //     `unsafe { ... }` expression. They drop at the closing
+    //     brace and do **not** cross any cooperative switch — the
+    //     borrow lifetimes are bounded by the single `load_image`
+    //     call inside this same block per ADR-0021's no-`&mut`-
+    //     across-switch discipline.
+    // (4) **Audit IDs.** Pattern is covered by UNSAFE-2026-0010
+    //     (`StaticCell`'s `Sync` marker + write-once contract) and
+    //     UNSAFE-2026-0014 (momentary `&mut` to just-initialised
+    //     state across the cooperative-switch boundary).
+    //
+    // **Why safer alternatives were rejected.** A `Box<Mutex<T>>` /
+    // `RwLock<T>` would require either a heap allocator (v1's
+    // bare-metal kernel has none) or a spin lock that is itself
+    // `unsafe` to construct + adds boot-time overhead with no
+    // soundness win under single-core cooperative semantics.
+    // `OnceCell` / `LazyCell` from `core` require a constructor
+    // closure invoked at access time, which cannot express the
+    // boot-flow ordering constraints this block depends on (PMM
+    // must be initialised before MMU before AS arena before
+    // cap-table). The `StaticCell` + write-once pattern is the
+    // minimal `Sync` shape that matches the actual boot semantics;
+    // every access path is `unsafe` so the audit log can name
+    // exactly which invariants each call site relies on.
     let loaded = unsafe {
         let pmm = (*PMM.0.get()).assume_init_mut();
         let mmu = (*MMU.0.get()).assume_init_ref();

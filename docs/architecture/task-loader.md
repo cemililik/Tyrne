@@ -150,7 +150,7 @@ T-019's host-test coverage in `kernel/src/obj/task_loader.rs::tests` pins **ever
 - §Simulation row 4 (image-PA-overlap preflight): `rejects_when_image_overlaps_allocatable_memory`, `accepts_image_disjoint_from_pmm_extent`.
 - §Simulation row 5 (DERIVE delegation + happy-path cap mint): `missing_derive_surfaces_via_address_space_creation_failed`, `returns_loaded_image_with_correct_metadata`.
 - §Simulation rows 6–8 (happy path + per-region flag pins): `stack_top_va_is_one_past_highest_mapped`, `maps_image_pages_with_user_execute_flags`, `maps_stack_with_user_write_flags`, `tail_zeroing_on_partial_last_page`.
-- §Rollback contract: `rolls_back_on_cap_map_failure_mid_image_loop`, `rolls_back_on_pmm_exhausted_mid_image_loop`, `rolls_back_on_cap_map_failure_mid_stack_loop`, `rolls_back_on_misaligned_image_base_va`, `rollback_helper_zero_pages_only_drops_cap`.
+- §Rollback contract: `rolls_back_on_cap_map_failure_mid_image_loop`, `rolls_back_on_pmm_exhausted_mid_image_loop`, `rolls_back_on_cap_map_failure_mid_stack_loop`, `rejects_misaligned_image_base_va_with_pmm_byte_stable` (no-rollback-needed case: row-1 alignment preflight catches the misalignment before any state change — pins the "PMM byte-stable" leg of the contract), `rollback_helper_zero_pages_only_drops_cap`.
 - Variant taxonomy: `loaded_image_struct_literal_round_trips_through_copy_and_eq`, `loaded_image_distinguishes_different_field_values`, `load_error_variants_pattern_match_exhaustively`, `load_error_variants_are_distinct`, `load_error_frame_budget_exceeded_fields_round_trip`.
 
 The mid-loop-failure tests use two test-only injection mechanisms:

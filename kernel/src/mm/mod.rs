@@ -118,18 +118,47 @@ pub use pmm::{Pmm, PmmError, PmmStats};
 /// ## Forward-compat note
 ///
 /// When [ADR-0033 placeholder][adr-0027] opens and the kernel moves
-/// to a high-half virtual layout, this function's body grows to
-/// `KERNEL_PHYS_BASE.checked_add(frame.as_usize()).expect(...)` or
-/// similar; every call site keeps working without source changes.
-/// The audit-log entries that cite "identity mapping post-MMU per
-/// ADR-0027" (UNSAFE-2026-0026, UNSAFE-2026-0027) gain a "lifted via
-/// ADR-0033 migration on date X" Amendment at the same commit. The
-/// PMM's existing `core::ptr::write_bytes` site
-/// ([`kernel/src/mm/pmm.rs`](pmm.rs)) is the second adopter — its
-/// safety comment already names the future-migration plan; the
+/// to a high-half virtual layout, this function's body grows to a
+/// `KERNEL_PHYS_BASE`-rebased translation; every call site keeps
+/// working without source changes. The kernel crate denies
+/// `clippy::expect_used` / `clippy::unwrap_used` / `clippy::panic`,
+/// so the future migration cannot adopt an `.expect(...)`-style
+/// snippet (a copy-pasted example would lint-fail). The intended
+/// shape is a `checked_add` with a `debug_assert!` + fallback —
+/// either of:
+///
+/// ```ignore
+/// // Pattern A — branch on the overflow path (no panic in release).
+/// KERNEL_PHYS_BASE
+///     .checked_add(frame.as_usize())
+///     .unwrap_or_else(|| {
+///         debug_assert!(
+///             false,
+///             "ADR-0033: KERNEL_PHYS_BASE + frame PA overflows usize"
+///         );
+///         // Fall back to the unchecked value — the debug_assert
+///         // catches the overflow in development; release builds
+///         // produce a deterministic value rather than a panic.
+///         KERNEL_PHYS_BASE.wrapping_add(frame.as_usize())
+///     }) as *mut u8
+///
+/// // Pattern B — saturating arithmetic, matches the rest of the
+/// // kernel's clippy::arithmetic_side_effects discipline.
+/// KERNEL_PHYS_BASE.saturating_add(frame.as_usize()) as *mut u8
+/// ```
+///
+/// Both are lint-clean against the workspace's pedantic + kernel-
+/// extra denies. The audit-log entries that cite "identity mapping
+/// post-MMU per ADR-0027" ([UNSAFE-2026-0026], [UNSAFE-2026-0027])
+/// gain a "lifted via ADR-0033 migration on date X" Amendment at
+/// the same commit. The PMM's existing `core::ptr::write_bytes`
+/// site ([`kernel/src/mm/pmm.rs`](pmm.rs)) is the second adopter —
+/// its safety comment already names the future-migration plan; the
 /// physical PMM site will route through this helper at the same
 /// commit ADR-0033 lands (kept inline today to avoid churning the
 /// audit-log entries that landed with T-017).
+///
+/// [UNSAFE-2026-0026]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
 ///
 /// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
 /// [UNSAFE-2026-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
