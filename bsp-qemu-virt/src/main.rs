@@ -315,11 +315,13 @@ static USERSPACE_IMAGE: &[u8] = &[0x40, 0x05, 0x80, 0x52, 0xc0, 0x03, 0x5f, 0xd6
 
 /// Base VA the loader places the image at — userspace VA range per
 /// [ADR-0027 §Decision outcome (a)][adr-0027]'s `TTBR0_EL1` range.
-/// `0x0080_0000` (8 MiB) matches the layout shape `bsp-qemu-virt`'s
-/// `linker.ld` uses for the kernel image (which lives at PA
-/// `0x4008_0000` = 128.5 MiB into PA-space; userspace VA `0x0080_0000`
-/// mirrors the 0.5 MiB-into-segment offset). Hard-coded for the
-/// placeholder blob; B6's `userland` linker script picks the real VA.
+/// `0x0080_0000` (8 MiB) is a pragmatic, page-aligned userspace VA:
+/// well clear of the null-page guard region used to trap dereferences,
+/// far below `USERSPACE_VA_LIMIT` (= `1 << 48`) so no overflow concern
+/// arises for placeholder-sized image+stack spans, and structurally
+/// aligned at the 8 MiB boundary which simplifies any mental arithmetic
+/// reading the smoke trace. Hard-coded for the placeholder blob; B6's
+/// `userland` linker script picks the real VA.
 ///
 /// [adr-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0027-kernel-virtual-memory-layout.md
 const USERSPACE_IMAGE_BASE_VA: usize = 0x0080_0000;

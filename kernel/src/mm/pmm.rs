@@ -539,6 +539,29 @@ impl<const N: usize, const R: usize> Pmm<N, R> {
     /// migration (ADR-0033 placeholder) introduces a `virt_to_phys`
     /// helper at the loader's call site.
     ///
+    /// # Conservatism (over-approximation)
+    ///
+    /// The helper queries the *extent + reserved-range* set only — it
+    /// does **not** consult the live bitmap to filter out frames that
+    /// are currently `Allocated`. An `Allocated` frame cannot be
+    /// returned by the very next `alloc_frame()` (the bitmap bit is
+    /// set), but the helper reports it as a candidate yield anyway.
+    /// This is *deliberate over-approximation*: an `Allocated` frame
+    /// becomes reachable as a yield candidate again the moment its
+    /// owner calls `free_frame` on it, so a staging region overlapping
+    /// such a frame is at risk over its lifetime. The conservative
+    /// "non-reserved frame ⇒ might be yielded" rule keeps the
+    /// soundness argument independent of allocation-timing reasoning.
+    ///
+    /// The production BSP wiring uses `.rodata`-resident images that
+    /// live entirely in PMM-reserved memory (kernel image range), so
+    /// the conservatism does not trip a real caller. Callers that
+    /// *intentionally* stage data in an `Allocated` PMM frame and
+    /// pass that PA to a `could_yield_pa_overlapping`-using helper
+    /// will see a false-positive rejection — they should either keep
+    /// the data in `.rodata` (the supported pattern) or build a
+    /// stricter helper that consults the bitmap.
+    ///
     /// # Algorithm
     ///
     /// Clip `pa_range` to `extent`, then walk the covered frame
@@ -1067,6 +1090,57 @@ mod tests {
         let _f2 = provider.alloc_frame().expect("alloc 3");
         let _f3 = provider.alloc_frame().expect("alloc 4");
         assert_eq!(provider.alloc_frame(), None);
+    }
+
+    // ── `could_yield_pa_overlapping` conservatism regression ──────────────────
+
+    #[test]
+    fn could_yield_pa_overlapping_treats_allocated_frame_as_yieldable() {
+        // PR #31 review-round 5 P2 regression: the helper queries
+        // extent + reserved-ranges only — it deliberately does NOT
+        // consult the bitmap to filter out currently-`Allocated`
+        // frames. A staging region overlapping an Allocated frame is
+        // therefore reported as a yield candidate (conservative
+        // over-approximation), even though the very next
+        // `alloc_frame()` cannot return that exact frame until it is
+        // freed. The conservatism is load-bearing: the staged region
+        // becomes a yield candidate the moment the owner calls
+        // `free_frame`, so the soundness argument stays independent
+        // of allocation timing.
+        let (_buf, ptr) = aligned_backing(4);
+        let base = ptr as usize;
+        let mut pmm = pmm_over_backing(ptr, 4, &[]);
+
+        // Allocate frame 0; the bitmap bit at index 0 is now set,
+        // so `alloc_frame()` cannot return frame 0 again until it is
+        // freed.
+        let frame0 = pmm.alloc_frame().expect("alloc must succeed");
+        assert_eq!(frame0.as_usize(), base);
+        assert_eq!(pmm.stats().allocated_frames, 1);
+        assert_eq!(pmm.stats().free_frames, 3);
+
+        // The helper STILL reports frame 0 as a possible yield —
+        // because it doesn't consult the bitmap. This is the
+        // documented conservatism (over-approximation).
+        let allocated_range = base..base.saturating_add(4096);
+        assert!(
+            pmm.could_yield_pa_overlapping(allocated_range),
+            "helper must over-conservatively report an Allocated \
+             frame as a yield candidate (regardless of the live \
+             bitmap bit)"
+        );
+
+        // Reserved frames are excluded, so the conservatism does
+        // NOT extend to reserved-range coverage. Build a second PMM
+        // with frame 0 reserved (offset (0, 1) in frame-index terms)
+        // and check the negative case.
+        let (_buf2, ptr2) = aligned_backing(4);
+        let base2 = ptr2 as usize;
+        let pmm2 = pmm_over_backing(ptr2, 4, &[(0, 1)]);
+        assert!(
+            !pmm2.could_yield_pa_overlapping(base2..base2.saturating_add(4096)),
+            "helper must exclude reserved-range frames"
+        );
     }
 
     #[test]

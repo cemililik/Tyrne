@@ -56,11 +56,11 @@
 //! kernel mappings, so an EL1 exception while the AS is active would
 //! translation-fault on the vector fetch). The `task_create_from_image`
 //! wrapper that turns a [`LoadedImage`] into a runnable task cap lands
-//! with B5 (syscall ABI per [ADR-0030][adr-0030]) and B6 (first
-//! userspace "hello") per [phase-b §B4 §Revision-notes][phase-b-b4-rider].
+//! with B5 (syscall ABI — placeholder slot ADR-0030; not yet authored)
+//! and B6 (first userspace "hello") per
+//! [phase-b §B4 §Revision-notes][phase-b-b4-rider].
 //!
 //! [adr-0029]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0029-initial-userspace-image-format.md
-//! [adr-0030]: https://github.com/cemililik/Tyrne/blob/main/docs/decisions/0030-syscall-abi.md
 //! [t-019]: https://github.com/cemililik/Tyrne/blob/main/docs/analysis/tasks/phase-b/T-019-task-loader.md
 //! [phase-b-b4-rider]: https://github.com/cemililik/Tyrne/blob/main/docs/roadmap/phases/phase-b.md#milestone-b4--task-loader
 
@@ -679,10 +679,15 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
             frame,
             MappingFlags::USER | MappingFlags::EXECUTE,
         ) {
-            // The just-alloc'd frame was NOT moved into the AS (cap_map
-            // returned Err before installing); free it directly so it
-            // doesn't leak. Previously-mapped pages roll back via the
-            // helper below.
+            // Per [`tyrne_hal::Mmu::map`]'s failure-semantics contract
+            // (clause 2: "`pa` is not consumed on Err"), the leaf
+            // frame `frame` is still owned by this stack frame after
+            // the failed `cap_map`. Free it directly so it doesn't
+            // leak. Previously-mapped pages roll back via the helper
+            // below. **If a future BSP `Mmu::map` impl violates clause
+            // 2**, this `pmm.free_frame` would alias a still-mapped
+            // frame — the trait contract is the load-bearing safety
+            // argument here.
             let _ = pmm.free_frame(frame);
             rollback(
                 table,
@@ -729,6 +734,10 @@ pub fn load_image<M: Mmu, const N: usize, const R: usize>(
             frame,
             MappingFlags::USER | MappingFlags::WRITE,
         ) {
+            // See image-loop equivalent above: `pa` is not consumed
+            // on Err per `tyrne_hal::Mmu::map`'s failure-semantics
+            // contract (clause 2). Free the leaf frame; previous
+            // mappings unwind via `rollback` below.
             let _ = pmm.free_frame(frame);
             rollback(
                 table,

@@ -104,7 +104,7 @@ This is sufficient to exercise the loader's `cap_create_address_space` + `cap_ma
 
 ## Userspace VA layout
 
-T-019 uses `0x0080_0000` (8 MiB) as the userspace `image_base_va`. The choice is bounded by [ADR-0027 §Decision outcome (a)](../decisions/0027-kernel-virtual-memory-layout.md)'s `TTBR0_EL1` range (the full 48-bit userspace VA space) and pragmatically chosen for symmetry with the kernel image's PA layout (`linker.ld` places the kernel at PA `0x4008_0000` = 0.5 MiB into the kernel reservation; `0x0080_0000` mirrors this offset in userspace VA).
+T-019 uses `0x0080_0000` (8 MiB) as the userspace `image_base_va`. The choice is bounded by [ADR-0027 §Decision outcome (a)](../decisions/0027-kernel-virtual-memory-layout.md)'s `TTBR0_EL1` range (the full 48-bit userspace VA space) and pragmatically picked: page-aligned, well clear of the null-page guard region, structurally aligned at the 8 MiB boundary which simplifies the mental arithmetic reading the smoke trace (`entry = 0x800000; sp = 0x802000`), and far enough below `USERSPACE_VA_LIMIT` that no overflow concern arises for the placeholder image+stack span. Not algebraically derived from the kernel image's PA layout — earlier doc revisions claimed a "mirrors the kernel's `0x4008_0000` offset" rationale that does not check out mathematically (kernel offset within the RAM segment is 0.5 MiB, not 8 MiB); the claim has been retired.
 
 The stack region follows the image contiguously: `stack_base = image_base_va + image_pages * PAGE_SIZE`. `stack_top_va = stack_base + stack_size_pages * PAGE_SIZE` is **one-past-the-highest** mapped VA (half-open `[stack_base, stack_top_va)` convention). `sp = stack_top_va` at task-creation initialisation is correct because the first userspace push (e.g. `sp -= 16`) lands inside the mapped range — matches the AAPCS64 convention.
 
@@ -141,7 +141,7 @@ The loader's `unsafe` surface is **exactly one block** in `kernel/src/obj/task_l
 
 ## Test surface
 
-T-019's host-test coverage in `kernel/src/obj/task_loader.rs::tests` pins **every row of the §Simulation table** plus the **rollback contract** plus the **enum-variant taxonomy** plus the **intermediate-frame-budget helper**. The 34 tests decompose as:
+T-019's host-test coverage in `kernel/src/obj/task_loader.rs::tests` pins **every row of the §Simulation table** plus the **rollback contract** plus the **enum-variant taxonomy** plus the **intermediate-frame-budget helper**. The 33 tests decompose as:
 
 - §Simulation row 1: `rejects_empty_image`, `rejects_zero_stack`, `rejects_misaligned_image_base_va_with_pmm_byte_stable`.
 - §Simulation row 2: `rejects_invalid_parent_cap_lookup`, `rejects_invalid_parent_cap_wrong_kind`.
