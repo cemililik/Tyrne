@@ -899,10 +899,30 @@ mod tests {
         let (_buf, ptr) = aligned_backing(16);
         // Pre-poison the backing with non-zero bytes so we can
         // assert the alloc actually zero-fills.
-        // SAFETY: ptr points to the head of a 16-frame
-        // PAGE_SIZE-aligned host-allocated Vec<u8> kept alive by
-        // _buf for the test's duration; the write covers exactly
-        // the Vec's payload range.
+        //
+        // SAFETY:
+        // (a) **Why unsafe is required.** `core::ptr::write_bytes` is
+        //     `unsafe fn` — the compiler cannot statically prove that
+        //     `ptr` points to `count` writable bytes; the obligation
+        //     falls on the caller.
+        // (b) **Invariants upheld.** `ptr` is the page-aligned head
+        //     of a host-allocated `Vec<u8>` of `(16 + 1) * 4096` bytes
+        //     (`aligned_backing`'s contract), kept alive by `_buf` for
+        //     the full duration of this test (the `_` prefix prevents
+        //     Rust from dropping the Vec early). The `16 * 4096`
+        //     write length lands entirely inside the Vec's payload
+        //     (alignment slack is at the head, not at the tail). No
+        //     other reference to the Vec's interior exists at this
+        //     point — `aligned_backing` returned the raw pointer
+        //     alongside the owning Vec, and we hold both bindings.
+        // (c) **Why a safer alternative was rejected.** Constructing
+        //     a `&mut [u8; 16 * 4096]` from the raw pointer would
+        //     itself require `unsafe` (`core::slice::from_raw_parts_mut`),
+        //     produce the same audit obligation, and add a wrapper
+        //     that hides the raw operation from reviewers. `write_bytes`
+        //     is the minimal expression of "fill PMM-backing host
+        //     memory with a poison pattern" for the zero-fill
+        //     regression test below.
         unsafe {
             core::ptr::write_bytes(ptr, 0xA5u8, 16 * 4096);
         }
@@ -916,9 +936,19 @@ mod tests {
         // Verify the returned frame is zeroed.
         let returned_ptr = frame.as_usize() as *const u8;
         for off in 0..4096 {
-            // SAFETY: returned_ptr is a PhysFrame the PMM just
-            // returned from the same backing buffer; reading the
-            // 4 KiB page is in-bounds for the host-allocated Vec.
+            // SAFETY:
+            // (a) The dereference `*returned_ptr.add(off)` requires
+            //     `unsafe` because raw-pointer reads are not
+            //     statically bounds-checked.
+            // (b) `returned_ptr` is the PA of a `PhysFrame` the PMM
+            //     just returned from the same `aligned_backing` Vec
+            //     this test owns (kept alive by `_buf`); the entire
+            //     4 KiB page is in-bounds for the host allocation,
+            //     and `off ∈ [0, 4096)` stays within that page.
+            // (c) Materialising a `&[u8; 4096]` slice would require
+            //     `slice::from_raw_parts` which is also `unsafe` and
+            //     hides the per-byte read pattern that's load-
+            //     bearing for the zero-fill assertion.
             let byte = unsafe { *returned_ptr.add(off) };
             assert_eq!(byte, 0u8, "alloc_frame must zero-fill (off={off})");
         }

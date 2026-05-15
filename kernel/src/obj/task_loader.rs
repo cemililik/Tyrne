@@ -903,8 +903,39 @@ mod tests {
         // Bootstrap AS slot wraps a fake inner; not exercised at runtime
         // — only used to mint the AS-kind cap the loader's preflight
         // accepts and that cap_create_address_space derives from.
-        // SAFETY: FakeMmu::create_address_space is pure host code with
-        // no UB; the input frame is page-aligned by construction.
+        //
+        // SAFETY:
+        // (a) **Why unsafe is required.** [`tyrne_hal::Mmu::create_address_space`]
+        //     is declared `unsafe fn` at the HAL trait surface
+        //     (ADR-0009): the trait contract demands callers prove
+        //     `root` is page-aligned + zero-initialised + exclusively
+        //     owned. The compiler cannot infer that from the call
+        //     site; the `unsafe` token is the manual proof obligation.
+        // (b) **Invariants upheld.** (i) `frame(0x4000_0000)` is
+        //     page-aligned by `PhysFrame::from_aligned`'s static
+        //     check. (ii) [`tyrne_test_hal::FakeMmu::create_address_space`]
+        //     is **pure host-side Rust**: it stores `root` in a
+        //     `HashMap`-backed mock and never dereferences it as a
+        //     pointer, so the alignment/zero-fill/exclusivity
+        //     invariants are vacuously satisfied — `FakeMmu` doesn't
+        //     read the frame's PA at all. (iii) Single-threaded test
+        //     execution; no peer caller observes `mmu` between this
+        //     call and its consumption by `wrap_bootstrap` below.
+        // (c) **Why safer alternatives were rejected.** The `unsafe`
+        //     lives on the HAL trait declaration so every caller
+        //     (production BSPs that *do* perform real work + test
+        //     fakes that don't) routes through the same audited
+        //     surface. Wrapping `FakeMmu::create_address_space` in
+        //     a parallel safe shim would duplicate the trait surface
+        //     and defeat the audit discipline; the per-call SAFETY
+        //     comment is the right scope for "this specific test
+        //     call is sound" reasoning.
+        //
+        // The three peer fixture sites in this file (the test
+        // `missing_derive_surfaces_via_address_space_creation_failed`,
+        // the `fixture_with_failing_mmu` helper, and `FailingMapMmu`'s
+        // `unsafe fn create_address_space` body) cross-reference this
+        // argument by name rather than restate it.
         let bootstrap_inner = unsafe { mmu.create_address_space(frame(0x4000_0000)) };
         let bootstrap_as = crate::mm::AddressSpace::wrap_bootstrap(bootstrap_inner);
         let bootstrap_handle = crate::mm::create_address_space(&mut arena, bootstrap_as).unwrap();
@@ -1446,7 +1477,11 @@ mod tests {
         let mmu = FakeMmu::new();
         let mut arena: AddressSpaceArena<FakeMmu> = AddressSpaceArena::new();
         let mut table = CapabilityTable::new();
-        // SAFETY: FakeMmu::create_address_space is pure host code.
+        // SAFETY: same (a)/(b)/(c) argument as the `fixture` helper's
+        // `mmu.create_address_space` call above — FakeMmu's
+        // `create_address_space` is pure host code; the frame is
+        // page-aligned by construction; the call is in a single-
+        // threaded test. See that site for the full discipline.
         let bootstrap_inner = unsafe { mmu.create_address_space(frame(0x4000_0000)) };
         let bootstrap_handle = crate::mm::create_address_space(
             &mut arena,
@@ -1713,7 +1748,17 @@ mod tests {
         type AddressSpace = <FakeMmu as Mmu>::AddressSpace;
 
         unsafe fn create_address_space(&self, root: PhysFrame) -> Self::AddressSpace {
-            // SAFETY: delegating to FakeMmu's pure host-side impl.
+            // SAFETY:
+            // (a) `unsafe_op_in_unsafe_fn` (workspace deny) requires
+            //     each unsafe call inside an `unsafe fn` body to
+            //     carry its own SAFETY comment, even when the parent
+            //     fn is itself `unsafe fn`.
+            // (b) FakeMmu's `create_address_space` is pure host-side
+            //     code; same invariants as the fixture call above —
+            //     see the `fixture` helper's full SAFETY argument.
+            // (c) FailingMapMmu is a test-only decorator over FakeMmu;
+            //     wrapping the inner call in a safe shim would
+            //     duplicate the trait surface for zero soundness win.
             unsafe { self.inner.create_address_space(root) }
         }
 
@@ -1777,8 +1822,11 @@ mod tests {
         let mut arena: AddressSpaceArena<FailingMapMmu> = AddressSpaceArena::new();
         let mut table = CapabilityTable::new();
 
-        // SAFETY: FailingMapMmu's create_address_space delegates to
-        // FakeMmu's pure host code.
+        // SAFETY: same (a)/(b)/(c) argument as the `fixture` helper's
+        // `mmu.create_address_space` call — FailingMapMmu delegates
+        // to FakeMmu's pure host code; the frame is page-aligned by
+        // construction; single-threaded test. See the `fixture`
+        // helper's full SAFETY discipline for the full argument.
         let bootstrap_inner = unsafe { mmu.create_address_space(frame(0x4000_0000)) };
         let bootstrap_handle = crate::mm::create_address_space(
             &mut arena,

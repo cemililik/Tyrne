@@ -164,6 +164,6 @@ pub use pmm::{Pmm, PmmError, PmmStats};
 /// [UNSAFE-2026-0027]: https://github.com/cemililik/Tyrne/blob/main/docs/audits/unsafe-log.md
 #[must_use]
 #[inline]
-pub fn phys_frame_kernel_ptr(frame: tyrne_hal::PhysFrame) -> *mut u8 {
+pub(crate) fn phys_frame_kernel_ptr(frame: tyrne_hal::PhysFrame) -> *mut u8 {
     frame.as_usize() as *mut u8
 }
